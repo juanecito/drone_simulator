@@ -7,6 +7,7 @@
 #include <format>
 
 #include "ds/common/math.hpp"
+#include "ds/geo/magnetic.hpp"
 #include "ds/geo/utm.hpp"
 
 namespace ds::sim {
@@ -75,6 +76,37 @@ PositionText formatPosition(const geo::Geodetic& p, double amslM, std::optional<
                                dms(p.latitudeDeg, 'N', 'S'), dms(p.longitudeDeg, 'E', 'W'));
     }
     return t;
+}
+
+HudCompass buildCompass(const geo::Geodetic& position, double trueHeadingDeg, astro::UtcTime utc) {
+    HudCompass c;
+    const geo::MagneticField field = geo::magneticField(position, geo::decimalYear(utc));
+    c.trueHeadingDeg = common::normalizeDegrees(trueHeadingDeg);
+    c.declinationDeg = field.declinationDeg;
+    c.magneticHeadingDeg = common::normalizeDegrees(trueHeadingDeg - field.declinationDeg);
+    // Rounded first so that 359.6° shows as 000°, not 360°.
+    const auto degrees = [](double d) { return (std::lround(d) % 360 + 360) % 360; };
+    c.heading.text = std::format("HDG {:03d}°T  {:03d}°M", degrees(c.trueHeadingDeg),
+                                 degrees(c.magneticHeadingDeg));
+    c.declination.text = std::format("DECL {:.1f}°{}", std::abs(field.declinationDeg),
+                                     field.declinationDeg >= 0.0 ? 'E' : 'W');
+    switch (geo::compassQuality(field)) {
+        case geo::CompassQuality::Unreliable:
+            c.declination = {"MAG UNRELIABLE", HudLevel::Warning};
+            break;
+        case geo::CompassQuality::Caution:
+            c.declination.text += "  weak field";
+            c.declination.level = HudLevel::Caution;
+            break;
+        case geo::CompassQuality::Good: break;
+    }
+    if (!field.dateValid && c.declination.level != HudLevel::Warning) {
+        c.declination.text +=
+            std::format("  ({} {:.0f}–{:.0f})", geo::magneticModelName(),
+                        geo::magneticModelStartYear(), geo::magneticModelEndYear());
+        c.declination.level = HudLevel::Caution;
+    }
+    return c;
 }
 
 HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const HudOptions& o) {
@@ -152,6 +184,7 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
         h.pilotDistance.text = "PILOT " + length(d, o.imperial, 0);
     }
     h.headingDeg = common::normalizeDegrees(common::radToDeg(s.attitude.yaw));
+    h.compass = buildCompass(geodetic, h.headingDeg, s.utc);
     h.rollRad = s.attitude.roll;
     h.pitchRad = s.attitude.pitch;
     if (o.showWind) {

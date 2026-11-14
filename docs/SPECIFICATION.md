@@ -434,6 +434,7 @@ debug overlays, HUD) using OpenGL 4.5 Core.
 | FR-GFX-13 | Mission visuals: waypoint beacons, landing-pad markers, zone volumes (no-fly, drop, survey area) as translucent shapes, next-objective direction arrow; each toggleable per mission ("realistic" missions may hide aids). | M |
 | FR-GFX-14a | **Position panel, always visible on the main screen** (FPV, chase and LOS views, free flight and missions): drone **UTM coordinates** — zone + latitude band, easting, northing in metres (e.g. `30T 440 123.4 E  4 474 567.8 N`) — and drone **elevation** AMSL, plus AGL height (aerial only; for ground drones the elevation is that of the drone on the terrain). Updated ≥ 10 Hz from ground-truth state; GPS-estimated values shown separately in the OSD. Can be moved but not hidden; also mirrored in the status bar. Option to additionally show lat/lon (DD or DMS). | M |
 | FR-GFX-14 | HUD/OSD: altitude AGL + AMSL, horizontal/vertical speed, attitude, throttle, flight mode, armed state, battery voltage/% /current, GPS sats/HDOP, home distance and bearing, **wind level + direction arrow relative to the drone heading** (missions may hide it), **clock (local time and UTC)**, lights on/off indicator, **flight-rule indicators** (AGL turns amber at 100 m and red at 120 m; distance to pilot and a line-of-sight indicator showing *visible / hidden*), flight timer, warnings, mission objective panel. | M |
+| FR-GFX-14b | **Compass, always visible on the main screen** (FPV, chase, LOS and free camera): a north-up rose with the **geographic (true) north** at the top and the cardinal points **N, E, S, W** (N in red), a **magnetic-north** marker (blue, "MN") turned by the local declination, and an arrow with the **drone's heading**; in the free camera a dashed line also shows the camera's view direction. Read-outs: heading true and magnetic (`HDG 123°T  121°M`) and declination (`DECL 1.2°E`). The declination comes from the World Magnetic Model (FR-GEO-05) at the drone's position and the simulation date; the read-out turns amber outside the model's validity period or in a weak horizontal field (< 6000 nT) and shows `MAG UNRELIABLE` in red near the magnetic poles (< 2000 nT, the WMM blackout zone). | M |
 | FR-GFX-15 | Viewport resize, HiDPI, MSAA (0/2/4/8×), V-Sync on/off. | M |
 | FR-GFX-16 | GPU debug output (`GL_KHR_debug`) routed to the logger in Debug builds. | M |
 | FR-GFX-17 | Debug overlays: wireframe, chunk bounds, collision volumes, force/velocity vectors, wind vector; frame statistics (FPS, frame time, draw calls, triangles). | S |
@@ -760,7 +761,7 @@ public:
 | FR-GEO-02b | Web-Mercator tile math (lat/lon ⇄ tile x/y/z, tile bounds) for XYZ/WMTS providers. | M |
 | FR-GEO-03 | (Moved) Sun, moon and sky positions are specified in §4.7.1. | — |
 | FR-GEO-04 | Distance/bearing utilities (for HUD home arrow, mission distances, GPS display). | M |
-| FR-GEO-05 | Geomagnetic field (declination, inclination) for magnetometer simulation via a simplified WMM. | C |
+| FR-GEO-05 | Geomagnetic main field from the **World Magnetic Model WMM2025** (NOAA NCEI / BGS, spherical harmonics to degree 12 with secular variation; validity 2025.0–2030.0): north/east/down components, declination, inclination, horizontal and total intensity at a geodetic position and decimal year, matching the official WMM2025 test values (0.01°, 0.05 nT). Used by the compass (FR-GFX-14b) and, later, the magnetometer model. Outside the validity period the field is held at the nearest end and flagged. | M |
 
 #### 4.7.1 Time & Astronomy (`core/astro`)
 
@@ -1220,6 +1221,18 @@ The viewport always shows the **position panel** (FR-GFX-14a), e.g.:
 └─────────────────────────────────────┘
 ```
 
+and, at the bottom centre, the **compass** (FR-GFX-14b): true north at the top, the blue
+magnetic-north marker turned by the declination, and the drone's heading arrow:
+
+```
+        MN
+        ▼
+     ·  N  ·        HDG 090°T  089°M   (top centre)
+   W    ➤    E
+     ·  S  ·
+   DECL 1.2°E
+```
+
 The tab panel is a dockable `QDockWidget` containing a `QTabWidget`
 (hidden for full-screen flying; `F11` toggles full screen, `F9` toggles the panel — `Tab` is not
 used because it is needed for keyboard focus navigation).
@@ -1505,7 +1518,7 @@ so Markdown pages appear in the generated site.
 | M0 | **Skeleton** | CMake/Ninja presets, empty Core libs, Qt main window with GL 4.5 viewport, GoogleTest + CTest, Doxygen target, **CPack `.deb` skeleton installing to `/opt/drone_simulator`**, CI incl. install test. |
 | M1 | **Storage + Geo + Astro** | `$HOME/.drone_simulation`, Qt SQL wrappers, migrations, settings persistence; `core/geo` conversions (ENU, UTM, Web Mercator); `core/astro` time scales, sun, moon, phase, rise/set, stars, validated against reference tables. |
 | M2 | **Procedural terrain + day/night sky** | Height-source abstraction, procedural source, chunking/LOD, async generation, atmospheric sky lit by sun and moon, moon phases, stars, HDR + exposure, fog, reversed-Z + camera-relative rendering, free-fly camera, Terrain tab (procedural). |
-| M3 | **Realistic flight** | `Vehicle` interface, RK4 rigid body, motor/prop/battery/atmosphere models, wind levels 0–10, sensors + estimator, flight controller (Acro/Angle/Alt hold), RC input via SDL3 + calibration, FPV/LOS/chase cameras, HUD with UTM/elevation position panel, Drone + Simulation tabs, reference profiles. |
+| M3 | **Realistic flight** | `Vehicle` interface, RK4 rigid body, motor/prop/battery/atmosphere models, wind levels 0–10, sensors + estimator, flight controller (Acro/Angle/Alt hold), RC input via SDL3 + calibration, FPV/LOS/chase cameras, HUD with UTM/elevation position panel and compass (true and magnetic north, WMM2025), Drone + Simulation tabs, reference profiles. |
 | M4 | **Real terrain (raster/LAS/LAZ files, orthophoto files + OpenTopography)** | Orthophoto files (mosaic, reprojection, LOD streaming, cache); raster source (COG, GeoTIFF, `.hgt`, `.asc`, `.img`; partial reads, overviews, mosaics), LAS/LAZ → DTM rasterization with PDAL and COG cache, path rules, validation, sha256, mission folders; `core/net` (client, cache, offline, credentials), OpenTopography preset (Global DEM + USGS APIs), block fetching + daily quota accounting, area download, attribution, Terrain tab (online), Settings → Data providers, mock-server tests. |
 | M5 | **Items + Missions** | Items Manager with triggers, mission loader/validator, objectives, failures, scoring, briefing/debrief, campaign progress, built-in mission pack (≥ 10), Missions tab. |
 | M6 | **Ground drone** | `Vehicle` interface shared by both types, ground physics (suspension, tyres, drivetrain, rollover, stuck, water), drive modes, ground input mapping, ground HUD/visuals, reference ground profiles, ground missions (≥ 4), parking zone item. |
@@ -1565,6 +1578,13 @@ so Markdown pages appear in the generated site.
   without a fix drift slowly, as on a real flight controller.
 - **Status bar:** shows the drone's position in the vehicle cameras, the camera's in the free
   camera.
+- **Compass (FR-GFX-14b, FR-GEO-05):** the full WMM2025 model (degree 12) in `core/geo`,
+  coefficients generated from NOAA's `WMM.COF` by `scripts/data/gen_wmm.py`, checked against
+  all 100 official test values. The HUD heading is the true heading from the ground-truth
+  attitude; the magnetic heading is derived from it with the declination at the drone (the
+  simulated magnetometer still measures the true heading with noise — magnetic deviation and
+  the magnetometer field model are M7 topics). Simulation dates outside 2025–2030 use the
+  field at the nearest end of the period, flagged in amber.
 
 ---
 
@@ -1699,6 +1719,7 @@ Assets are licensed separately from code and need their own entries in
 | 3D models, textures, HDRIs | **CC0** preferred (e.g. Poly Haven, ambientCG); CC-BY acceptable with attribution | No CC-BY-NC / CC-BY-SA in the repository unless kept separate and clearly labelled. |
 | Astronomical series | VSOP87 (Bretagnon & Francou 1988, IMCCE) — published without an explicit licence | **Decision:** the truncated, converted table (`vsop87_earth_data.cpp`) is distributed under the project's **MIT** licence, crediting the authors in the file, `THIRD_PARTY_NOTICES.md` and `debian/copyright`. |
 | Star catalogue | Yale Bright Star Catalogue (BSC5, Hoffleit & Warren 1991) — freely distributed by NASA ADC/CDS without an explicit licence | **Decision:** the converted extract (`assets/sky/bsc5.csv`) is distributed under the project's **MIT** licence, crediting the authors in `THIRD_PARTY_NOTICES.md`, `debian/copyright` and the file's header comment. |
+| Geomagnetic model | World Magnetic Model WMM2025 coefficients and test values (NOAA NCEI and British Geological Survey) — U.S. Government material, public domain | Converted into `src/core/geo/wmm_data.cpp` (MIT for the project's code around it) and `tests/fixtures/geo/wmm_test_values.csv`; credited, with the 17 U.S.C. 403 notice, in `THIRD_PARTY_NOTICES.md` and `debian/copyright`. |
 | Moon textures | NASA (LRO / Clementine) imagery — public domain (US Government work) | Credit NASA. Avoid Milky-Way images under CC BY-SA unless kept separate (§12.4). |
 | Reference data for tests | JPL Horizons / USNO outputs (US Government, public domain) | Stored as test fixtures with source notes. |
 | Fonts (HUD) | SIL OFL 1.1 (e.g. Inter, DejaVu — Bitstream Vera license) | OFL allows bundling with MIT software; ship the font license. |

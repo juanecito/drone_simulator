@@ -51,7 +51,8 @@ SPDX-FileCopyrightText = "NASA's Scientific Visualization Studio, CGI Moon Kit (
 SPDX-License-Identifier = "LicenseRef-NASA-Public-Domain"
 
 # Reference values produced by scripts/fixtures/*.py from PROJ, GeographicLib, astropy,
-# JPL Horizons and the USNO Astronomical Applications API (see THIRD_PARTY_NOTICES.md).
+# JPL Horizons and the USNO Astronomical Applications API, and the public-domain NOAA WMM2025
+# test values converted by scripts/data/gen_wmm.py (see THIRD_PARTY_NOTICES.md).
 [[annotations]]
 path = "tests/fixtures/**"
 precedence = "aggregate"

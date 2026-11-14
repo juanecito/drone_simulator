@@ -86,6 +86,21 @@ THE SOFTWARE.
   converted extract is distributed with this project under the **MIT License**, with credit
   to the authors (project decision, `docs/SPECIFICATION.md` §12.4).
 
+### World Magnetic Model WMM2025 (`src/core/geo/wmm_data.cpp`, `tests/fixtures/geo/wmm_test_values.csv`)
+
+- Chulliat, A., W. Brown, M. Nair, N. Gomez Perez, L.-Y. Young, C. Watson, N. Boneh,
+  C. Beggan, B. Meyer and M. Paniccia, 2025. *The US/UK World Magnetic Model for 2025-2030:
+  Technical Report*, NOAA National Centers for Environmental Information,
+  <https://doi.org/10.25923/prbc-s316>.
+- Coefficients (`WMM.COF`) and test values (`WMM2025_TestValues.txt`) from `WMM2025COF.zip`,
+  <https://www.ncei.noaa.gov/products/world-magnetic-model>, converted by
+  `scripts/data/gen_wmm.py`. The model is evaluated by this project's own code
+  (`src/core/geo/magnetic.cpp`), written from the formulas in the technical report.
+- **Notice (17 U.S.C. 403):** the WMM2025 coefficients and test values are U.S. Government
+  material produced by NOAA NCEI (with the British Geological Survey), are in the public
+  domain and are not subject to copyright protection in the United States. NOAA and BGS do
+  not endorse this program.
+
 ### Moon albedo map (`assets/sky/moon_albedo.pgm`)
 
 - From NASA's Scientific Visualization Studio, *CGI Moon Kit* (<https://svs.gsfc.nasa.gov/4720>),

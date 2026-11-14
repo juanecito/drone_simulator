@@ -16,6 +16,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <utility>
 
 #include "ds/app/main_window.hpp"
 #include "ds/app/opengl_check.hpp"
@@ -133,6 +134,23 @@ TEST(Viewport, MainWindowViewportBecomesReady) {
 
 // The drone seen from the chase camera with the HUD painted over the 3D view (FR-GFX-05,
 // FR-GFX-14, FR-GFX-14a). Without settings nothing is saved.
+// Pixels of the compass's heading arrow (yellow) and magnetic-north marker (blue) in the
+// bottom-centre area of @p image (FR-GFX-14b).
+std::pair<int, int> compassPixels(const QImage& image) {
+    int yellow = 0;
+    int blue = 0;
+    const int w = image.width();
+    const int h = image.height();
+    for (int y = h * 2 / 3; y < h; ++y) {
+        for (int x = w * 2 / 5; x < w * 3 / 5; ++x) {
+            const QRgb c = image.pixel(x, y);
+            yellow += (qRed(c) > 220 && qGreen(c) > 180 && qBlue(c) < 110) ? 1 : 0;
+            blue += (qRed(c) < 140 && qGreen(c) > 140 && qBlue(c) > 220) ? 1 : 0;
+        }
+    }
+    return {yellow, blue};
+}
+
 TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
     DS_REQUIRE_OPENGL_45();
 
@@ -173,6 +191,21 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
                     ->findChild<QLabel*>(QStringLiteral("PositionLabel"))
                     ->text()
                     .startsWith(QStringLiteral("UTM")));
+    const auto [yellow, blue] = compassPixels(image);
+    EXPECT_GT(yellow, 40) << "drone heading arrow";
+    EXPECT_GT(blue, 15) << "magnetic north marker";
+
+    // The free camera keeps the compass, with the view direction (FR-GFX-14b).
+    window.simulation()->setCameraMode(ds::graphics::CameraMode::Free);
+    window.scene()->camera().yawRad = 1.0;
+    QTest::qWait(300);
+    const QImage free = window.viewport()->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        free.save(QString::fromUtf8(dir) + QStringLiteral("/free_view.png"));
+    }
+    const auto [freeYellow, freeBlue] = compassPixels(free);
+    EXPECT_GT(freeYellow, 40);
+    EXPECT_GT(freeBlue, 15);
 }
 
 }  // namespace

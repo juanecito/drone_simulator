@@ -110,6 +110,7 @@ private:
     void captureMouse();
     void renderScene(const graphics::FrameTarget& target);
     void paintHud(const SimulationController& sim);
+    void paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera);
 
     SceneController* scene_;
     QPointer<SimulationController> simulation_;  // Cleared if it is deleted first.

@@ -36,6 +36,17 @@ struct HudOptions {
     std::optional<physics::Vec3> pilotPosition;
 };
 
+/// @brief Compass rose (FR-GFX-14b): true and magnetic north and the vehicle's heading.
+struct HudCompass {
+    double trueHeadingDeg = 0.0;      ///< Heading from geographic (true) north, 0…360.
+    double magneticHeadingDeg = 0.0;  ///< Heading from magnetic north, 0…360.
+    double declinationDeg = 0.0;      ///< Magnetic north relative to true north, + east (WMM).
+    HudItem heading;                  ///< "HDG 123°T  121°M".
+    /// "DECL 2.1°W"; caution outside the WMM validity period or in a weak horizontal field,
+    /// warning ("MAG UNRELIABLE") near the magnetic poles.
+    HudItem declination;
+};
+
 /// @brief Everything drawn over the 3D view.
 struct HudModel {
     std::string positionUtm;        ///< "UTM 30T  440 123.4 E  4 474 567.8 N".
@@ -60,7 +71,8 @@ struct HudModel {
     std::vector<HudItem> warnings;  ///< Flashing warnings.
     double rollRad = 0.0;           ///< Artificial horizon.
     double pitchRad = 0.0;          ///< Artificial horizon.
-    double headingDeg = 0.0;        ///< Compass.
+    double headingDeg = 0.0;        ///< True heading (same as compass.trueHeadingDeg).
+    HudCompass compass;             ///< Compass rose.
     /// Direction the wind blows towards, relative to the drone's nose (radians, clockwise).
     std::optional<double> windArrowRad;
 };
@@ -71,6 +83,8 @@ inline constexpr double kAglCautionM = 100.0;
 inline constexpr double kAglWarningM = 120.0;
 
 /// @brief Builds the HUD for @p snapshot; @p frame converts world positions to geodetic.
+/// @details The declination comes from the World Magnetic Model at the vehicle's position and
+/// the snapshot's UTC (FR-GEO-05).
 [[nodiscard]] HudModel buildHud(const WorldSnapshot& snapshot, const geo::LocalFrame& frame,
                                 const HudOptions& options);
 
@@ -84,6 +98,11 @@ struct PositionText {
 /// @brief Formats a position (FR-GFX-14a, NFR-REAL-07).
 [[nodiscard]] PositionText formatPosition(const geo::Geodetic& position, double amslM,
                                           std::optional<double> aglM, bool imperial, bool latLon);
+
+/// @brief Compass content for a vehicle at @p position heading @p trueHeadingDeg at
+/// @p utc (FR-GFX-14b).
+[[nodiscard]] HudCompass buildCompass(const geo::Geodetic& position, double trueHeadingDeg,
+                                      astro::UtcTime utc);
 
 /// @brief Groups digits by three with a thin space: 4474567.8 → "4 474 567.8".
 [[nodiscard]] std::string groupDigits(double value, int decimals);

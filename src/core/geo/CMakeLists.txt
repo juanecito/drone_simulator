@@ -5,8 +5,10 @@ ds_add_core_module(geo
     SOURCES
         coordinates.cpp
         geodesic.cpp
+        magnetic.cpp
         module.cpp
         utm.cpp
         web_mercator.cpp
+        wmm_data.cpp
     DEPS
         ds::common)

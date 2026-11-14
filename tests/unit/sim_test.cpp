@@ -377,4 +377,49 @@ TEST(Hud, LevelsAndWarnings) {
     EXPECT_NE(buildHud(s, frame, imperial).altitudeAgl.text.find("ft"), std::string::npos);
 }
 
+TEST(Hud, CompassUsesTheWorldMagneticModel) {
+    using namespace std::chrono;
+    const auto utc = [](year_month_day d, hours h) {
+        return time_point_cast<milliseconds>(sys_days{d} + h);
+    };
+    // Points and declinations from the official WMM2025 test values.
+    HudCompass c = buildCompass({23.0, 63.0, 69000.0}, 90.0, utc(2026y / January / 1, 0h));
+    EXPECT_NEAR(c.declinationDeg, 1.17, 0.006);
+    EXPECT_NEAR(c.magneticHeadingDeg, 90.0 - 1.17, 0.006);
+    EXPECT_EQ(c.heading.text, "HDG 090°T  089°M");
+    EXPECT_EQ(c.declination.text, "DECL 1.2°E");
+    EXPECT_EQ(c.declination.level, HudLevel::Normal);
+
+    c = buildCompass({-36.0, -137.0, 6000.0}, 10.0, utc(2025y / July / 2, 12h));  // 2025.5
+    EXPECT_NEAR(c.declinationDeg, 20.28, 0.006);
+    EXPECT_NEAR(c.magneticHeadingDeg, 360.0 + 10.0 - 20.28, 0.006);  // Wraps below 0°.
+    EXPECT_EQ(c.heading.text, "HDG 010°T  350°M");
+
+    c = buildCompass({-66.0, -5.0, 37000.0}, 359.8, utc(2027y / January / 1, 0h));
+    EXPECT_NEAR(c.declinationDeg, -17.22, 0.006);
+    EXPECT_EQ(c.heading.text, "HDG 000°T  017°M");  // 359.8° rounds to 000°, not 360°.
+    EXPECT_EQ(c.declination.text, "DECL 17.2°W");
+
+    // Outside the model's years: still shown, flagged.
+    c = buildCompass({40.4, -3.7, 650.0}, 0.0, utc(2020y / June / 1, 0h));
+    EXPECT_EQ(c.declination.level, HudLevel::Caution);
+    EXPECT_NE(c.declination.text.find("WMM-2025 2025–2030"), std::string::npos)
+        << c.declination.text;
+    // Near the north magnetic pole the horizontal field is too weak for a compass.
+    c = buildCompass({89.0, -121.0, 0.0}, 0.0, utc(2025y / January / 1, 0h));
+    EXPECT_EQ(c.declination.level, HudLevel::Warning);
+    EXPECT_EQ(c.declination.text, "MAG UNRELIABLE");
+
+    // The HUD fills the compass from the vehicle's attitude.
+    WorldSnapshot s;
+    s.hasVehicle = true;
+    s.attitude.yaw = std::numbers::pi / 2.0;
+    s.utc = utc(2026y / March / 1, 12h);
+    const HudModel h = buildHud(s, geo::LocalFrame({40.4, -3.7, 650.0}), {});
+    EXPECT_NEAR(h.compass.trueHeadingDeg, 90.0, 1e-9);
+    EXPECT_DOUBLE_EQ(h.headingDeg, h.compass.trueHeadingDeg);
+    EXPECT_GT(h.compass.declinationDeg, 0.0);  // Madrid, 2026: about 1.5° E.
+    EXPECT_LT(h.compass.declinationDeg, 3.0);
+}
+
 }  // namespace

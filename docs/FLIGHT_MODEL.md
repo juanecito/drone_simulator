@@ -119,7 +119,7 @@ four times per step.
 | Accelerometer | white noise, bias, motor vibration (averaged over the tick to avoid aliasing) |
 | Barometer | 50 Hz, noise; pressure altitude against QNH |
 | GPS | 10 Hz, slowly varying position error (1σ ≈ 1.2 m horizontal, 2.5 m vertical), velocity noise, about 25 s to the first fix after power-on |
-| Magnetometer | heading noise |
+| Magnetometer | true heading with noise (no declination or deviation yet; the HUD compass gets the declination from the WMM2025 model in `core/geo`) |
 
 ### Estimator
 

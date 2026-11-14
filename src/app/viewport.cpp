@@ -5,6 +5,8 @@
 
 #include <QCursor>
 #include <QDateTime>
+#include <QFont>
+#include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QOpenGLContext>
@@ -19,6 +21,7 @@
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/simulation_controller.hpp"
 #include "ds/common/log.hpp"
+#include "ds/common/math.hpp"
 #include "ds/input/keyboard.hpp"
 
 namespace ds::app {
@@ -185,6 +188,8 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     lastCamera_ = camera;
     if (sim != nullptr && vehicleView) {
         paintHud(*sim);
+    } else if (sim != nullptr) {
+        paintFreeCompass(*sim, camera);
     }
 
     ++framesSinceStats_;
@@ -310,6 +315,24 @@ void Viewport::paintHud(const SimulationController& sim) {
     options.blinkOn = (ms / 500) % 2 == 0;
     options.scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
     ds::app::paintHud(painter, rect(), sim.hud(), options);
+}
+
+void Viewport::paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera) {
+    // Free camera: only the compass, with the drone's heading and the camera's (FR-GFX-14b).
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    const double scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
+    QFont font(QStringLiteral("monospace"));
+    font.setStyleHint(QFont::Monospace);
+    font.setBold(true);
+    font.setPointSizeF(10.0 * scale);
+    painter.setFont(font);
+    const double radius = compassRadius(scale);
+    const double margin = 12.0 * scale;
+    const double line = QFontMetricsF(font).height() * 1.1;
+    const QPointF centre(0.5 * width(), height() - margin - line - 4.0 - radius);
+    paintCompass(painter, centre, radius, sim.hud().compass,
+                 common::normalizeDegrees(common::radToDeg(camera.yawRad)));
 }
 
 void Viewport::captureMouse() {

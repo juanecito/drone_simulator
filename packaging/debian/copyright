@@ -32,6 +32,15 @@ Comment: Yale Bright Star Catalogue, 5th Revised Ed., CDS catalogue V/50,
  project under the MIT license, crediting the authors. Installed as
  /opt/drone_simulator/share/sky/bsc5.csv.
 
+Files: src/core/geo/wmm_data.cpp
+Copyright: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+License: MIT
+Comment: Contains the Gauss coefficients of the World Magnetic Model WMM2025
+ (NOAA National Centers for Environmental Information and British Geological
+ Survey, https://www.ncei.noaa.gov/products/world-magnetic-model). U.S.
+ Government material, public domain and not subject to copyright protection in
+ the United States (17 U.S.C. 105, 403). The surrounding code is MIT.
+
 Files: assets/sky/moon_albedo.pgm
 Copyright: NASA's Scientific Visualization Studio, CGI Moon Kit (LRO / LROC WAC)
 License: public-domain

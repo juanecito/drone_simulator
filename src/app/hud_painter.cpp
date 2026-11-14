@@ -109,7 +109,94 @@ void windArrow(QPainter& p, QPointF centre, double radius, double angleRad) {
     p.restore();
 }
 
+// Point at @p distance from @p centre in compass direction @p deg (clockwise from up).
+QPointF polar(QPointF centre, double deg, double distance) {
+    const double a = deg * std::numbers::pi / 180.0;
+    return centre + QPointF(distance * std::sin(a), -distance * std::cos(a));
+}
+
 }  // namespace
+
+void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compass,
+                  std::optional<double> viewHeadingDeg) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const QColor trueNorth(255, 80, 70);
+    const QColor magneticNorth(90, 170, 255);
+    const QColor ring(245, 245, 245, 220);
+
+    // Plate and ring.
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 110));
+    p.drawEllipse(c, r, r);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(ring, 1.5));
+    p.drawEllipse(c, r, r);
+
+    // Ticks: every 10°, longer every 30°, longest and red at true north.
+    for (int deg = 0; deg < 360; deg += 10) {
+        const bool cardinal = deg % 90 == 0;
+        const double inner = r * (cardinal ? 0.80 : deg % 30 == 0 ? 0.86 : 0.91);
+        p.setPen(QPen(deg == 0 ? trueNorth : ring, cardinal ? 2.0 : 1.0));
+        p.drawLine(polar(c, deg, inner), polar(c, deg, r));
+    }
+
+    // Cardinal points of true (geographic) north.
+    QFont small = p.font();
+    small.setPointSizeF(p.font().pointSizeF() * 0.85);
+    p.setFont(small);
+    const double labelHeight = QFontMetricsF(small).height();
+    const struct {
+        const char* text;
+        double deg;
+    } cardinals[] = {{"N", 0.0}, {"E", 90.0}, {"S", 180.0}, {"W", 270.0}};
+    for (const auto& k : cardinals) {
+        const QPointF at = polar(c, k.deg, r * 0.66) - QPointF(0.0, 0.5 * labelHeight);
+        outlinedText(p, at, QString::fromLatin1(k.text), k.deg == 0.0 ? trueNorth : ring,
+                     Qt::AlignHCenter);
+    }
+
+    // Magnetic north: blue marker outside the ring, turned by the declination.
+    {
+        const double d = compass.declinationDeg;
+        QPainterPath marker;
+        marker.moveTo(polar(c, d, r + 1.0));
+        marker.lineTo(polar(c, d - 6.0, r + 0.25 * r));
+        marker.lineTo(polar(c, d + 6.0, r + 0.25 * r));
+        marker.closeSubpath();
+        p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
+        p.setBrush(magneticNorth);
+        p.drawPath(marker);
+        const QPointF label =
+            polar(c, d, r + 0.25 * r + 0.55 * labelHeight) - QPointF(0.0, 0.5 * labelHeight);
+        outlinedText(p, label, QStringLiteral("MN"), magneticNorth, Qt::AlignHCenter);
+    }
+
+    // Camera view direction (free camera).
+    if (viewHeadingDeg) {
+        p.setPen(QPen(QColor(255, 255, 255, 170), 1.2, Qt::DashLine));
+        p.drawLine(c, polar(c, *viewHeadingDeg, 0.92 * r));
+    }
+
+    // Vehicle heading: arrow from the centre.
+    {
+        const double h = compass.trueHeadingDeg;
+        QPainterPath arrow;
+        arrow.moveTo(polar(c, h, 0.48 * r));
+        arrow.lineTo(polar(c, h + 145.0, 0.30 * r));
+        arrow.lineTo(polar(c, h + 180.0, 0.12 * r));
+        arrow.lineTo(polar(c, h - 145.0, 0.30 * r));
+        arrow.closeSubpath();
+        p.setPen(QPen(QColor(0, 0, 0, 220), 1.5));
+        p.setBrush(QColor(255, 210, 60));
+        p.drawPath(arrow);
+    }
+
+    // Declination (or a warning) under the rose.
+    outlinedText(p, c + QPointF(0.0, r + 4.0), QString::fromStdString(compass.declination.text),
+                 colorFor(compass.declination.level), Qt::AlignHCenter);
+    p.restore();
+}
 
 void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
               const HudPaintOptions& options) {
@@ -157,11 +244,10 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     column(p, {area.right() - margin, area.top() + margin},
            {&hud.clockLocal, &hud.clockUtc, &hud.timer}, Qt::AlignRight);
 
-    // Heading (top centre).
-    outlinedText(
-        p, {area.center().x(), area.top() + margin},
-        QStringLiteral("%1°").arg(std::lround(hud.headingDeg) % 360, 3, 10, QLatin1Char('0')),
-        QColor(245, 245, 245), Qt::AlignHCenter);
+    // Heading, true and magnetic (top centre).
+    outlinedText(p, {area.center().x(), area.top() + margin},
+                 QString::fromStdString(hud.compass.heading.text),
+                 colorFor(hud.compass.heading.level), Qt::AlignHCenter);
 
     // Warnings (under the heading, flashing).
     if (options.blinkOn) {
@@ -189,6 +275,11 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     column(p, {area.left() + margin, bottom}, {&hud.battery, &hud.gps, &hud.lights}, Qt::AlignLeft);
     column(p, {area.right() - margin, bottom}, {&hud.armed, &hud.mode, &hud.throttle},
            Qt::AlignRight);
+
+    // Compass rose (bottom centre, FR-GFX-14b).
+    const double radius = compassRadius(options.scale);
+    paintCompass(p, {area.center().x(), area.bottom() - margin - line - 4.0 - radius}, radius,
+                 hud.compass);
     p.restore();
 }
 

@@ -14,8 +14,8 @@ astronomically correct day/night sky.
 > propellers and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence,
 > noisy sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight
 > controller. Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or
-> with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD and a UTM position
-> panel. There are three reference profiles and an editable Vehicle tab. Missions, real
+> with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD, a UTM position
+> panel and a compass showing true and magnetic north (World Magnetic Model WMM2025). There are three reference profiles and an editable Vehicle tab. Missions, real
 > terrain, the ground drone and weather arrive in milestones M4–M8 (see the specification).
 
 ## Quick start
@@ -64,6 +64,12 @@ camera**:
 | Mouse wheel | Change the base speed (speed also grows with height above ground) |
 
 `F11` toggles full screen, `F9` shows or hides the tab panel and `Ctrl+Q` quits.
+
+The **compass** at the bottom centre of the view is north-up: geographic (true) north at the
+top with N, E, S and W, a blue **MN** marker for magnetic north (turned by the local
+declination from the World Magnetic Model), and a yellow arrow for the drone's heading. In
+the free camera a dashed line shows where the camera looks. The top centre reads the
+heading as true and magnetic (`HDG 090°T  089°M`), and the compass shows the declination.
 
 The status bar shows the drone's position in the vehicle cameras and the camera's position
 in the free camera: UTM, elevation AMSL and height above ground. It also shows the frame

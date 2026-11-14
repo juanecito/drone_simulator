@@ -9,6 +9,7 @@
 #include "ds/geo/coordinates.hpp"
 #include "ds/geo/ellipsoid.hpp"
 #include "ds/geo/geodesic.hpp"
+#include "ds/geo/magnetic.hpp"
 #include "ds/geo/utm.hpp"
 #include "ds/geo/web_mercator.hpp"
 
@@ -284,6 +285,58 @@ TEST(GeoLocalBearing, CompassDirections) {
     EXPECT_NEAR(localBearing({0, 0, 0}, {0, -10, 0}).bearingDeg, 180.0, 1e-12);
     EXPECT_NEAR(localBearing({0, 0, 0}, {-10, 0, 0}).bearingDeg, 270.0, 1e-12);
     EXPECT_NEAR(localBearing({1, 1, 5}, {4, 5, 0}).distanceM, 5.0, 1e-12);
+}
+
+// --- World Magnetic Model WMM2025 (FR-GEO-05) --------------------------------------------------
+
+TEST(GeoMagnetic, MatchesOfficialWmm2025TestValues) {
+    const CsvTable table("geo/wmm_test_values.csv");
+    ASSERT_EQ(table.size(), 100U);
+    for (std::size_t i = 0; i < table.size(); ++i) {
+        const Geodetic g{table.number(i, "lat_deg"), table.number(i, "lon_deg"),
+                         1000.0 * table.number(i, "height_km")};
+        const MagneticField f = magneticField(g, table.number(i, "year"));
+        EXPECT_TRUE(f.dateValid);
+        // Angles are published to 0.01°; components to 1 µnT (computed with the NOAA code).
+        EXPECT_NEAR(f.declinationDeg, table.number(i, "decl_deg"), 0.006) << "row " << i;
+        EXPECT_NEAR(f.inclinationDeg, table.number(i, "incl_deg"), 0.006) << "row " << i;
+        EXPECT_NEAR(f.northNt, table.number(i, "x_nt"), 0.05) << "row " << i;
+        EXPECT_NEAR(f.eastNt, table.number(i, "y_nt"), 0.05) << "row " << i;
+        EXPECT_NEAR(f.downNt, table.number(i, "z_nt"), 0.05) << "row " << i;
+        EXPECT_NEAR(f.horizontalNt, table.number(i, "h_nt"), 0.05) << "row " << i;
+        EXPECT_NEAR(f.totalNt, table.number(i, "f_nt"), 0.05) << "row " << i;
+    }
+}
+
+TEST(GeoMagnetic, ValidityPeriodAndPoles) {
+    EXPECT_EQ(magneticModelName(), "WMM-2025");
+    EXPECT_DOUBLE_EQ(magneticModelStartYear(), 2025.0);
+    EXPECT_DOUBLE_EQ(magneticModelEndYear(), 2030.0);
+
+    const Geodetic madrid{40.4168, -3.7038, 700.0};
+    const MagneticField before = magneticField(madrid, 2020.0);
+    EXPECT_FALSE(before.dateValid);
+    // Outside the period the field is held at the nearest end.
+    EXPECT_DOUBLE_EQ(before.declinationDeg, magneticField(madrid, 2025.0).declinationDeg);
+    EXPECT_FALSE(magneticField(madrid, 2030.0).dateValid);
+    EXPECT_EQ(compassQuality(magneticField(madrid, 2026.0)), CompassQuality::Good);
+
+    // Finite at the geographic poles; the compass is unusable near the magnetic pole.
+    const MagneticField pole = magneticField({90.0, 0.0, 0.0}, 2026.0);
+    EXPECT_TRUE(std::isfinite(pole.declinationDeg));
+    EXPECT_GT(pole.inclinationDeg, 85.0);
+    EXPECT_NE(compassQuality(magneticField({86.0, 150.0, 0.0}, 2026.0)), CompassQuality::Good);
+}
+
+TEST(GeoMagnetic, DecimalYear) {
+    using namespace std::chrono;
+    const auto at = [](year_month_day d, hours h) {
+        return time_point_cast<milliseconds>(sys_days{d} + h);
+    };
+    EXPECT_DOUBLE_EQ(decimalYear(at(2026y / January / 1, 0h)), 2026.0);
+    EXPECT_NEAR(decimalYear(at(2026y / July / 2, 12h)), 2026.5, 1e-9);  // Day 182.5 of 365.
+    EXPECT_NEAR(decimalYear(at(2028y / July / 2, 0h)), 2028.5, 1e-9);   // Day 183 of 366.
+    EXPECT_LT(decimalYear(at(2026y / December / 31, 23h)), 2027.0);
 }
 
 }  // namespace

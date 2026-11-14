@@ -3,14 +3,18 @@
 
 #pragma once
 
+#include <QPointF>
 #include <QRect>
+
+#include <optional>
 
 #include "ds/sim/hud.hpp"
 
 class QPainter;
 
 /// @file
-/// @brief Paints the HUD (OSD and position panel) over the 3D view (FR-GFX-14, FR-GFX-14a).
+/// @brief Paints the HUD (OSD, position panel and compass) over the 3D view (FR-GFX-14,
+/// FR-GFX-14a, FR-GFX-14b).
 /// @ingroup app
 
 namespace ds::app {
@@ -26,5 +30,21 @@ struct HudPaintOptions {
 /// it stays readable over sky and snow).
 void paintHud(QPainter& painter, const QRect& area, const sim::HudModel& hud,
               const HudPaintOptions& options);
+
+/// @brief Paints the north-up compass rose (FR-GFX-14b) centred at @p centre.
+/// @details True (geographic) north is at the top with the cardinal points N, E, S, W; a blue
+/// "MN" marker outside the ring shows magnetic north, turned by the declination; a yellow
+/// arrow shows the vehicle's heading, and, if given, a dashed line the camera's view heading
+/// (free camera). The declination text is drawn under the rose.
+/// @param painter Painter (its font sets the text size).
+/// @param centre Centre of the rose.
+/// @param radius Radius of the ring in pixels.
+/// @param compass Headings and declination.
+/// @param viewHeadingDeg Camera heading from true north, or empty.
+void paintCompass(QPainter& painter, QPointF centre, double radius, const sim::HudCompass& compass,
+                  std::optional<double> viewHeadingDeg = std::nullopt);
+
+/// @brief Radius of the compass ring for a HUD text @p scale.
+[[nodiscard]] constexpr double compassRadius(double scale) noexcept { return 52.0 * scale; }
 
 }  // namespace ds::app
