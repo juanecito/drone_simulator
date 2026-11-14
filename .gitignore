@@ -21,3 +21,6 @@ compile_commands.json
 
 # Python virtual environments used by helper scripts
 .venv/
+
+# Only local repository
+/biblio/*.pdf
