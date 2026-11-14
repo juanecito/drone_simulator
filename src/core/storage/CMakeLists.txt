@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: MIT
 #
 # The only Core module allowed to use Qt: Qt6::Core and Qt6::Sql (SPECIFICATION §3.1).
+# Links ds_net to implement its CacheIndex and UsageLedger interfaces (§3.2).
 
 ds_add_core_module(storage
     SOURCES
+        cache_schema.cpp
         connection.cpp
         data_location.cpp
         input_profile_store.cpp
         migrations.cpp
         module.cpp
+        provider_store.cpp
         schema.cpp
         session_store.cpp
         settings_store.cpp
@@ -19,5 +22,6 @@ ds_add_core_module(storage
         vehicle_profile_store.cpp
     DEPS
         ds::common
+        ds::net
         Qt6::Core
         Qt6::Sql)

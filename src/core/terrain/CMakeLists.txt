@@ -11,6 +11,7 @@ ds_add_core_module(terrain
         procedural_source.cpp
         query.cpp
         streamer.cpp
+        terrain_files.cpp
     DEPS
         ds::common
         ds::geo

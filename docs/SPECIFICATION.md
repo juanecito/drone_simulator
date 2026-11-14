@@ -1588,6 +1588,39 @@ so Markdown pages appear in the generated site.
   the magnetometer field model are M7 topics). Simulation dates outside 2025–2030 use the
   field at the nearest end of the period, flagged in amber.
 
+**M4 implementation notes** (in progress; deliberate scope decisions):
+
+- **Step 1 — network foundation and file plumbing (done):** `core/net` with the libcurl
+  client (network thread, priorities, cancellation, per-provider concurrency and rate limit,
+  HTTPS-only unless a provider is marked insecure, 10 s / 30 s timeouts, 5 redirects, response
+  size and content-type limits, retries with equal-jitter backoff, `Retry-After`, circuit
+  breaker, manual offline mode and unreachable-network detection); provider configuration
+  (`assets/providers/*.json`, user providers in `data_providers`); URL templates with key
+  injection and redaction; block planning (fewest requests within the area and response-size
+  limits; fixed 20 km streaming grid); rolling 24 h quota over `provider_calls`; the disk cache
+  (`cache/<provider>/…`, 0700/0600, SHA-256 checked on every read, LRU eviction, pinning, ETag /
+  Last-Modified revalidation) indexed in the separate `cache.db`; area download with estimate,
+  progress, cancel and pinning. `core/terrain`: the mission `terrain` object for
+  `"source": "file"`, path rules (mission folder or `library:`, symlink escapes rejected),
+  size limits, `sha256` checks and `terrain_data_hash`.
+- **Quota counting:** every attempt that reaches the provider counts as a call, retries
+  included; quota-limited providers therefore retry at most once. Before each request the
+  remaining budget is checked; with none left the provider is served from the cache only.
+- **OpenTopography preset:** the Global DEM request (`/API/globaldem?demtype=…&south=…&north=…
+  &west=…&east=…&outputFormat=GTiff&API_Key=…`), the dataset area limits and the 50 calls / 24 h
+  limit are verified against OpenTopography's published documentation. The USGS request
+  (`/API/usgsdem?datasetName=…`), the response content types and the body of a quota-exceeded
+  response are **not verified yet** (the API reference page is JavaScript-rendered); those
+  datasets are marked `"verified": false` and must be checked before release.
+- **Tests:** the network tests use a small in-process HTTP/1.1 server written for the test suite
+  (`tests/unit/mock_http_server.hpp`) instead of cpp-httplib, so no extra test dependency is
+  needed. CI never contacts real providers.
+- **Next steps (need `libgdal-dev` and `libpdal-dev`):** raster source (GDAL, COG/GeoTIFF/`.hgt`/
+  `.asc`/`.img`, partial reads, overviews, VRT mosaics), online DEM source decoding GeoTIFF
+  payloads from `/vsimem/`, LAS/LAZ → DTM rasterization with PDAL and the COG cache,
+  orthophoto mosaics and GPU streaming, attribution overlay, Terrain tab (online/file),
+  Settings → Data providers with the OS keyring (QtKeychain), and the integration tests.
+
 ---
 
 ## 11. Decisions, Assumptions & Open Questions

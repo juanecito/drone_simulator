@@ -69,6 +69,9 @@ endif()
 # SDL3 (zlib licence): RC transmitters and gamepads (FR-IN-01), used only inside core/input.
 find_package(SDL3 3.2 REQUIRED CONFIG COMPONENTS SDL3-shared)
 
+# libcurl (curl licence, MIT-style): HTTP(S) to data providers (§4.6), used only inside core/net.
+find_package(CURL 7.85 REQUIRED)
+
 # ---------------------------------------------------------------------------
 # Project
 # ---------------------------------------------------------------------------

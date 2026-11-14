@@ -12,9 +12,11 @@ add_executable(ds_unit_tests
     input_test.cpp
     log_test.cpp
     modules_test.cpp
+    net_test.cpp
     physics_test.cpp
     renderer_test.cpp
     sim_test.cpp
+    terrain_files_test.cpp
     version_test.cpp
     wind_test.cpp)
 target_link_libraries(ds_unit_tests PRIVATE

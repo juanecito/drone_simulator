@@ -17,6 +17,7 @@
 #include "ds/storage/connection.hpp"
 #include "ds/storage/input_profile_store.hpp"
 #include "ds/storage/migrations.hpp"
+#include "ds/storage/provider_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/settings_store.hpp"
 #include "ds/storage/storage_service.hpp"
@@ -446,6 +447,167 @@ VehicleProfileRecord profile(std::string key, std::string name, std::string para
     r.name = std::move(name);
     r.paramsJson = std::move(params);
     return r;
+}
+
+// --- Data providers, call log, credentials (FR-TER-O02, FR-TER-O17, FR-NET-07) ----------------
+
+ds::net::ProviderConfig providerFixture(std::string key, std::string name) {
+    ds::net::ProviderConfig p;
+    p.key = std::move(key);
+    p.name = std::move(name);
+    p.urlTemplate = "https://example.org/dem?d={dataset}&bbox={bbox}";
+    p.datasets.push_back(ds::net::DatasetConfig{.id = "D30", .name = "D30", .resolutionM = 30});
+    p.defaultDataset = "D30";
+    p.attribution = "Example";
+    p.dailyCallLimit = 50;
+    p.rateLimitRps = 1.0;
+    return p;
+}
+
+TEST(StorageTime, IsoUtcRoundTrip) {
+    EXPECT_EQ(unixToIsoUtc(0), "1970-01-01T00:00:00Z");
+    EXPECT_EQ(unixToIsoUtc(1'800'000'000), "2027-01-15T08:00:00Z");
+    EXPECT_EQ(isoUtcToUnix("2027-01-15T08:00:00Z"), 1'800'000'000);
+    EXPECT_FALSE(isoUtcToUnix("2027-02-30T08:00:00Z"));
+    EXPECT_FALSE(isoUtcToUnix("2027-01-15 08:00:00"));
+}
+
+TEST(StorageProviders, SyncBuiltinSaveUserAndProtectBoth) {
+    DbConnection db = migratedDb();
+    ProviderStore store(db);
+    const std::array presets{providerFixture("opentopography", "OpenTopography")};
+    ASSERT_TRUE(store.syncBuiltin(presets));
+    auto found = store.find("opentopography");
+    ASSERT_TRUE(found && *found);
+    EXPECT_EQ((*found)->origin, "builtin");
+    EXPECT_EQ((*found)->dailyCallLimit, 50);
+    EXPECT_EQ(ds::net::toJson(**found), ds::net::toJson(presets[0]));
+    EXPECT_EQ(scalar(db, "SELECT daily_call_limit FROM data_providers").toInt(), 50);
+
+    // Users cannot overwrite a built-in provider…
+    EXPECT_FALSE(store.saveUser(providerFixture("opentopography", "Mine")));
+    // …and a built-in sync never overwrites a user provider.
+    ASSERT_TRUE(store.saveUser(providerFixture("national-wcs", "National WCS")));
+    const std::array clash{providerFixture("national-wcs", "Builtin clash")};
+    ASSERT_TRUE(store.syncBuiltin(clash));
+    EXPECT_EQ((*store.find("national-wcs"))->name, "National WCS");
+    EXPECT_EQ((*store.find("national-wcs"))->origin, "user");
+    // Invalid user providers are rejected.
+    auto bad = providerFixture("bad", "Bad");
+    bad.urlTemplate = "https://example.org/{nope}";
+    EXPECT_FALSE(store.saveUser(bad));
+
+    const auto all = store.list();
+    ASSERT_TRUE(all);
+    ASSERT_EQ(all->size(), 2U);
+    EXPECT_EQ(all->front().name, "National WCS");
+    EXPECT_FALSE(*store.removeUser("opentopography"));
+    EXPECT_TRUE(*store.removeUser("national-wcs"));
+}
+
+TEST(StorageProviders, CallLogUsageAndPrune) {
+    DbConnection db = migratedDb();
+    ProviderStore store(db);
+    const std::array presets{providerFixture("ot", "OT")};
+    ASSERT_TRUE(store.syncBuiltin(presets));
+    const std::int64_t t0 = 1'800'000'000;
+    ASSERT_TRUE(store.recordCall({"ot", t0 - 100'000, "D30", std::nullopt, 200, 5}));
+    ASSERT_TRUE(store.recordCall({"ot", t0, "D30", ds::net::GeoRect{1, 2, 3, 4}, 200, 1000}));
+    ASSERT_TRUE(store.recordCall({"ot", t0 + 60, "D30", std::nullopt, 500, 0}));
+    EXPECT_FALSE(store.recordCall({"unknown", t0, "", std::nullopt, 200, 0}));
+    auto times = store.callTimesSince("ot", t0);
+    ASSERT_TRUE(times);
+    EXPECT_EQ(*times, (std::vector<std::int64_t>{t0, t0 + 60}));
+    auto usage = store.usageSince("ot", t0);
+    ASSERT_TRUE(usage);
+    EXPECT_EQ(usage->calls, 2);
+    EXPECT_EQ(usage->errors, 1);
+    EXPECT_EQ(usage->bytes, 1000U);
+    EXPECT_DOUBLE_EQ(scalar(db, "SELECT north FROM provider_calls WHERE bytes = 1000").toDouble(),
+                     4.0);
+    EXPECT_EQ(*store.pruneCalls(t0 - 1), 1);
+    EXPECT_EQ(scalar(db, "SELECT COUNT(*) FROM provider_calls").toInt(), 2);
+    // Deleting the provider deletes its calls (ON DELETE CASCADE).
+    ASSERT_TRUE(run(db, "DELETE FROM data_providers"));
+    EXPECT_EQ(scalar(db, "SELECT COUNT(*) FROM provider_calls").toInt(), 0);
+}
+
+TEST(StorageProviders, FallbackCredentials) {
+    DbConnection db = migratedDb();
+    ProviderStore store(db);
+    const std::array presets{providerFixture("ot", "OT")};
+    ASSERT_TRUE(store.syncBuiltin(presets));
+    EXPECT_FALSE(*store.credential("ot"));
+    ASSERT_TRUE(store.setCredential("ot", "k1"));
+    ASSERT_TRUE(store.setCredential("ot", "k2"));
+    EXPECT_EQ(*store.credential("ot"), "k2");
+    EXPECT_FALSE(store.setCredential("nope", "k"));
+    ASSERT_TRUE(store.clearCredential("ot"));
+    EXPECT_FALSE(*store.credential("ot"));
+}
+
+// --- Tile cache index in cache.db (FR-NET-04)
+// -----------------------------------------------------
+
+TEST(StorageCacheIndex, TilesTableRoundTripAndLruOrder) {
+    DbConnection db = memoryDb();
+    ASSERT_TRUE(migrate(db, cacheSchemaMigrations()));
+    CacheIndexStore store(db);
+    ds::net::CacheEntry a{"ot", "https://x/a",        "ot/aa/a.bin", 10,  "image/tiff", "\"e\"",
+                          "",   std::string(64, 'a'), 100,           100, 500,          false};
+    ds::net::CacheEntry b = a;
+    b.key = "https://x/b";
+    b.relativePath = "ot/bb/b.bin";
+    b.lastAccessUnixS = 50;
+    b.expiresAtUnixS.reset();
+    ASSERT_TRUE(store.put(a));
+    ASSERT_TRUE(store.put(b));
+    EXPECT_EQ(**store.find("ot", "https://x/a"), a);
+    EXPECT_EQ(**store.find("ot", "https://x/b"), b);
+    auto lru = store.list("");
+    ASSERT_TRUE(lru);
+    ASSERT_EQ(lru->size(), 2U);
+    EXPECT_EQ(lru->front().key, "https://x/b");
+    ASSERT_TRUE(store.touch("ot", "https://x/b", 200));
+    EXPECT_EQ(store.list("ot")->front().key, "https://x/a");
+    EXPECT_TRUE(*store.setPinned("ot", "https://x/a", true));
+    EXPECT_FALSE(*store.setPinned("ot", "missing", true));
+    EXPECT_TRUE((*store.find("ot", "https://x/a"))->pinned);
+    ASSERT_TRUE(store.remove("ot", "https://x/a"));
+    EXPECT_FALSE(*store.find("ot", "https://x/a"));
+    EXPECT_TRUE(store.list("other")->empty());
+}
+
+TEST(StorageAdapters, LedgerAndCacheIndexThroughServices) {
+    auto userDb = StorageService::start({});
+    ASSERT_TRUE(userDb) << userDb.error().message;
+    auto cacheDb = StorageService::start({std::nullopt, cacheSchemaMigrations()});
+    ASSERT_TRUE(cacheDb) << cacheDb.error().message;
+    EXPECT_EQ((*cacheDb)->info().migration.toVersion, 1);
+    const std::array presets{providerFixture("ot", "OT")};
+    ASSERT_TRUE((*userDb)
+                    ->submit([&](DbConnection& c) { return ProviderStore(c).syncBuiltin(presets); })
+                    .get());
+
+    StorageUsageLedger ledger(**userDb);
+    const std::int64_t now = 1'800'000'000;
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(ledger.record({"ot", now - (i * 3600), "D30", std::nullopt, 200, 1}));
+    }
+    auto quota = ds::net::quotaStatus(ledger, "ot", 50, now);
+    ASSERT_TRUE(quota);
+    EXPECT_EQ(quota->used, 3);
+    EXPECT_EQ(quota->remaining, 47);
+
+    StorageCacheIndex index(**cacheDb);
+    ds::net::CacheEntry e{"ot", "k", "ot/k.bin",   1,    "", "", "", std::string(64, 'f'),
+                          1,    1,   std::nullopt, false};
+    ASSERT_TRUE(index.put(e));
+    EXPECT_EQ(**index.find("ot", "k"), e);
+    EXPECT_TRUE(*index.setPinned("ot", "k", true));
+    EXPECT_EQ(index.list("")->size(), 1U);
+    ASSERT_TRUE(index.remove("ot", "k"));
+    EXPECT_FALSE(*index.find("ot", "k"));
 }
 
 }  // namespace

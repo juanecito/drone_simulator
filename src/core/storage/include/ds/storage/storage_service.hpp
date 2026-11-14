@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -28,6 +29,9 @@ namespace ds::storage {
 struct StorageConfig {
     /// Database file; `std::nullopt` ⇒ in-memory database (nothing is persisted, FR-DB-02).
     std::optional<std::filesystem::path> databaseFile;
+    /// Schema to apply; empty ⇒ the user database schema (schemaMigrations()). The tile cache
+    /// index uses cacheSchemaMigrations() on its own `cache.db` (FR-NET-04).
+    std::span<const Migration> migrations;
 };
 
 /// @brief Facts about the open database.

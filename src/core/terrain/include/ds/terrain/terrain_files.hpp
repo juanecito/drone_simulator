@@ -1,0 +1,131 @@
+// SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "ds/common/json.hpp"
+#include "ds/terrain/height_source.hpp"
+#include "ds/terrain/terrain_error.hpp"
+
+/// @file
+/// @brief Elevation and orthophoto files declared in a mission's `terrain` object
+/// (§4.5.4, §4.5.5): parsing, path rules, size limits and integrity. Reading the files
+/// (GDAL / PDAL) is done by the raster, lidar and orthophoto sources.
+/// @ingroup terrain
+
+namespace ds::terrain {
+
+/// @brief Kind of the elevation files.
+enum class ElevationFormat {
+    Raster,      ///< COG, GeoTIFF, `.hgt`, `.asc`, `.img` (FR-TER-F01).
+    PointCloud,  ///< LAS / LAZ (FR-TER-L01).
+};
+
+/// @brief One file reference: `path` plus optional `sha256`.
+struct FileRef {
+    std::string path;      ///< As written in the mission (relative or `library:<name>`).
+    std::string sha256;    ///< Expected SHA-256 (lower case), empty if not given.
+    std::string jsonPath;  ///< JSON pointer of the entry, for error messages.
+};
+
+/// @brief Interpolation used to rasterize lidar ground points (FR-TER-L03).
+enum class LidarInterpolation { Tin, Idw };
+
+/// @brief Mission terrain with `"source": "file"` (FR-TER-F02, FR-TER-I02).
+struct FileTerrainSpec {
+    ElevationFormat format = ElevationFormat::Raster;  ///< `format`: raster | las | laz.
+    std::vector<FileRef> elevationFiles;               ///< At least one.
+    std::string crs;                     ///< Required if the files carry no CRS (FR-TER-F05).
+    std::string verticalDatum;           ///< e.g. EGM2008 (FR-TER-F06).
+    std::string attribution;             ///< Shown like provider attribution (FR-TER-F10).
+    std::optional<double> originLatDeg;  ///< Geographic origin (FR-TER-09).
+    std::optional<double> originLonDeg;  ///< Geographic origin.
+    std::optional<double> originAltM;    ///< Origin altitude.
+    std::string originAltRef = "AGL";    ///< `AGL` or `AMSL`.
+    std::optional<Extent> extent;        ///< Sub-area (FR-TER-F07).
+    int band = 1;                        ///< Raster band (FR-TER-C01).
+    // LAS/LAZ (FR-TER-L02 … L04)
+    std::optional<double> resolutionM;  ///< Grid resolution; empty ⇒ automatic.
+    LidarInterpolation interpolation = LidarInterpolation::Tin;  ///< Hole/grid interpolation.
+    bool classifyGround = false;  ///< Run SMRF when no ground class exists.
+    // Orthophotos (FR-TER-I01, I02)
+    std::vector<FileRef> orthophotoFiles;  ///< Optional imagery.
+    std::string orthophotoCrs;             ///< If the images carry no CRS.
+    std::string orthophotoAttribution;     ///< Imagery attribution.
+    std::vector<int> orthophotoBands;      ///< e.g. {1, 2, 3}; empty ⇒ automatic.
+};
+
+/// @brief Parses a mission `terrain` object with `"source": "file"`.
+/// @param json The `terrain` object.
+/// @param jsonPath Its JSON pointer (e.g. "/terrain"), prefixed to error messages.
+/// @details Unknown properties are errors (except `x-…`). `surface` other than `"dtm"` is
+/// NotSupported ("DSM is not supported in v1.0", FR-TER-L02); `interpolation: "max"` is only
+/// meaningful for DSM and rejected likewise.
+[[nodiscard]] TerrainResult<FileTerrainSpec> parseFileTerrain(
+    const common::Json& json, std::string_view jsonPath = "/terrain");
+
+/// @brief Folders where terrain files may be.
+struct TerrainFileRoots {
+    std::filesystem::path missionDir;  ///< Folder of the `.mission.json` (relative paths).
+    std::filesystem::path libraryDir;  ///< `$HOME/.drone_simulation/library` (`library:`).
+};
+
+/// @brief Resolves @p reference by the rules of FR-TER-F03.
+/// @details Relative paths are resolved in `missionDir`; `library:<name>` in `libraryDir`.
+/// Absolute paths, backslashes, `..` segments, and paths whose real location (after following
+/// symlinks) leaves the folder are PathRejected; a missing or non-regular file is FileNotFound.
+/// @return The canonical path of the file.
+[[nodiscard]] TerrainResult<std::filesystem::path> resolveTerrainPath(
+    std::string_view reference, const TerrainFileRoots& roots);
+
+/// @brief Elevation format implied by a file name, or nullopt if unsupported (FR-TER-F01).
+[[nodiscard]] std::optional<ElevationFormat> elevationFormatOf(const std::filesystem::path& file);
+
+/// @brief True for orthophoto file names supported by FR-TER-I01 (`.tif`, `.tiff`, `.jp2`,
+/// `.png`, `.jpg`, `.jpeg`).
+[[nodiscard]] bool isOrthophotoFile(const std::filesystem::path& file);
+
+/// @brief Size limits (FR-TER-F08, FR-TER-I08).
+struct TerrainFileLimits {
+    std::uint64_t maxRasterBytes = std::uint64_t{4} << 30U;       ///< 4 GB per terrain.
+    std::uint64_t maxPointCloudBytes = std::uint64_t{20} << 30U;  ///< 20 GB per terrain.
+    std::uint64_t maxOrthophotoBytes = std::uint64_t{50} << 30U;  ///< 50 GB per mission.
+};
+
+/// @brief A resolved and verified file.
+struct ResolvedFile {
+    std::filesystem::path path;   ///< Canonical path.
+    std::uint64_t sizeBytes = 0;  ///< File size.
+    std::string sha256;           ///< Computed hash.
+};
+
+/// @brief Result of prepareFileTerrain().
+struct PreparedFileTerrain {
+    std::vector<ResolvedFile> elevation;    ///< Elevation files, in mission order.
+    std::vector<ResolvedFile> orthophotos;  ///< Usable orthophotos (empty if disabled).
+    std::vector<std::string> warnings;      ///< e.g. why orthophotos were disabled.
+    std::string terrainDataHash;            ///< FR-TER-F09 (orthophotos excluded, FR-TER-I09).
+};
+
+/// @brief Resolves, checks and hashes every file of @p spec.
+/// @details Elevation problems are errors naming the JSON path. Orthophoto problems only
+/// disable the imagery and add a warning (FR-TER-I08). Hashing reads every file once and can be
+/// cancelled with @p stop.
+[[nodiscard]] TerrainResult<PreparedFileTerrain> prepareFileTerrain(
+    const FileTerrainSpec& spec, const TerrainFileRoots& roots,
+    const TerrainFileLimits& limits = {}, std::stop_token stop = {});
+
+/// @brief Combined hash of the elevation inputs and the settings that change the heights
+/// (FR-TER-F09): SHA-256 over the file hashes in order and a canonical text of the settings.
+[[nodiscard]] std::string terrainDataHash(const std::vector<std::string>& fileHashes,
+                                          const FileTerrainSpec& spec);
+
+}  // namespace ds::terrain
