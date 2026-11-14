@@ -50,7 +50,8 @@ void StorageService::run(StorageConfig config, std::promise<StorageResult<Storag
         return;
     }
     DbConnection connection = std::move(*opened);
-    auto migrated = migrate(connection);
+    auto migrated =
+        config.migrations.empty() ? migrate(connection) : migrate(connection, config.migrations);
     if (!migrated) {
         started.set_value(std::unexpected(migrated.error()));
         return;

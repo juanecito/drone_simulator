@@ -33,6 +33,9 @@ struct MigrationReport {
 /// @brief The application's migrations, in order.
 [[nodiscard]] std::span<const Migration> schemaMigrations() noexcept;
 
+/// @brief Migrations of the separate tile-cache index database `cache.db` (FR-NET-04).
+[[nodiscard]] std::span<const Migration> cacheSchemaMigrations() noexcept;
+
 /// @brief Version the application's migrations lead to.
 [[nodiscard]] int latestSchemaVersion() noexcept;
 

@@ -18,6 +18,7 @@ path = [
     ".github/**.md",
     "assets/vehicles/**.json",
     "assets/environment/**.json",
+    "assets/providers/**.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>"

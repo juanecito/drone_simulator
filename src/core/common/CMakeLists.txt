@@ -9,6 +9,7 @@ ds_add_core_module(common
         log.cpp
         module.cpp
         random.cpp
+        sha256.cpp
         worker_pool.cpp)
 
 target_include_directories(ds_common PUBLIC

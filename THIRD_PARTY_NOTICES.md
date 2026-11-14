@@ -194,6 +194,13 @@ THE SOFTWARE.
   `libsdl3-0` (licence text in `/usr/share/doc/libsdl3-0/copyright`). Only the joystick and
   gamepad subsystem is initialised (RC transmitters and gamepads, FR-IN-01).
 
+### libcurl (HTTPS to elevation data providers)
+
+- © 1996-2025 Daniel Stenberg and the curl contributors — <https://curl.se/>
+- Used under the **curl License** (MIT/X derivative); linked dynamically and installed from the
+  Debian package `libcurl4t64` (licence text in `/usr/share/doc/libcurl4t64/copyright`). Used only
+  by `core/net` for requests to the data providers the user configures (§4.6).
+
 ### OpenGL driver (libGL / libOpenGL / GLVND)
 
 Provided by the system graphics driver; no code is included.
