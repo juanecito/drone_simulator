@@ -1,0 +1,92 @@
+.\" SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+.\" SPDX-License-Identifier: MIT
+.TH DRONE-SIMULATOR 6 "November 2026" "Drone Simulator @PROJECT_VERSION@" "Games Manual"
+.SH NAME
+drone-simulator \- realistic 3D simulator for aerial and ground drones
+.SH SYNOPSIS
+.B drone-simulator
+.RB [ \-\-log\-level
+.IR level ]
+.RB [ \-\-gl\-debug ]
+.RB [ \-\-version ]
+.RB [ \-\-help ]
+.RI [ qt-options ]
+.SH DESCRIPTION
+.B drone-simulator
+simulates aerial drones (multirotors) and ground drones (RC rovers) over procedural or
+real-world terrain, with mission-based play, weather and a day/night sky.
+.PP
+It needs a graphics driver with OpenGL 4.5 core profile support. If none is available,
+it shows an error with the detected OpenGL version and exits.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show a summary of the options and exit.
+.TP
+.BR \-v ", " \-\-version
+Show the version and exit.
+.TP
+.BI \-\-log\-level " level"
+Minimum level of the messages written to standard error:
+.BR trace ", " debug ", " info " (default), " warn ", " error " or " off .
+.TP
+.B \-\-gl\-debug
+Request an OpenGL debug context and log the messages of the graphics driver.
+.PP
+Standard Qt options such as
+.B \-platform
+and
+.B \-style
+are also accepted.
+.SH KEYS
+.TP
+.BR F5 ", " F6 ", " F7 ", " F8
+Start (or resume), pause, single step and reset the simulation.
+.TP
+.B Space
+Arm or disarm the motors (vehicle cameras).
+.TP
+.BR W " / " S ", " A " / " D
+Throttle up and down, yaw left and right (vehicle cameras); move the free camera.
+.TP
+.B Arrow keys
+Pitch and roll (vehicle cameras); move the free camera.
+.TP
+.BR 1 " \- " 4
+Flight mode: Acro, Angle, altitude hold, position hold.
+.TP
+.B C
+Next camera: FPV, chase, line of sight, free.
+.TP
+.BR P ", " R
+Pause or resume; reset the drone.
+.TP
+.B L
+Navigation lights.
+.TP
+.B F11
+Toggle full screen.
+.TP
+.B F9
+Show or hide the tab panel.
+.TP
+.B Ctrl+Q
+Quit.
+.SH FILES
+.TP
+.I /opt/drone_simulator/
+Program files.
+.TP
+.I ~/.drone_simulation/
+Per-user data (database, logs, caches). Removing the package does not touch it.
+.SH EXIT STATUS
+.B 0
+on success,
+.B 1
+if OpenGL 4.5 core is not available or another fatal error occurs,
+.B 2
+for invalid command-line options.
+.SH COPYRIGHT
+Copyright \(co 2026 Juan Maria Gomez Lopez.
+Released under the MIT License; see
+.IR /usr/share/doc/drone-simulator/copyright .

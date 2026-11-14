@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Drone Simulator
+GenericName=Drone Flight Simulator
+Comment=Realistic 3D simulator for aerial and ground drones
+Exec=drone-simulator
+Icon=drone-simulator
+Terminal=false
+Categories=Game;Simulation;
+Keywords=drone;quadcopter;fpv;rover;flight;simulator;
+StartupWMClass=drone_simulator

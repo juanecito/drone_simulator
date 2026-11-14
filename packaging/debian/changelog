@@ -1,0 +1,10 @@
+drone-simulator (0.1.0-1) unstable; urgency=medium
+
+  * Milestone M0: project skeleton.
+    - Qt 6 main window with OpenGL 4.5 core viewport, tab panel, menus and
+      status bar; clear error dialog when OpenGL 4.5 core is not available.
+    - Empty Core module libraries, logger, command-line options.
+    - Unit and integration tests, Doxygen documentation, Debian package
+      installing into /opt/drone_simulator.
+
+ -- Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>  Fri, 13 Nov 2026 17:20:00 +0100

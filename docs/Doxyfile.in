@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# Doxygen configuration, configured by cmake/Doxygen.cmake. Only non-default values are set.
+# Build with: cmake --build --preset debug --target docs
+
+PROJECT_NAME           = "Drone Simulator"
+PROJECT_NUMBER         = @PROJECT_VERSION@
+PROJECT_BRIEF          = "@PROJECT_DESCRIPTION@"
+OUTPUT_DIRECTORY       = @DS_DOXYGEN_OUTPUT_DIR@
+CREATE_SUBDIRS         = NO
+STRIP_FROM_PATH        = @CMAKE_SOURCE_DIR@
+STRIP_FROM_INC_PATH    = @CMAKE_SOURCE_DIR@/src/core/common/include \
+                         @CMAKE_SOURCE_DIR@/src/core/geo/include \
+                         @CMAKE_SOURCE_DIR@/src/core/astro/include \
+                         @CMAKE_SOURCE_DIR@/src/core/weather/include \
+                         @CMAKE_SOURCE_DIR@/src/core/storage/include \
+                         @CMAKE_SOURCE_DIR@/src/core/net/include \
+                         @CMAKE_SOURCE_DIR@/src/core/terrain/include \
+                         @CMAKE_SOURCE_DIR@/src/core/items/include \
+                         @CMAKE_SOURCE_DIR@/src/core/input/include \
+                         @CMAKE_SOURCE_DIR@/src/core/physics/include \
+                         @CMAKE_SOURCE_DIR@/src/core/missions/include \
+                         @CMAKE_SOURCE_DIR@/src/core/graphics/include \
+                         @CMAKE_SOURCE_DIR@/src/core/sim/include \
+                         @CMAKE_SOURCE_DIR@/src/app/include \
+                         @CMAKE_BINARY_DIR@/src/core/common/include
+JAVADOC_AUTOBRIEF      = NO
+MARKDOWN_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = YES
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = NO
+HIDE_UNDOC_MEMBERS     = NO
+INTERNAL_DOCS          = NO
+SORT_MEMBER_DOCS       = NO
+
+# Markdown pages: README as main page, third-party notices and docs/*.md.
+INPUT                  = @CMAKE_SOURCE_DIR@/README.md \
+                         @CMAKE_SOURCE_DIR@/THIRD_PARTY_NOTICES.md \
+                         @CMAKE_SOURCE_DIR@/docs \
+                         @CMAKE_SOURCE_DIR@/src \
+                         @CMAKE_BINARY_DIR@/src/core/common/include
+FILE_PATTERNS          = *.hpp *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */third_party/* */build/*
+USE_MDFILE_AS_MAINPAGE = @CMAKE_SOURCE_DIR@/README.md
+EXCLUDE_SYMBOLS        = Q_OBJECT
+
+# Qt macros
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = Q_OBJECT= "signals=public" "slots=" "Q_SIGNALS=public" "Q_SLOTS="
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = @DS_DOXYGEN_WARN_AS_ERROR@
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = AUTO_LIGHT
+GENERATE_TREEVIEW      = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+HAVE_DOT               = @DS_DOXYGEN_HAVE_DOT@
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_GRAPH            = YES
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO

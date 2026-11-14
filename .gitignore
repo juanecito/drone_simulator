@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+
+# Build trees (CMake presets use build/<preset>)
+/build/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+
+# Packages
+*.deb
+*.ddeb
+
+# Editors / tools
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+.clangd
+
+# Python virtual environments used by helper scripts
+.venv/

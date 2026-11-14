@@ -1,0 +1,37 @@
+#version 450
+// SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+// SPDX-License-Identifier: MIT
+//
+// Irradiance on an upward-facing surface from the sky (integral of the sky-view LUT over the
+// upper hemisphere, cosine weighted) plus the night-sky background, for terrain ambient light.
+
+#include "common.glsl"
+#include "atmosphere.glsl"
+
+layout(local_size_x = 256) in;
+
+shared vec3 s_sum[256];
+
+void main() {
+    uint i = gl_LocalInvocationID.x;
+    float r = cameraRadius();
+    // 16 × 16 cells, uniform in cos θ and φ: dΩ = d(cos θ) dφ.
+    float cosTheta = (float(i / 16u) + 0.5) / 16.0;
+    float phi = 2.0 * PI * (float(i % 16u) + 0.5) / 16.0;
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    vec3 dir = vec3(sinTheta * sin(phi), cosTheta, -sinTheta * cos(phi));
+    s_sum[i] = skyLuminance(dir, r) * cosTheta;
+    barrier();
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (i < stride) {
+            s_sum[i] += s_sum[i + stride];
+        }
+        barrier();
+    }
+    if (i == 0u) {
+        const float kCell = (1.0 / 16.0) * (2.0 * PI / 16.0);
+        vec3 sky = s_sum[0] * kCell;
+        // Uniform background luminance L over the hemisphere gives π·L.
+        e_skyIrradiance = vec4(sky + PI * u_misc.y * vec3(0.8, 0.9, 1.1), 1.0);
+    }
+}

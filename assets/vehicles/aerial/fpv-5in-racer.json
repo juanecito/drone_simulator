@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "vehicleType": "aerial",
+  "layout": "quad-x",
+  "key": "fpv-5in-racer",
+  "name": "5-inch FPV racer (generic)",
+  "description": "Generic 5-inch freestyle/racing quad: 2306-size 1900 KV motors, 5.1x4.6 three-blade propellers, 6S 1100 mAh LiPo, about 650 g ready to fly.",
+  "frame": {
+    "massKg": 0.65,
+    "armLengthM": 0.11,
+    "inertiaXxKgM2": 0.0016,
+    "inertiaYyKgM2": 0.0018,
+    "inertiaZzKgM2": 0.003,
+    "dragAreaForwardM2": 0.022,
+    "dragAreaSideM2": 0.007,
+    "dragAreaVerticalM2": 0.04,
+    "propHeightM": 0.02,
+    "gearHeightM": 0.03,
+    "crashSpeedMs": 6.0
+  },
+  "motor": {
+    "kv": 1900,
+    "resistanceOhm": 0.12,
+    "noLoadCurrentA": 1.4,
+    "timeConstantS": 0.025,
+    "rotorInertiaKgM2": 8e-06,
+    "maxCurrentA": 45,
+    "massKg": 0.032
+  },
+  "propeller": {
+    "diameterM": 0.1295,
+    "pitchM": 0.1168,
+    "blades": 3,
+    "thrustCoefficient": 0.185,
+    "torqueCoefficient": 0.025,
+    "zeroThrustAdvanceRatio": 0.9,
+    "rotorDragCoefficient": 0.5
+  },
+  "battery": {
+    "chemistry": "lipo",
+    "cellsInSeries": 6,
+    "capacityAh": 1.1,
+    "cellResistanceOhm": 0.004,
+    "maxDischargeC": 100,
+    "massKg": 0.18,
+    "heatCapacityJPerK": 180,
+    "coolingWPerK": 0.8,
+    "lowCellVoltage": 3.5,
+    "criticalCellVoltage": 3.3,
+    "cutoffCellVoltage": 3.0
+  },
+  "electrical": {
+    "avionicsCurrentA": 0.5,
+    "escEfficiency": 0.95
+  },
+  "sensors": {
+    "gyroNoiseDps": 0.1,
+    "gyroBiasDps": 0.5,
+    "gyroBiasWalkDps": 0.005,
+    "accelNoiseMs2": 0.05,
+    "accelBiasMs2": 0.05,
+    "vibrationMs2": 4.0,
+    "baroNoiseM": 0.3,
+    "baroRateHz": 50,
+    "gpsRateHz": 10,
+    "gpsHorizontalNoiseM": 1.5,
+    "gpsVerticalNoiseM": 3.0,
+    "gpsVelocityNoiseMs": 0.1,
+    "gpsAcquisitionS": 30,
+    "magNoiseDeg": 2.0
+  },
+  "controller": {
+    "rates": {
+      "roll": {
+        "centerDps": 200,
+        "maxDps": 670,
+        "expo": 0.5
+      },
+      "pitch": {
+        "centerDps": 200,
+        "maxDps": 670,
+        "expo": 0.5
+      },
+      "yaw": {
+        "centerDps": 200,
+        "maxDps": 500,
+        "expo": 0.3
+      }
+    },
+    "pid": {
+      "roll": {
+        "p": 0.02,
+        "i": 0.1,
+        "d": 0.0005
+      },
+      "pitch": {
+        "p": 0.0227,
+        "i": 0.11,
+        "d": 0.00057
+      },
+      "yaw": {
+        "p": 0.067,
+        "i": 0.2,
+        "d": 0.0
+      }
+    },
+    "dTermCutoffHz": 100,
+    "maxAngleDeg": 55,
+    "levelGain": 6.0,
+    "maxClimbMs": 3.0,
+    "maxDescentMs": 2.0,
+    "altitudeGain": 1.2,
+    "climbP": 0.06,
+    "climbI": 0.05,
+    "idleThrottle": 0.05,
+    "airmode": true,
+    "failsafeDescentMs": 1.5,
+    "failsafeDelayS": 1.0
+  },
+  "camera": {
+    "uptiltDeg": 30,
+    "fovDeg": 120
+  },
+  "reference": {
+    "hoverThrottle": 0.24,
+    "thrustToWeight": 8.5,
+    "hoverEnduranceMin": 8.0,
+    "maxLevelSpeedMs": 30.0,
+    "source": "Typical figures for 6S 5-inch quads of about 650 g: hover at about a quarter of the throttle, about 8.5:1 static thrust-to-weight on the pack (1.4-1.6 kgf per motor), 7-9 minutes of pure hover on a 1100 mAh pack, about 110 km/h at the 55 degree Angle-mode tilt limit."
+  }
+}

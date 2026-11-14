@@ -1,0 +1,74 @@
+#version 450
+// SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+// SPDX-License-Identifier: MIT
+//
+// Auto exposure from the histogram, with eye-like adaptation; same formulas as
+// src/core/graphics/exposure.cpp. Writes the pre-exposure for the next frame and clears the
+// histogram.
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(location = 0) uniform float u_dt;
+layout(location = 1) uniform int u_manual;
+layout(location = 2) uniform float u_manualEv;
+layout(location = 3) uniform float u_compensation;
+layout(location = 4) uniform int u_reset;      // 1: jump to u_resetEv without adaptation.
+layout(location = 5) uniform float u_resetEv;
+
+const float kMinLog2 = -16.0;
+const float kMaxLog2 = 18.0;
+const float kMinEv = -12.0;
+const float kMaxEv = 18.0;
+
+shared uint s_bins[256];
+
+float binLog2(uint bin) {
+    return bin == 0u ? kMinLog2
+                     : kMinLog2 + (float(bin) - 0.5) / 254.0 * (kMaxLog2 - kMinLog2);
+}
+
+void main() {
+    uint i = gl_LocalInvocationID.x;
+    s_bins[i] = e_histogram[i];
+    barrier();
+    if (i == 0u) {
+        uint total = 0u;
+        for (uint b = 0u; b < 256u; ++b) {
+            total += s_bins[b];
+        }
+        float low = 0.10 * float(total);
+        float high = 0.98 * float(total);
+        float acc = 0.0;
+        float sum = 0.0;
+        float weight = 0.0;
+        for (uint b = 0u; b < 256u; ++b) {
+            float c = float(s_bins[b]);
+            float lo = max(low - acc, 0.0);
+            float use = clamp(min(c, high - acc) - lo, 0.0, c);
+            sum += use * binLog2(b);
+            weight += use;
+            acc += c;
+        }
+        float avgLog2 = weight > 0.0 ? sum / weight : 0.0;
+        float avg = exp2(avgLog2);
+        float ev = log2(max(avg, 1e-9) * 100.0 / 12.5);
+        float bias = clamp((8.0 - ev) * 0.35, 0.0, 6.0);
+        float target = clamp(ev + bias + u_compensation, kMinEv, kMaxEv);
+        float current = e_ev100;
+        if (u_manual != 0) {
+            current = u_manualEv;
+        } else if (u_reset != 0) {
+            current = u_resetEv;
+        } else {
+            float tau = target < current ? 0.6 : 2.5;
+            current += (target - current) * (1.0 - exp(-u_dt / tau));
+        }
+        e_ev100 = current;
+        e_exposure = 1.0 / (1.2 * exp2(current));
+        e_avgLuminance = avg;
+    }
+    barrier();
+    e_histogram[i] = 0u;
+}

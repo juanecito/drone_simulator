@@ -1,0 +1,15 @@
+NASA media usage guidelines (https://www.nasa.gov/nasa-brand-center/images-and-media/)
+
+Material created by NASA, such as images and data produced by NASA's Scientific
+Visualization Studio, is generally not subject to copyright in the United States
+(17 U.S.C. 105, works of the U.S. Government). It may be used for educational or
+informational purposes, including reproduction and modification, without explicit
+permission. NASA should be acknowledged as the source of the material. NASA's
+name, logos and insignia may not be used to imply endorsement.
+
+Used here: "CGI Moon Kit", NASA's Scientific Visualization Studio
+(https://svs.gsfc.nasa.gov/4720), file lroc_color_poles_1k.jpg, derived from the
+Lunar Reconnaissance Orbiter Camera (LROC) Wide Angle Camera mosaic. Converted to
+an 8-bit greyscale albedo map by scripts/data/gen_moon_texture.py.
+
+Credit: NASA's Scientific Visualization Studio / LRO / LROC (Arizona State University).

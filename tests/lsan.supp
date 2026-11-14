@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# LeakSanitizer suppressions for one-time allocations inside system libraries that are never
+# freed by design (font cache, GL driver). Our own code must stay leak-free (NFR-REL-05).
+leak:libfontconfig.so
+leak:libGLX_nvidia.so
+leak:libnvidia-glcore.so
+leak:libnvidia-eglcore.so
+leak:libdbus-1.so
+leak:swrast_dri.so
+leak:libgallium
+leak:libLLVM

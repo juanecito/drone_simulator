@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "vehicleType": "aerial",
+  "layout": "quad-x",
+  "key": "survey-1500g",
+  "name": "1.5 kg survey quad (generic)",
+  "description": "Generic 450 mm mapping quadcopter of about 1.5 kg: 2814-size 700 KV motors, 10x4.5 two-blade propellers, 4S 5000 mAh LiPo, survey camera and GNSS.",
+  "frame": {
+    "massKg": 1.5,
+    "armLengthM": 0.225,
+    "inertiaXxKgM2": 0.015,
+    "inertiaYyKgM2": 0.016,
+    "inertiaZzKgM2": 0.028,
+    "dragAreaForwardM2": 0.04,
+    "dragAreaSideM2": 0.022,
+    "dragAreaVerticalM2": 0.08,
+    "propHeightM": 0.03,
+    "gearHeightM": 0.12,
+    "crashSpeedMs": 3.0
+  },
+  "motor": {
+    "kv": 740,
+    "resistanceOhm": 0.38,
+    "noLoadCurrentA": 0.5,
+    "timeConstantS": 0.07,
+    "rotorInertiaKgM2": 7.5e-05,
+    "maxCurrentA": 25,
+    "massKg": 0.07
+  },
+  "propeller": {
+    "diameterM": 0.254,
+    "pitchM": 0.114,
+    "blades": 2,
+    "thrustCoefficient": 0.12,
+    "torqueCoefficient": 0.0088,
+    "zeroThrustAdvanceRatio": 0.5,
+    "rotorDragCoefficient": 0.5
+  },
+  "battery": {
+    "chemistry": "lipo",
+    "cellsInSeries": 4,
+    "capacityAh": 5.0,
+    "cellResistanceOhm": 0.005,
+    "maxDischargeC": 25,
+    "massKg": 0.53,
+    "heatCapacityJPerK": 500,
+    "coolingWPerK": 1.0,
+    "lowCellVoltage": 3.5,
+    "criticalCellVoltage": 3.3,
+    "cutoffCellVoltage": 3.0
+  },
+  "electrical": {
+    "avionicsCurrentA": 1.0,
+    "escEfficiency": 0.95
+  },
+  "sensors": {
+    "gyroNoiseDps": 0.05,
+    "gyroBiasDps": 0.3,
+    "gyroBiasWalkDps": 0.003,
+    "accelNoiseMs2": 0.03,
+    "accelBiasMs2": 0.03,
+    "vibrationMs2": 1.5,
+    "baroNoiseM": 0.2,
+    "baroRateHz": 50,
+    "gpsRateHz": 10,
+    "gpsHorizontalNoiseM": 1.0,
+    "gpsVerticalNoiseM": 2.0,
+    "gpsVelocityNoiseMs": 0.05,
+    "gpsAcquisitionS": 25,
+    "magNoiseDeg": 1.0
+  },
+  "controller": {
+    "rates": {
+      "roll": {
+        "centerDps": 80,
+        "maxDps": 150,
+        "expo": 0.3
+      },
+      "pitch": {
+        "centerDps": 80,
+        "maxDps": 150,
+        "expo": 0.3
+      },
+      "yaw": {
+        "centerDps": 60,
+        "maxDps": 120,
+        "expo": 0.2
+      }
+    },
+    "pid": {
+      "roll": {
+        "p": 0.034,
+        "i": 0.07,
+        "d": 0.0024
+      },
+      "pitch": {
+        "p": 0.0365,
+        "i": 0.075,
+        "d": 0.0026
+      },
+      "yaw": {
+        "p": 0.22,
+        "i": 0.4,
+        "d": 0.0
+      }
+    },
+    "dTermCutoffHz": 60,
+    "maxAngleDeg": 30,
+    "levelGain": 3.0,
+    "maxClimbMs": 4.0,
+    "maxDescentMs": 3.0,
+    "altitudeGain": 1.0,
+    "climbP": 0.1,
+    "climbI": 0.06,
+    "idleThrottle": 0.05,
+    "airmode": false,
+    "failsafeDescentMs": 1.0,
+    "failsafeDelayS": 1.0
+  },
+  "camera": {
+    "uptiltDeg": 0,
+    "fovDeg": 75
+  },
+  "reference": {
+    "hoverThrottle": 0.52,
+    "thrustToWeight": 2.6,
+    "hoverEnduranceMin": 20.0,
+    "maxLevelSpeedMs": 18.0,
+    "source": "Typical figures for 450 mm, 1.5 kg mapping quads on 4S 5000 mAh: hover near half throttle, thrust-to-weight about 2.5, about 20 minutes of hover, about 65 km/h at the 30 degree tilt limit."
+  }
+}

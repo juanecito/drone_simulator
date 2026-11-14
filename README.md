@@ -1,0 +1,136 @@
+# Drone Simulator
+
+Realistic 3D desktop simulator for **aerial drones** (multirotors) and **ground drones**
+(RC rovers), with mission-based play, real-world or procedural terrain, weather and an
+astronomically correct day/night sky.
+
+- **Language:** C++23 · **GUI:** Qt 6 Widgets · **Graphics:** OpenGL 4.5 core
+- **Build:** CMake + Ninja · **Tests:** GoogleTest + CTest · **Docs:** Doxygen + Markdown
+- **Platform:** Debian 13 (amd64), distributed as a `.deb` package installed in `/opt/drone_simulator`
+- **Licence:** MIT — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+
+> **Status: milestone M3 (realistic flight).** Fly a quadcopter over endless or bounded
+> procedural terrain under a physically based day/night sky. The flight model covers motors,
+> propellers and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence,
+> noisy sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight
+> controller. Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or
+> with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD and a UTM position
+> panel. There are three reference profiles and an editable Vehicle tab. Missions, real
+> terrain, the ground drone and weather arrive in milestones M4–M8 (see the specification).
+
+## Quick start
+
+```sh
+sudo scripts/ci/install-deps.sh          # Debian 13 build dependencies
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+./build/debug/src/app/drone_simulator
+```
+
+Full instructions, presets and packaging: [docs/BUILDING.md](docs/BUILDING.md).
+
+## Running
+
+```
+drone_simulator [--log-level trace|debug|info|warn|error|off] [--gl-debug] [--db <path>]
+                [--version] [--help]
+```
+
+**Flying.** Press `F5` (*Simulation › Start*). The view switches to the chase camera. Then:
+
+| Key | Action (vehicle cameras: FPV, chase, line of sight) |
+|-----|--------|
+| `Space` | Arm / disarm (throttle must be low) |
+| `W` / `S` | Throttle up / down (stays where you leave it; centres in altitude hold) |
+| `A` / `D` | Yaw left / right |
+| Arrow keys | Pitch forward / back, roll left / right |
+| `1` `2` `3` `4` | Acro, Angle, Altitude hold, Position hold (= altitude hold until M7) |
+| `L` | Navigation lights |
+| `C` | Next camera: FPV → chase → line of sight → free |
+| `P` | Pause / resume |
+| `R` | Reset the drone to the take-off point |
+
+`F5`–`F8` are *Start*, *Pause*, *Step* and *Reset* in the Simulation menu. In the **free
+camera**:
+
+| Key / mouse | Action |
+|-------------|--------|
+| Click in the view | Capture the mouse to look around |
+| `Esc` | Release the mouse |
+| `W` `S` `A` `D` or arrow keys | Move forward, back, left, right |
+| `E` / `Q` or `Page Up` / `Page Down` | Climb / descend |
+| `Shift` (held) | 10× faster |
+| Mouse wheel | Change the base speed (speed also grows with height above ground) |
+
+`F11` toggles full screen, `F9` shows or hides the tab panel and `Ctrl+Q` quits.
+
+The status bar shows the drone's position in the vehicle cameras and the camera's position
+in the free camera: UTM, elevation AMSL and height above ground. It also shows the frame
+rate.
+
+- **Simulation tab:** *Start*, *Pause*, *Step*, *Reset*, the time scale, the camera, live
+  stick positions, telemetry, statistics of the current flight and simulation events
+  (crashes, arming refused, battery warnings). *Take Off From Free-Camera Position* moves the
+  take-off point.
+- **Vehicle tab:** choose a profile (5″ FPV racer, sub-250 g camera drone, 1.5 kg survey
+  quad, or your own) and see its computed hover throttle, thrust-to-weight, endurance, top
+  speed and the highest wind level it can handle. All parameters can be edited (*Apply* to
+  fly them) and saved as your own profile.
+- **Settings › Controls:** choose the keyboard or a joystick (RC transmitter in USB joystick
+  mode, or a gamepad), start from a preset (radio AETR/TAER, gamepad mode 1/2), run the
+  calibration wizard and set expo and deadzones, then *Fly With This*. Mappings are saved per
+  device.
+
+- **Terrain tab:** choose a preset (built-in or your own: *Save As…* / *Delete*), set the seed
+  (*Random*), shape parameters, water level, unlimited or custom dimensions with the edge
+  treatment, and the geographic origin; *Regenerate* applies them. A shaded 2D preview shows
+  the result.
+- **Environment tab:** date and time in any time zone (or UTC), *Now*, a time-of-day slider and
+  running time (up to 3600×); Sun and Moon position, phase, rise/set and twilight times; exposure
+  (automatic with compensation, or manual EV), visibility (haze and fog), the wind level
+  (0–10, Beaufort) and direction, and the air temperature, QNH and humidity.
+
+An OpenGL **4.5 core profile** driver is required; if it is missing the program shows an error
+with the detected version and exits.
+
+User data — one SQLite database per operating-system user — lives in
+`$HOME/.drone_simulation/drone_simulation.db` (folder mode `0700`, file `0600`). It holds the
+settings, including the window layout, the terrain and the environment, which are restored at
+the next start; the user's terrain presets, vehicle profiles and controller mappings; and a
+record of each flight. If the folder
+cannot be created, the program warns and runs with a temporary in-memory database. `--db <path>`
+uses another database file (for testing). Uninstalling the package never touches user data.
+
+## Documentation
+
+- [Specification](docs/SPECIFICATION.md) — requirements, architecture, milestones, licensing.
+- [Building](docs/BUILDING.md) — toolchain, presets, tests, docs, `.deb` packaging.
+- [Flight model](docs/FLIGHT_MODEL.md) — frames, physics, flight controller, reference
+  profiles and validation.
+- API reference: `cmake --build --preset debug --target docs`, then open
+  `build/debug/docs/html/index.html`.
+
+## Source layout
+
+```
+src/core/<module>/   Qt-free Core libraries (only storage uses Qt SQL)
+src/app/             Qt 6 GUI: MainWindow, Viewport, tabs, scene adapter, command line
+tests/unit/          GoogleTest unit tests
+tests/integration/   GUI (offscreen) and OpenGL (native display) tests
+third_party/glad/    Generated OpenGL 4.5 core loader
+packaging/           Desktop entry, icon, Debian copyright
+cmake/               Build helpers (warnings, sanitizers, modules, docs, packaging)
+scripts/ci/          Dependency install and .deb clean-install test
+scripts/data/        Generators of the astronomy tables, star catalogue and moon texture
+scripts/fixtures/    Generators of the reference data the tests compare against
+assets/shaders/      GLSL 4.50 shaders (installed to share/shaders)
+assets/sky/          Bright Star Catalogue and moon albedo map (installed to share/sky)
+tests/fixtures/      Reference data (PROJ, GeographicLib, JPL Horizons, USNO, astropy)
+```
+
+## Licence
+
+Copyright (c) 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>.
+Released under the [MIT License](LICENSE). The project follows the
+[REUSE](https://reuse.software) specification.

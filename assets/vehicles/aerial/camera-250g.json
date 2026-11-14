@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "vehicleType": "aerial",
+  "layout": "quad-x",
+  "key": "camera-250g",
+  "name": "Sub-250 g camera drone (generic)",
+  "description": "Generic folding camera drone under 250 g: 1504-size 3000 KV motors, 4.7-inch two-blade propellers, 2S 2000 mAh Li-ion pack, three-axis gimbal camera.",
+  "frame": {
+    "massKg": 0.249,
+    "armLengthM": 0.085,
+    "inertiaXxKgM2": 0.0004,
+    "inertiaYyKgM2": 0.0005,
+    "inertiaZzKgM2": 0.00075,
+    "dragAreaForwardM2": 0.01,
+    "dragAreaSideM2": 0.007,
+    "dragAreaVerticalM2": 0.02,
+    "propHeightM": 0.015,
+    "gearHeightM": 0.04,
+    "crashSpeedMs": 3.0
+  },
+  "motor": {
+    "kv": 2700,
+    "resistanceOhm": 0.4,
+    "noLoadCurrentA": 0.3,
+    "timeConstantS": 0.04,
+    "rotorInertiaKgM2": 2.3e-06,
+    "maxCurrentA": 8,
+    "massKg": 0.012
+  },
+  "propeller": {
+    "diameterM": 0.12,
+    "pitchM": 0.066,
+    "blades": 2,
+    "thrustCoefficient": 0.13,
+    "torqueCoefficient": 0.0095,
+    "zeroThrustAdvanceRatio": 0.6,
+    "rotorDragCoefficient": 0.5
+  },
+  "battery": {
+    "chemistry": "liion",
+    "cellsInSeries": 2,
+    "capacityAh": 2.0,
+    "cellResistanceOhm": 0.03,
+    "maxDischargeC": 10,
+    "massKg": 0.085,
+    "heatCapacityJPerK": 75,
+    "coolingWPerK": 0.3,
+    "lowCellVoltage": 3.4,
+    "criticalCellVoltage": 3.2,
+    "cutoffCellVoltage": 2.9
+  },
+  "electrical": {
+    "avionicsCurrentA": 0.55,
+    "escEfficiency": 0.92
+  },
+  "sensors": {
+    "gyroNoiseDps": 0.05,
+    "gyroBiasDps": 0.3,
+    "gyroBiasWalkDps": 0.003,
+    "accelNoiseMs2": 0.03,
+    "accelBiasMs2": 0.03,
+    "vibrationMs2": 1.0,
+    "baroNoiseM": 0.15,
+    "baroRateHz": 50,
+    "gpsRateHz": 10,
+    "gpsHorizontalNoiseM": 1.0,
+    "gpsVerticalNoiseM": 2.0,
+    "gpsVelocityNoiseMs": 0.05,
+    "gpsAcquisitionS": 20,
+    "magNoiseDeg": 1.0
+  },
+  "controller": {
+    "rates": {
+      "roll": {
+        "centerDps": 90,
+        "maxDps": 180,
+        "expo": 0.3
+      },
+      "pitch": {
+        "centerDps": 90,
+        "maxDps": 180,
+        "expo": 0.3
+      },
+      "yaw": {
+        "centerDps": 60,
+        "maxDps": 120,
+        "expo": 0.2
+      }
+    },
+    "pid": {
+      "roll": {
+        "p": 0.0206,
+        "i": 0.06,
+        "d": 0.00082
+      },
+      "pitch": {
+        "p": 0.0257,
+        "i": 0.075,
+        "d": 0.00103
+      },
+      "yaw": {
+        "p": 0.105,
+        "i": 0.3,
+        "d": 0.0
+      }
+    },
+    "dTermCutoffHz": 80,
+    "maxAngleDeg": 35,
+    "levelGain": 4.0,
+    "maxClimbMs": 5.0,
+    "maxDescentMs": 3.5,
+    "altitudeGain": 1.0,
+    "climbP": 0.08,
+    "climbI": 0.06,
+    "idleThrottle": 0.05,
+    "airmode": false,
+    "failsafeDescentMs": 1.5,
+    "failsafeDelayS": 1.0
+  },
+  "camera": {
+    "uptiltDeg": 0,
+    "fovDeg": 75
+  },
+  "reference": {
+    "hoverThrottle": 0.47,
+    "thrustToWeight": 2.9,
+    "hoverEnduranceMin": 24.0,
+    "maxLevelSpeedMs": 16.0,
+    "source": "Typical figures for folding camera drones just under 250 g: hover just under half throttle, thrust-to-weight around 3, about 24 minutes of hover on a 2S Li-ion pack, about 16 m/s (58 km/h) in sport mode."
+  }
+}

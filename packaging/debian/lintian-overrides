@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# Deliberate deviations from Debian archive policy (SPECIFICATION §7.1, FR-PKG-02/03/05/07).
+# The package is distributed by the project itself, not through the Debian archive.
+
+# FR-PKG-03: the program is installed as an add-on package in /opt/drone_simulator.
+drone-simulator: dir-or-file-in-opt [opt/*]
+
+# FR-PKG-02 / FR-PKG-05: section "games", with the command in /usr/bin (a symlink into /opt),
+# so lintian finds no binary in /usr/games.
+drone-simulator: package-section-games-but-contains-no-game
+
+# Not uploaded to the Debian archive, so there is no ITP bug to close.
+drone-simulator: initial-upload-closes-no-bugs

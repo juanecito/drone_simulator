@@ -1,0 +1,82 @@
+#version 450
+// SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+// SPDX-License-Identifier: MIT
+//
+// Multiple-scattering LUT (Hillaire 2020, §5.5): for each altitude and light zenith cosine,
+// the luminance Ψ_ms added by all scattering orders ≥ 2 for unit illuminance, assuming
+// isotropic phase for those orders. One work group per texel, one invocation per direction.
+
+#include "common.glsl"
+#include "atmosphere.glsl"
+
+layout(local_size_x = 64) in;
+layout(binding = 0, rgba32f) uniform writeonly image2D o_lut;
+
+shared vec3 s_luminance[64];
+shared vec3 s_transfer[64];
+
+void main() {
+    ivec2 p = ivec2(gl_WorkGroupID.xy);
+    ivec2 size = imageSize(o_lut);
+    vec2 uv = (vec2(p) + 0.5) / vec2(size);
+    float muLight = uv.x * 2.0 - 1.0;
+    float r = bottomRadius() + uv.y * (topRadius() - bottomRadius());
+    r = clamp(r, bottomRadius() + 0.001, topRadius() - 0.001);
+    vec3 light = vec3(sqrt(max(1.0 - muLight * muLight, 0.0)), muLight, 0.0);
+
+    // Uniform directions on the sphere: 8 × 8 stratified (cos θ, φ).
+    uint i = gl_LocalInvocationID.x;
+    float cosTheta = 1.0 - 2.0 * (float(i / 8u) + 0.5) / 8.0;
+    float phi = 2.0 * PI * (float(i % 8u) + 0.5) / 8.0;
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    vec3 dir = vec3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+
+    float mu = dir.y;
+    bool ground = rayHitsGround(r, mu);
+    float tMax = ground ? distanceToGround(r, mu) : distanceToTop(r, mu);
+    const int kSteps = 24;
+    float dt = tMax / float(kSteps);
+    vec3 origin = vec3(0.0, r, 0.0);
+    vec3 luminance = vec3(0.0);
+    vec3 transfer = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    const float kIsotropic = 1.0 / (4.0 * PI);
+    for (int k = 0; k < kSteps; ++k) {
+        float t = (float(k) + 0.5) * dt;
+        vec3 pos = origin + t * dir;
+        float h = length(pos);
+        Medium m = sampleMedium(h - bottomRadius());
+        vec3 scattering = m.rayleigh + m.mie;
+        vec3 ext = max(m.extinction, vec3(1e-7));
+        vec3 sampleT = exp(-m.extinction * dt);
+        vec3 sunT = transmittanceToLight(h, dot(pos, light) / h, 0.0);
+        vec3 s = sunT * scattering * kIsotropic;
+        luminance += throughput * (s - s * sampleT) / ext;
+        transfer += throughput * (scattering - scattering * sampleT) / ext;
+        throughput *= sampleT;
+    }
+    if (ground) {
+        vec3 pos = origin + tMax * dir;
+        float h = length(pos);
+        float muL = dot(pos, light) / h;
+        vec3 sunT = transmittanceToLight(h, muL, 0.0);
+        luminance += throughput * sunT * max(muL, 0.0) * a_ground.rgb / PI;
+    }
+    s_luminance[i] = luminance;
+    s_transfer[i] = transfer;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (i < stride) {
+            s_luminance[i] += s_luminance[i + stride];
+            s_transfer[i] += s_transfer[i + stride];
+        }
+        barrier();
+    }
+    if (i == 0u) {
+        // Averages over the sphere = integrals with the isotropic phase function.
+        vec3 l2 = s_luminance[0] / 64.0;
+        vec3 fms = s_transfer[0] / 64.0;
+        vec3 psi = l2 / max(1.0 - fms, vec3(1e-3));
+        imageStore(o_lut, p, vec4(psi, 1.0));
+    }
+}

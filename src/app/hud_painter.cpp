@@ -1,0 +1,195 @@
+// SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+// SPDX-License-Identifier: MIT
+
+#include "ds/app/hud_painter.hpp"
+
+#include <QFont>
+#include <QFontMetrics>
+#include <QPainter>
+#include <QPainterPath>
+
+#include <cmath>
+#include <numbers>
+#include <vector>
+
+namespace ds::app {
+namespace {
+
+QColor colorFor(sim::HudLevel level) {
+    switch (level) {
+        case sim::HudLevel::Caution: return {255, 190, 40};
+        case sim::HudLevel::Warning: return {255, 70, 60};
+        case sim::HudLevel::Normal: break;
+    }
+    return {245, 245, 245};
+}
+
+// Text with a dark outline, anchored by @p align at @p anchor.
+void outlinedText(QPainter& p, QPointF anchor, const QString& text, const QColor& color,
+                  Qt::Alignment align) {
+    const QFontMetricsF fm(p.font());
+    const double w = fm.horizontalAdvance(text);
+    double x = anchor.x();
+    if (align & Qt::AlignRight) {
+        x -= w;
+    } else if (align & Qt::AlignHCenter) {
+        x -= 0.5 * w;
+    }
+    QPainterPath path;
+    path.addText(QPointF(x, anchor.y() + fm.ascent()), p.font(), text);
+    p.setPen(QPen(QColor(0, 0, 0, 200), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(path);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawPath(path);
+}
+
+// A column of items, top to bottom from @p anchor.
+void column(QPainter& p, QPointF anchor, const std::vector<const sim::HudItem*>& items,
+            Qt::Alignment align) {
+    const double line = QFontMetricsF(p.font()).height() * 1.1;
+    for (const sim::HudItem* item : items) {
+        if (item->text.empty()) {
+            continue;
+        }
+        outlinedText(p, anchor, QString::fromStdString(item->text), colorFor(item->level), align);
+        anchor.ry() += line;
+    }
+}
+
+void horizon(QPainter& p, const QRectF& area, const sim::HudModel& hud) {
+    const QPointF c = area.center();
+    const double pxPerRad = 0.5 * area.height() / 0.6;  // ±34° of pitch on screen.
+    p.save();
+    p.translate(c);
+    p.rotate(-hud.rollRad * 180.0 / std::numbers::pi);
+    const double y0 = hud.pitchRad * pxPerRad;
+    p.setPen(QPen(QColor(255, 255, 255, 190), 1.5));
+    const double half = 0.18 * area.width();
+    p.drawLine(QPointF(-half, y0), QPointF(-0.25 * half, y0));
+    p.drawLine(QPointF(0.25 * half, y0), QPointF(half, y0));
+    // Pitch ladder every 10°.
+    p.setPen(QPen(QColor(255, 255, 255, 120), 1.0));
+    for (int deg = -30; deg <= 30; deg += 10) {
+        if (deg == 0) {
+            continue;
+        }
+        const double y = y0 - deg * std::numbers::pi / 180.0 * pxPerRad;
+        if (std::abs(y) > 0.4 * area.height()) {
+            continue;
+        }
+        p.drawLine(QPointF(-0.4 * half, y), QPointF(-0.15 * half, y));
+        p.drawLine(QPointF(0.15 * half, y), QPointF(0.4 * half, y));
+    }
+    p.restore();
+    // Fixed aircraft symbol.
+    p.setPen(QPen(QColor(255, 255, 255, 230), 2.0));
+    p.drawLine(c + QPointF(-22, 0), c + QPointF(-8, 0));
+    p.drawLine(c + QPointF(8, 0), c + QPointF(22, 0));
+    p.drawEllipse(c, 3.0, 3.0);
+}
+
+void windArrow(QPainter& p, QPointF centre, double radius, double angleRad) {
+    p.save();
+    p.translate(centre);
+    p.rotate(angleRad * 180.0 / std::numbers::pi);  // 0 = towards the top (the nose).
+    QPainterPath arrow;
+    arrow.moveTo(0, -radius);
+    arrow.lineTo(0.45 * radius, -0.1 * radius);
+    arrow.lineTo(0.15 * radius, -0.1 * radius);
+    arrow.lineTo(0.15 * radius, radius);
+    arrow.lineTo(-0.15 * radius, radius);
+    arrow.lineTo(-0.15 * radius, -0.1 * radius);
+    arrow.lineTo(-0.45 * radius, -0.1 * radius);
+    arrow.closeSubpath();
+    p.setPen(QPen(QColor(0, 0, 0, 200), 2.0));
+    p.setBrush(QColor(120, 200, 255, 220));
+    p.drawPath(arrow);
+    p.restore();
+}
+
+}  // namespace
+
+void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
+              const HudPaintOptions& options) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    QFont font(QStringLiteral("monospace"));
+    font.setStyleHint(QFont::Monospace);
+    font.setBold(true);
+    font.setPointSizeF(10.0 * options.scale);
+    p.setFont(font);
+    const QRectF area(rect);
+    const double margin = 12.0 * options.scale;
+    const double line = QFontMetricsF(font).height() * 1.1;
+
+    if (options.horizon) {
+        horizon(p, area, hud);
+    }
+
+    // Position panel (top left, FR-GFX-14a) on a translucent plate.
+    {
+        std::vector<QString> lines{QString::fromStdString(hud.positionUtm),
+                                   QString::fromStdString(hud.positionElevation)};
+        if (!hud.positionLatLon.empty()) {
+            lines.push_back(QString::fromStdString(hud.positionLatLon));
+        }
+        const QFontMetricsF fm(font);
+        double width = 0.0;
+        for (const QString& l : lines) {
+            width = std::max(width, fm.horizontalAdvance(l));
+        }
+        const QRectF plate(area.left() + margin - 6, area.top() + margin - 4, width + 12,
+                           line * static_cast<double>(lines.size()) + 8);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 110));
+        p.drawRoundedRect(plate, 4, 4);
+        QPointF at(area.left() + margin, area.top() + margin);
+        for (const QString& l : lines) {
+            outlinedText(p, at, l, QColor(235, 245, 255), Qt::AlignLeft);
+            at.ry() += line;
+        }
+    }
+
+    // Clocks and timer (top right).
+    column(p, {area.right() - margin, area.top() + margin},
+           {&hud.clockLocal, &hud.clockUtc, &hud.timer}, Qt::AlignRight);
+
+    // Heading (top centre).
+    outlinedText(
+        p, {area.center().x(), area.top() + margin},
+        QStringLiteral("%1°").arg(std::lround(hud.headingDeg) % 360, 3, 10, QLatin1Char('0')),
+        QColor(245, 245, 245), Qt::AlignHCenter);
+
+    // Warnings (under the heading, flashing).
+    if (options.blinkOn) {
+        QPointF at(area.center().x(), area.top() + margin + 2.0 * line);
+        for (const sim::HudItem& w : hud.warnings) {
+            outlinedText(p, at, QString::fromStdString(w.text), colorFor(w.level),
+                         Qt::AlignHCenter);
+            at.ry() += line;
+        }
+    }
+
+    // Heights and climb (left middle); speeds, distances and wind (right middle).
+    const double middle = area.center().y() - line;
+    column(p, {area.left() + margin, middle},
+           {&hud.altitudeAgl, &hud.altitudeAmsl, &hud.verticalSpeed}, Qt::AlignLeft);
+    column(p, {area.right() - margin, middle},
+           {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind}, Qt::AlignRight);
+    if (hud.windArrowRad) {
+        windArrow(p, {area.right() - margin - 14.0 * options.scale, middle + 5.0 * line},
+                  12.0 * options.scale, *hud.windArrowRad);
+    }
+
+    // Vehicle state (bottom).
+    const double bottom = area.bottom() - margin - 3.0 * line;
+    column(p, {area.left() + margin, bottom}, {&hud.battery, &hud.gps, &hud.lights}, Qt::AlignLeft);
+    column(p, {area.right() - margin, bottom}, {&hud.armed, &hud.mode, &hud.throttle},
+           Qt::AlignRight);
+    p.restore();
+}
+
+}  // namespace ds::app

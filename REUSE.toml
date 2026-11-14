@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# Licensing of files that cannot carry an SPDX header (https://reuse.software).
+# Check with: reuse lint
+version = 1
+
+[[annotations]]
+path = [
+    "CLAUDE.md",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "CMakePresets.json",
+    "docs/**.md",
+    "packaging/linux/drone-simulator.desktop",
+    "packaging/debian/copyright",
+    "packaging/debian/changelog",
+    ".github/**.md",
+    "assets/vehicles/**.json",
+    "assets/environment/**.json",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["third_party/glad/src/**", "third_party/glad/include/glad/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = ["David Herberth and the glad contributors", "The Khronos Group Inc."]
+SPDX-License-Identifier = "(WTFPL OR CC0-1.0) AND Apache-2.0"
+
+[[annotations]]
+path = "third_party/glad/include/KHR/khrplatform.h"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2008-2018 The Khronos Group Inc."
+SPDX-License-Identifier = "LicenseRef-Khronos-MIT"
+
+[[annotations]]
+path = "assets/sky/bsc5.csv"
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+    "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>",
+    "1991 D. Hoffleit and W. H. Warren Jr. (Yale Bright Star Catalogue, NASA ADC)",
+]
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "assets/sky/moon_albedo.pgm"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "NASA's Scientific Visualization Studio, CGI Moon Kit (LRO / LROC WAC data)"
+SPDX-License-Identifier = "LicenseRef-NASA-Public-Domain"
+
+# Reference values produced by scripts/fixtures/*.py from PROJ, GeographicLib, astropy,
+# JPL Horizons and the USNO Astronomical Applications API (see THIRD_PARTY_NOTICES.md).
+[[annotations]]
+path = "tests/fixtures/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>"
+SPDX-License-Identifier = "MIT"

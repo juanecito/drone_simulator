@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# Build, test, document and package on Debian 13, then test-install the .deb in a clean
+# Debian 13 container (SPECIFICATION §7.1, milestone M0).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test, docs, package (Debian 13)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: scripts/ci/install-deps.sh
+      - name: Configure (ci preset — warnings and Doxygen warnings are errors)
+        run: cmake --preset ci
+      - name: Build
+        run: cmake --build --preset ci
+      - name: Test (Xvfb + Mesa llvmpipe for OpenGL 4.5 core)
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ctest --preset ci --output-on-failure
+      - name: Documentation
+        run: cmake --build --preset ci --target docs
+      - name: Package (.deb)
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+          cmake --build --preset release --target package
+      - name: Lintian (fails on errors and warnings; overrides in packaging/debian/lintian-overrides)
+        run: lintian --fail-on error,warning --info build/release/*.deb
+      - name: Formatting
+        run: clang-format --dry-run --Werror $(find src tests -name '*.cpp' -o -name '*.hpp')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: build/release/*.deb
+          if-no-files-found: error
+
+  deb-install:
+    name: Clean install test (Debian 13 container)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: dist
+      - name: Install, run and purge in debian:trixie
+        run: scripts/ci/test-deb-install.sh dist/*.deb
+
+  reuse:
+    name: REUSE licensing check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: fsfe/reuse-action@v5

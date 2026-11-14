@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+---
+Language: Cpp
+BasedOnStyle: Google
+Standard: Latest
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Qt headers
+  - Regex: '^<Q[A-Za-z]+>$'
+    Priority: 1
+  # Third-party headers (gtest, glad, ...)
+  - Regex: '^<(gtest|gmock|glad|KHR)/'
+    Priority: 2
+  # C++ standard library
+  - Regex: '^<[a-z_]+>$'
+    Priority: 3
+  # Project headers
+  - Regex: '^"ds/'
+    Priority: 4
+  - Regex: '.*'
+    Priority: 5

@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+
+add_executable(ds_unit_tests
+    graphics_test.cpp
+    common_test.cpp
+    terrain_test.cpp
+    astro_test.cpp
+    command_line_test.cpp
+    flight_test.cpp
+    geo_test.cpp
+    input_test.cpp
+    log_test.cpp
+    modules_test.cpp
+    physics_test.cpp
+    renderer_test.cpp
+    sim_test.cpp
+    version_test.cpp
+    wind_test.cpp)
+target_link_libraries(ds_unit_tests PRIVATE
+    GTest::gtest_main
+    ds::common ds::geo ds::astro ds::weather ds::storage ds::net ds::terrain ds::items
+    ds::input ds::physics ds::missions ds::graphics ds::sim
+    ds::app_ui)
+target_compile_definitions(ds_unit_tests PRIVATE
+    DS_TEST_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures"
+    DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
+ds_set_warnings(ds_unit_tests)
+gtest_discover_tests(ds_unit_tests
+    TEST_PREFIX "unit."
+    PROPERTIES LABELS unit
+    DISCOVERY_MODE PRE_TEST)
+
+# Storage tests need a QCoreApplication (Qt SQL driver plugins), hence their own main().
+add_executable(ds_storage_unit_tests qt_core_main.cpp storage_test.cpp)
+target_link_libraries(ds_storage_unit_tests PRIVATE GTest::gtest ds::storage)
+ds_set_warnings(ds_storage_unit_tests)
+gtest_discover_tests(ds_storage_unit_tests
+    TEST_PREFIX "unit."
+    PROPERTIES LABELS unit
+    DISCOVERY_MODE PRE_TEST)
