@@ -135,6 +135,36 @@ assets/sky/          Bright Star Catalogue and moon albedo map (installed to sha
 tests/fixtures/      Reference data (PROJ, GeographicLib, JPL Horizons, USNO, astropy)
 ```
 
+## Acronyms
+
+Acronyms used in this file. The full list, including the requirement ID prefixes, is in
+Appendix A of the [specification](docs/SPECIFICATION.md).
+
+| Acronym | Meaning |
+|---------|---------|
+| AETR / TAER | RC channel orders: Aileron-Elevator-Throttle-Rudder / Throttle-Aileron-Elevator-Rudder |
+| AGL / AMSL | Above ground level / above mean sea level |
+| API | Application programming interface |
+| DECL | Magnetic declination (compass read-out) |
+| EV | Exposure value |
+| FPV | First-person view (camera on the drone) |
+| GLSL | OpenGL Shading Language |
+| GUI | Graphical user interface |
+| HDG | Heading (HUD read-out: T = true, M = magnetic) |
+| HUD / OSD | Head-up display / on-screen display: flight data over the 3D view |
+| ISA | International Standard Atmosphere |
+| JPL | NASA Jet Propulsion Laboratory |
+| MN | Magnetic north (compass marker) |
+| QNH | Altimeter setting: sea-level pressure that makes a barometer read the field elevation |
+| RC | Radio control (transmitter and receiver) |
+| SDL | Simple DirectMedia Layer (joysticks and gamepads) |
+| SQL | Structured Query Language |
+| USB | Universal Serial Bus |
+| USNO | U.S. Naval Observatory |
+| UTC | Coordinated Universal Time |
+| UTM | Universal Transverse Mercator |
+| WMM | World Magnetic Model (WMM2025: valid 2025–2030) |
+
 ## Licence
 
 Copyright (c) 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>.

@@ -84,6 +84,8 @@ in the loop (HIL/SITL), fixed-wing aircraft, and mobile/web targets.
 | **Objective** | A measurable task inside a mission (reach waypoint, land, deliver…). |
 | **Core** | All non-GUI code. Core does not depend on Qt, except `core/storage`, which uses Qt SQL (see §3.1). |
 
+Acronyms and abbreviations are listed in **Appendix A**.
+
 ### 1.5 Requirement notation
 Requirements carry IDs (`FR-xxx` functional, `NFR-xxx` non-functional) and a priority:
 **M** = must (v1.0), **S** = should, **C** = could (later).
@@ -1750,3 +1752,167 @@ Assets are licensed separately from code and need their own entries in
    licence and source offer, and GDAL built without copyleft optional dependencies (§12.2).
 5. CI: `reuse lint` passes; a dependency check fails the build if a GPL-only Qt module
    or an unapproved library is linked.
+
+---
+
+## Appendix A. Acronyms and abbreviations
+
+### A.1 Requirement ID prefixes
+
+| Prefix | Area |
+|--------|------|
+| FR / NFR | Functional / non-functional requirement |
+| FR-AST | Time and astronomy (`core/astro`) |
+| FR-DB | User database and storage |
+| FR-GEO | Geo-referencing (`core/geo`) |
+| FR-GFX | Graphics engine |
+| FR-GND | Ground drone |
+| FR-IN | Input devices |
+| FR-ITM | Items manager |
+| FR-LOOP | Main simulation loop |
+| FR-MIS | Missions |
+| FR-NET | Network and data cache |
+| FR-PHY | Flight physics |
+| FR-PKG | Packaging |
+| FR-TER | Terrain generator (`-O` online, `-F` files) |
+| FR-UI | User interface |
+| FR-WIND | Wind levels |
+| FR-WX | Weather |
+| FR-X | Cross-cutting concerns |
+| NFR-MNT | Maintainability |
+| NFR-PERF | Performance |
+| NFR-REAL | Realism |
+| NFR-REL | Reliability |
+| NFR-SEC | Security and privacy |
+| NFR-USE | Usability |
+
+### A.2 Flight, vehicles and sensors
+
+| Acronym | Meaning |
+|---------|---------|
+| AETR / TAER | Channel orders of an RC transmitter: Aileron-Elevator-Throttle-Rudder / Throttle-Aileron-Elevator-Rudder |
+| AGL | Above ground level |
+| AMSL | Above mean sea level |
+| EKF | Extended Kalman filter |
+| ESC | Electronic speed controller (drives a brushless motor) |
+| FOV | Field of view |
+| FPV | First-person view (camera on the drone) |
+| GPS | Global Positioning System |
+| HDG | Heading (HUD read-out) |
+| HDOP | Horizontal dilution of precision (GPS quality) |
+| HIL / SITL | Hardware in the loop / software in the loop |
+| HUD / OSD | Head-up display / on-screen display: flight data drawn over the 3D view |
+| IMU | Inertial measurement unit (gyro + accelerometer) |
+| ISA | International Standard Atmosphere |
+| KV | Motor velocity constant (rpm per volt) |
+| LiPo / Li-ion | Lithium-polymer / lithium-ion battery |
+| LOS / VLOS | Line of sight / visual line of sight (pilot to drone) |
+| MN | Magnetic north (compass marker) |
+| OCV | Open-circuit voltage (battery) |
+| PID | Proportional-integral-derivative controller |
+| QNH | Altimeter setting: sea-level pressure that makes a barometer read the field elevation |
+| RC | Radio control (transmitter and receiver) |
+| RK4 | Classical fourth-order Runge–Kutta integrator |
+| RPM | Revolutions per minute |
+| RTH | Return to home |
+| SoC | State of charge (battery) |
+| UAV | Unmanned aerial vehicle |
+| UGV | Unmanned ground vehicle (the ground drone) |
+
+### A.3 Geodesy, terrain and imagery
+
+| Acronym | Meaning |
+|---------|---------|
+| COG / COPC | Cloud-Optimized GeoTIFF / Cloud-Optimized Point Cloud |
+| COP30 / COP90 | Copernicus DEM, 30 m / 90 m (GLO-30 / GLO-90) |
+| CRS | Coordinate reference system |
+| DD / DMS | Decimal degrees / degrees-minutes-seconds |
+| DECL | Magnetic declination (HUD read-out) |
+| DEM / DTM / DSM | Digital elevation / terrain / surface model |
+| ECEF | Earth-centred, Earth-fixed coordinates |
+| EGM96 / EGM2008 | Earth Gravitational Model geoids (orthometric heights) |
+| ENU | Local East-North-Up frame |
+| EPSG | EPSG Geodetic Parameter Dataset codes (e.g. EPSG:4326 = WGS84 lat/lon) |
+| IDW | Inverse distance weighting (interpolation) |
+| LAS / LAZ | ASPRS lidar point-cloud format / its compressed form |
+| LOD | Level of detail |
+| NAIP | National Agriculture Imagery Program (USGS/USDA orthophotos) |
+| OGC | Open Geospatial Consortium |
+| SMRF | Simple Morphological Filter (lidar ground classification) |
+| SRTM | Shuttle Radar Topography Mission (DEM; GL1/GL3 = 1″/3″ grids) |
+| TIN | Triangulated irregular network |
+| UPS | Universal Polar Stereographic |
+| UTM | Universal Transverse Mercator |
+| VLR | Variable-length record (LAS header) |
+| VRT | GDAL virtual raster |
+| WCS / WMS / WMTS | OGC Web Coverage / Map / Map Tile Service |
+| WGS84 | World Geodetic System 1984 |
+| WKT | Well-known text (CRS description) |
+| WMM | World Magnetic Model (WMM2025: valid 2025–2030) |
+| XYZ / TMS | Web map tile URL schemes (`{z}/{x}/{y}`) / Tile Map Service |
+
+### A.4 Astronomy and sky
+
+| Acronym | Meaning |
+|---------|---------|
+| BSC5 | Yale Bright Star Catalogue, 5th revised edition |
+| ELP | Éphéméride Lunaire Parisienne (lunar theory, ELP-2000/82) |
+| EV | Exposure value |
+| HDR | High dynamic range |
+| SPA | Solar Position Algorithm (NREL) |
+| TT | Terrestrial Time |
+| UTC | Coordinated Universal Time |
+| VSOP87 | Variations Séculaires des Orbites Planétaires (planetary theory, 1987) |
+
+### A.5 Software, graphics and build
+
+| Acronym | Meaning |
+|---------|---------|
+| AABB / OBB | Axis-aligned / oriented bounding box |
+| API | Application programming interface |
+| APT | Debian package manager (Advanced Package Tool) |
+| BVH | Bounding volume hierarchy |
+| CI | Continuous integration |
+| CRUD | Create, read, update, delete |
+| DB | Database |
+| DEP-5 | Debian machine-readable copyright format |
+| DSA | Direct State Access (OpenGL 4.5) |
+| GDAL / PDAL | Geospatial / Point Data Abstraction Library |
+| GL / GLSL | OpenGL / OpenGL Shading Language |
+| GPU / CPU | Graphics / central processing unit |
+| GUI / UI | Graphical user interface / user interface |
+| GUID | Globally unique identifier (joystick identity) |
+| HID | Human interface device (USB) |
+| HTTP(S) / TLS | Hypertext Transfer Protocol (Secure) / Transport Layer Security |
+| JSON | JavaScript Object Notation |
+| LRU | Least recently used (cache eviction) |
+| MSAA | Multisample anti-aliasing |
+| RAII | Resource acquisition is initialisation (C++ ownership idiom) |
+| RNG | Random number generator |
+| SDL | Simple DirectMedia Layer (SDL3: joysticks and gamepads) |
+| SQL | Structured Query Language |
+| URL | Uniform resource locator |
+| VAO | Vertex array object (OpenGL) |
+| WAL | Write-ahead logging (SQLite journal mode) |
+
+### A.6 Organisations, data sources and licences
+
+| Acronym | Meaning |
+|---------|---------|
+| ADC / CDS | NASA Astronomical Data Center / Centre de Données astronomiques de Strasbourg |
+| ASPRS | American Society for Photogrammetry and Remote Sensing |
+| BGS | British Geological Survey |
+| BSD / MIT | Permissive software licences |
+| CC0 / CC BY / CC BY-SA / CC BY-NC | Creative Commons licences (public-domain dedication / attribution / share-alike / non-commercial) |
+| GPL / LGPL | GNU (Lesser) General Public License |
+| IMCCE | Institut de Mécanique Céleste et de Calcul des Éphémérides |
+| JPL | NASA Jet Propulsion Laboratory (Horizons ephemerides) |
+| LRO / LROC | Lunar Reconnaissance Orbiter / its camera |
+| NASA | National Aeronautics and Space Administration |
+| NCEI / NOAA | National Centers for Environmental Information / National Oceanic and Atmospheric Administration |
+| NREL | National Renewable Energy Laboratory |
+| OFL | SIL Open Font License |
+| REUSE | FSFE specification for licence information in every file |
+| SPDX | Software Package Data Exchange (licence identifiers) |
+| USGS / 3DEP | U.S. Geological Survey / its 3D Elevation Program |
+| USNO | U.S. Naval Observatory |
