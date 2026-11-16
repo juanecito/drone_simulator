@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "first-flight",
+  "title": "First flight",
+  "briefing": "A calm summer morning over flat farmland. Take off from the pad, climb to 10 m, fly to the beacon 60 m north of you and come back to land on the pad. Take your time: there is no time limit.",
+  "difficulty": 1,
+  "order": 0,
+  "terrain": {
+    "source": "procedural",
+    "seed": 20260601,
+    "preset": "flatlands",
+    "origin": { "geo": [40.4168, -3.7038, 0], "altRef": "AGL" },
+    "extent": { "widthM": 2000, "lengthM": 2000 }
+  },
+  "environment": {
+    "utc": "2026-06-21T08:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": { "seed": 1, "preset": "clear", "temperatureC": 20,
+                 "wind": { "level": 1, "fromDeg": 270 } }
+  },
+  "vehicle": { "type": "aerial", "profile": "camera-250g", "allowProfileChange": true },
+  "spawn": { "local": [0, 0, 0], "headingDeg": 0 },
+  "rules": { "allowKeyboard": true, "showMarkers": true },
+  "items": [
+    { "type": "landingPad", "id": "home-pad", "name": "Home pad", "local": [0, 0, 0], "radiusM": 1.5 },
+    { "type": "waypoint", "id": "beacon", "name": "Beacon", "local": [0, 10, -60], "radiusM": 3 }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    { "id": "takeoff", "type": "reachAltitude", "title": "Climb to 10 m", "altitudeAglM": 10 },
+    { "id": "reach-beacon", "type": "reachWaypoint", "title": "Fly to the beacon", "target": "beacon" },
+    { "id": "land", "type": "land", "title": "Land on the home pad", "target": "home-pad",
+      "maxErrorM": 1.0 }
+  ],
+  "scoring": { "stars": [ { "maxTimeS": 120 }, { "maxTimeS": 60 } ] }
+}

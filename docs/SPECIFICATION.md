@@ -208,6 +208,7 @@ drone_simulator/
 │   ├── environment/        # wind_levels.json, weather_presets.json
 │   ├── sky/                # star catalogue (BSC5), moon textures, ΔT table
 │   ├── missions/           # built-in mission pack (*.mission.json) + mission.schema.json
+│   ├── default-missions/   # missions copied into the user's mission folder (FR-MIS-01b)
 │   └── providers/          # built-in data-provider presets (JSON)
 ├── src/
 │   ├── app/                # Qt6 GUI (executable: drone_simulator)
@@ -843,6 +844,10 @@ constraints, detect failure, score the attempt, and report results.
   missions in `$HOME/.drone_simulation/missions/` (scanned at startup). A mission is either a
   single `.mission.json` file or a **folder** with the JSON plus its `dem/` files; *Import
   mission* copies the file or the whole folder there.
+- **Default mission:** at every start the application makes sure the user's mission folder
+  holds the **default mission** *First flight* (`first-flight.mission.json`, shipped in
+  `/opt/drone_simulator/share/default-missions/`), so the list of available missions is never
+  empty and new users have a ready-made example to fly and to copy (FR-MIS-01b).
 - **Units and coordinates:** SI units; positions as `geo` `[lat, lon, alt]` with `altRef`
   (`AGL`/`AMSL`), as `utm` `{zone, easting, northing, alt}`, or as `local` metres from the
   terrain origin in the engine frame (`[x east, y up, z south]`).
@@ -927,6 +932,7 @@ The full reference of every field, objective, failure and scoring option is in
 |----|-------------|-----|
 | FR-MIS-01 | Missions are loaded **only from JSON files** (§4.9.1): the built-in pack and the user's mission folder. Each file is validated against `mission.schema.json`, then semantically (references between ids, objectives allowed for the vehicle type, positions inside the terrain extent, reachable thresholds). Errors give the file, JSON path and a readable message (e.g. `objectives[1].target: unknown item "pad2"`); an invalid file never crashes the app and is listed as invalid. | M |
 | FR-MIS-01a | *Reload missions* rescans the folders; changed files are picked up (file hash). Automatic reload when a file changes on disk (S). | M / S |
+| FR-MIS-01b | **Default mission.** At start-up, before the folders are scanned, every mission of `share/default-missions/` is copied into `$HOME/.drone_simulation/missions/` (folder created with mode `0700`, file `0600`) **unless** a file of that name already exists there or a user mission already has that `id`. Existing files are never overwritten (the user's edits are kept); a deleted default mission is installed again at the next start. The default mission is then listed with the user's missions (origin *user*, outside the campaign, so always unlocked). v1.0 ships one: **`first-flight`** — aerial, procedural flat farmland (`flatlands` preset), clear summer morning, light wind, sub-250 g camera drone, keyboard allowed, no time limit; objectives in order: climb to 10 m, reach a beacon 60 m north at 10 m AGL, land on the home pad (≤ 1 m from its centre); stars for finishing in ≤ 120 s and ≤ 60 s. If the folder cannot be written the application still starts, with the built-in missions only. | M |
 | FR-MIS-02 | A mission defines its own terrain inline: **procedural** (seed + parameters, optionally starting from a built-in preset), **online** (elevation/imagery provider keys, origin) or **file** (elevation files in the mission folder or geodata library, §4.5.4), optionally with **orthophoto files** (§4.5.5), with optional dimensions (`terrain.extent`, FR-TER-04a). Online terrain must be fully cached before PreFlight (download offered in the briefing). If the provider is unavailable or not configured (e.g. missing API key), the area isn't covered, or the elevation file is missing, invalid or doesn't match its `sha256`, the mission is listed as unavailable with the reason. | M |
 | FR-MIS-03 | Item positions given in local metres **or** geographic coordinates (lat/lon + AGL/AMSL), converted via `core/geo`. | M |
 | FR-MIS-03a | Every mission declares its **vehicle type** (`aerial` or `ground`); the validator rejects objectives and rules that don't apply to that type. The mission list shows the vehicle type. | M |
@@ -1371,7 +1377,7 @@ used because it is needed for keyboard focus navigation).
 | `ds_items` | static lib | ds_common |
 | `ds_input` | static lib | ds_common, SDL3::SDL3 |
 | `ds_physics` | static lib | ds_common, ds_geo, ds_terrain, ds_items |
-| `ds_missions` | static lib | ds_common, ds_geo, ds_items, ds_physics, nlohmann_json_schema_validator |
+| `ds_missions` | static lib | ds_common (incl. its JSON Schema validator), ds_geo, ds_astro, ds_terrain, ds_items, ds_physics |
 | `ds_graphics` | static lib | ds_common, ds_geo, ds_astro, glad, OpenGL::GL |
 | `ds_sim` | static lib | all of the above (Qt only transitively via ds_storage) |
 | `drone_simulator` | executable | ds_sim, Qt6::Widgets, Qt6::OpenGLWidgets |
@@ -1654,6 +1660,10 @@ so Markdown pages appear in the generated site.
   just before contact. **Return home** needs the vehicle to have left the home radius first.
 - **Stars:** success gives the first star; `scoring.stars` holds at most two thresholds, for
   the second and third star. Score formulas are documented in `docs/MISSIONS.md`.
+- **Default mission (FR-MIS-01b, done):** `assets/default-missions/first-flight.mission.json`
+  is copied into the user's mission folder at start-up if it is missing; the built-in and user
+  folders are then scanned and the mission index in the database is synchronised (a file
+  whose id is already taken keeps no row). The Missions tab will list it from that index.
 - **Next steps:** built-in mission pack (≥ 10 aerial; the 4 ground missions need M6; the 3
   real-terrain missions need the GDAL raster source of M4), mission index sync at start-up,
   Missions tab, briefing / debrief dialogs, mission rules in the simulation (time scale,

@@ -27,4 +27,7 @@ ds_add_integration_test(ds_gui_tests FORCE_OFFSCREEN SOURCES main_window_test.cp
 ds_add_integration_test(ds_gl_tests SOURCES opengl_test.cpp scene_render_test.cpp)
 target_link_libraries(ds_gl_tests PRIVATE ds::terrain ds::astro)
 target_compile_definitions(ds_gl_tests PRIVATE DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
-ds_add_integration_test(ds_storage_integration_tests FORCE_OFFSCREEN SOURCES storage_files_test.cpp)
+ds_add_integration_test(ds_storage_integration_tests FORCE_OFFSCREEN SOURCES storage_files_test.cpp
+    mission_library_test.cpp)
+target_compile_definitions(ds_storage_integration_tests PRIVATE
+    DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")

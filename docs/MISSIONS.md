@@ -19,6 +19,12 @@ terrain, time and weather, vehicle, rules, items, objectives, scheduled failures
   `~/.drone_simulation/missions/`. A mission is either a single `.mission.json` file, or a
   folder with exactly one `.mission.json` at its top plus its data (`dem/`, `ortho/`). Each
   mission `id` must be unique; a user mission cannot reuse the id of a built-in one.
+- **Default mission:** at every start the application makes sure your mission folder holds
+  *First flight* ([`assets/default-missions/first-flight.mission.json`](../assets/default-missions/first-flight.mission.json)):
+  take off, climb to 10 m, fly to a beacon 60 m north and land back on the pad. It is copied
+  only when no file of that name and no mission with the id `first-flight` exists, so your
+  edits are kept; if you delete it, it comes back at the next start. It is a good starting
+  point for your own missions — copy it under a new file name and change its `id`.
 - **Import mission** copies a file, or a whole mission folder (symbolic links are not copied),
   into `~/.drone_simulation/missions/`.
 
@@ -188,7 +194,11 @@ stored per user in the database; it survives when a mission file disappears.
 
 ## Examples
 
-The two examples of SPECIFICATION §4.9.1 are kept as test fixtures and pass validation:
+The two examples of SPECIFICATION §4.9.1 are kept as test fixtures and pass validation, and
+the default mission is the simplest complete mission:
+
+- [`assets/default-missions/first-flight.mission.json`](../assets/default-missions/first-flight.mission.json)
+  — aerial, procedural terrain, take-off, waypoint and landing in sequence.
 
 - [`tests/fixtures/missions/precision-landing-01.mission.json`](../tests/fixtures/missions/precision-landing-01.mission.json)
   — aerial, online terrain, precision landing with a scheduled GPS drift.

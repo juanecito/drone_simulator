@@ -9,8 +9,10 @@
 #include <string>
 #include <vector>
 
+#include "ds/app/asset_paths.hpp"
 #include "ds/app/command_line.hpp"
 #include "ds/app/main_window.hpp"
+#include "ds/app/mission_library.hpp"
 #include "ds/app/mission_validation.hpp"
 #include "ds/app/opengl_check.hpp"
 #include "ds/app/settings_controller.hpp"
@@ -126,6 +128,22 @@ int main(int argc, char* argv[]) {
                              QString::fromStdString(storage->warning));
     }
     ds::app::SettingsController settings(*storage->service);
+
+    // FR-MIS-01/01b: the list of available missions — built-in pack plus the user's folder,
+    // where the default mission is installed if it is missing — indexed in the database.
+    ds::app::MissionFolders missionFolders{.assetDir = ds::app::findAssetDirectory(),
+                                           .userDir = {},
+                                           .libraryDir = {}};
+    if (const auto dataDir = ds::storage::prepareDataDirectory(ds::storage::homeDirectory())) {
+        missionFolders.userDir = *dataDir / "missions";
+        missionFolders.libraryDir = *dataDir / "library";
+    } else {
+        ds::log::warn("No user missions: {}", dataDir.error().message);
+    }
+    const auto missionLibrary = ds::app::loadMissionLibrary(missionFolders, storage->service.get());
+    if (!missionLibrary) {
+        ds::log::error("Cannot load the missions: {}", missionLibrary.error().message);
+    }
 
     ds::app::MainWindow window(&settings);
     QObject::connect(&window, &ds::app::MainWindow::fatalError, &app,
