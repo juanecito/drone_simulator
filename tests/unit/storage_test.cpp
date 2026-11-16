@@ -10,6 +10,7 @@
 #include <future>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "ds/storage/connection.hpp"
 #include "ds/storage/input_profile_store.hpp"
 #include "ds/storage/migrations.hpp"
+#include "ds/storage/mission_store.hpp"
 #include "ds/storage/provider_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/settings_store.hpp"
@@ -608,6 +610,113 @@ TEST(StorageAdapters, LedgerAndCacheIndexThroughServices) {
     EXPECT_EQ(index.list("")->size(), 1U);
     ASSERT_TRUE(index.remove("ot", "k"));
     EXPECT_FALSE(*index.find("ot", "k"));
+}
+
+
+// --- Missions (FR-MIS-01a, FR-MIS-12, FR-DB-09) -------------------------------------------------
+
+MissionIndexRecord missionRow(const char* key, const char* origin = "builtin") {
+    MissionIndexRecord r;
+    r.missionKey = key;
+    r.title = std::string("Mission ") + key;
+    r.origin = origin;
+    r.chapter = "basics";
+    r.filePath = std::string("/missions/") + key + ".mission.json";
+    r.fileSha256 = std::string(64, 'a');
+    return r;
+}
+
+MissionAttemptRecord attempt(const char* key, const char* outcome, int stars, double score,
+                             double duration) {
+    MissionAttemptRecord a;
+    a.missionKey = key;
+    a.startedAt = "2026-06-21T10:00:00Z";
+    a.outcome = outcome;
+    a.stars = stars;
+    a.score = score;
+    a.durationS = duration;
+    a.resultsJson = R"({"objectives": []})";
+    return a;
+}
+
+TEST(StorageMissions, SyncKeepsProgressOfMissingMissions) {
+    DbConnection db = migratedDb();
+    MissionStore store(db);
+    ASSERT_TRUE(store.sync("builtin", {missionRow("m1"), missionRow("m2")}));
+    ASSERT_TRUE(store.recordAttempt(attempt("m2", "succeeded", 2, 1500.0, 80.0)));
+    ASSERT_TRUE(store.recordAttempt(attempt("m2", "succeeded", 3, 1800.0, 60.0)));
+    ASSERT_TRUE(store.recordAttempt(attempt("m2", "failed", 0, 300.0, 20.0)));
+    // m2's file disappears: the row stays (missing) with its progress.
+    auto changed = missionRow("m1");
+    changed.title = "Renamed";
+    changed.fileSha256 = std::string(64, 'b');
+    ASSERT_TRUE(store.sync("builtin", {changed}));
+    const auto list = store.list();
+    ASSERT_TRUE(list) << list.error().message;
+    ASSERT_EQ(list->size(), 2U);
+    EXPECT_EQ((*list)[0].mission.title, "Renamed");
+    EXPECT_EQ((*list)[0].mission.status, "valid");
+    EXPECT_EQ((*list)[0].progress.attempts, 0);
+    EXPECT_FALSE((*list)[0].progress.bestTimeS);
+    EXPECT_EQ((*list)[1].mission.status, "missing");
+    EXPECT_EQ((*list)[1].progress.attempts, 3);
+    EXPECT_EQ((*list)[1].progress.successes, 2);
+    EXPECT_EQ((*list)[1].progress.bestStars, 3);
+    EXPECT_DOUBLE_EQ((*list)[1].progress.bestScore, 1800.0);
+    EXPECT_DOUBLE_EQ(*(*list)[1].progress.bestTimeS, 60.0);
+    // User missions are synchronised separately and do not mark built-in ones missing.
+    ASSERT_TRUE(store.sync("user", {missionRow("u1", "user")}));
+    EXPECT_EQ((*store.find("m1"))->mission.status, "valid");
+    EXPECT_FALSE(store.sync("user", {missionRow("m3", "builtin")}));
+}
+
+TEST(StorageMissions, InvalidMissionsKeepTheirErrors) {
+    DbConnection db = migratedDb();
+    MissionStore store(db);
+    auto bad = missionRow("bad", "user");
+    bad.status = "invalid";
+    bad.validationErrorsJson = R"(["objectives[1].target: unknown item \"pad2\""])";
+    ASSERT_TRUE(store.upsert(bad));
+    const auto found = store.find("bad");
+    ASSERT_TRUE(found && *found);
+    EXPECT_EQ((*found)->mission, bad);
+    EXPECT_FALSE(store.find("nope").value());
+    bad.validationErrorsJson = "not json";
+    EXPECT_FALSE(store.upsert(bad));
+    bad.validationErrorsJson.clear();
+    bad.status = "broken";
+    EXPECT_FALSE(store.upsert(bad));
+}
+
+TEST(StorageMissions, AttemptsBestAndValidation) {
+    DbConnection db = migratedDb();
+    MissionStore store(db);
+    ASSERT_TRUE(store.upsert(missionRow("m1")));
+    ASSERT_TRUE(store.upsert(missionRow("m2")));
+    auto a = attempt("m1", "succeeded", 2, 1500.0, 80.0);
+    a.terrainDataHash = std::string(64, 'c');
+    const auto id = store.recordAttempt(a);
+    ASSERT_TRUE(id) << id.error().message;
+    ASSERT_TRUE(store.recordAttempt(attempt("m1", "succeeded", 2, 1600.0, 90.0)));
+    ASSERT_TRUE(store.recordAttempt(attempt("m2", "aborted", 0, 0.0, 5.0)));
+    const auto all = store.attempts();
+    ASSERT_TRUE(all);
+    EXPECT_EQ(all->size(), 3U);
+    const auto m1 = store.attempts("m1");
+    ASSERT_EQ(m1->size(), 2U);
+    EXPECT_EQ(m1->back().id, *id);
+    EXPECT_EQ(m1->back().terrainDataHash, a.terrainDataHash);
+    const auto best = store.bestAttempt("m1");
+    ASSERT_TRUE(best && *best);
+    EXPECT_DOUBLE_EQ((*best)->score, 1600.0);
+    EXPECT_FALSE(store.recordAttempt(attempt("unknown", "failed", 0, 0.0, 1.0)));
+    EXPECT_FALSE(store.recordAttempt(attempt("m1", "failed", 2, 0.0, 1.0)));  // Stars need success.
+    EXPECT_FALSE(store.recordAttempt(attempt("m1", "won", 0, 0.0, 1.0)));
+    auto badJson = attempt("m1", "failed", 0, 0.0, 1.0);
+    badJson.resultsJson = "[]";
+    EXPECT_FALSE(store.recordAttempt(badJson));
+    EXPECT_EQ(store.clearAttempts().value(), 3);
+    EXPECT_FALSE(store.bestAttempt("m1").value());
 }
 
 }  // namespace

@@ -11,6 +11,7 @@ ds_add_core_module(storage
         data_location.cpp
         input_profile_store.cpp
         migrations.cpp
+        mission_store.cpp
         module.cpp
         provider_store.cpp
         schema.cpp

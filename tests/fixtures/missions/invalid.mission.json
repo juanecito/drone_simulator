@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "id": "invalid-01",
+  "title": "Precision landing in crosswind",
+  "briefing": "Take off from the yard, fly to the rooftop pad and land within 0.5 m.",
+  "difficulty": 2,
+  "chapter": "basics",
+  "terrain": {
+    "source": "online",
+    "elevationProvider": "opentopography",
+    "dataset": "COP30",
+    "imageryProvider": null,
+    "origin": {
+      "geo": [
+        46.51,
+        7.98,
+        0
+      ],
+      "altRef": "AGL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 2000
+    }
+  },
+  "environment": {
+    "utc": "2026-06-21T09:30:00Z",
+    "timeZone": "Europe/Zurich",
+    "weather": {
+      "seed": 1201,
+      "preset": "scattered-clouds",
+      "temperatureC": 18,
+      "wind": {
+        "level": 4,
+        "fromDeg": 270
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": false
+  },
+  "spawn": {
+    "geo": [
+      46.5098,
+      7.9795,
+      0
+    ],
+    "altRef": "AGL",
+    "headingDeg": 90
+  },
+  "rules": {
+    "allowKeyboard": false,
+    "showMarkers": true,
+    "maxAltitudeAglM": 120,
+    "vlos": {
+      "maxDistanceM": 500,
+      "maxHiddenS": 5
+    },
+    "timeLimitS": 300,
+    "minBatteryPct": 15
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "geo": [
+        46.5123,
+        7.9811,
+        2.0
+      ],
+      "altRef": "AGL"
+    }
+  ],
+  "objectives": [
+    {
+      "id": "takeoff",
+      "type": "reachAltitude",
+      "altitudeAglM": 10
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad2",
+      "maxErrorM": 0.5,
+      "maxTouchdownSpeedMs": 0.7,
+      "after": [
+        "takeoff"
+      ]
+    }
+  ],
+  "failures": [
+    {
+      "atS": 90,
+      "type": "gpsDrift",
+      "magnitudeM": 3
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 240
+      },
+      {
+        "maxTimeS": 150,
+        "maxErrorM": 0.3
+      }
+    ]
+  }
+}

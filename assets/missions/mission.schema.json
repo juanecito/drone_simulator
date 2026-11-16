@@ -1,0 +1,2071 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:drone-simulator:mission:1",
+  "title": "Drone Simulator mission",
+  "description": "One mission of the Drone Simulator (SPECIFICATION §4.9.1, docs/MISSIONS.md). Unknown properties are errors, except extension fields whose name starts with \"x-\".",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "terrain",
+    "environment",
+    "vehicle",
+    "spawn",
+    "objectives"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "title": {
+      "$ref": "#/$defs/text",
+      "maxLength": 120
+    },
+    "briefing": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "difficulty": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "chapter": {
+      "$ref": "#/$defs/id"
+    },
+    "order": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "unlock": {
+      "type": "object",
+      "properties": {
+        "requires": {
+          "$ref": "#/$defs/idList",
+          "minItems": 1
+        },
+        "minStars": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "requires"
+      ]
+    },
+    "terrain": {
+      "$ref": "#/$defs/terrain"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "vehicle": {
+      "$ref": "#/$defs/vehicle"
+    },
+    "spawn": {
+      "$ref": "#/$defs/spawn"
+    },
+    "rules": {
+      "$ref": "#/$defs/rules"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "objectiveOrder": {
+      "enum": [
+        "parallel",
+        "sequential"
+      ]
+    },
+    "objectives": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/objective"
+      }
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    },
+    "scoring": {
+      "type": "object",
+      "properties": {
+        "stars": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/star"
+          },
+          "description": "Thresholds for the 2nd and the 3rd star; completing the mission gives the 1st."
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x-": true
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+      "description": "Identifier: lower-case letters, digits, '.', '_' and '-', at most 64 characters."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "altRef": {
+      "enum": [
+        "AGL",
+        "AMSL"
+      ],
+      "description": "Altitude reference: above the terrain (default) or above mean sea level."
+    },
+    "geo": {
+      "type": "array",
+      "description": "[latitude °, longitude °, altitude m] (WGS84).",
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        {
+          "type": "number",
+          "minimum": -500,
+          "maximum": 9000
+        }
+      ],
+      "items": false,
+      "minItems": 3
+    },
+    "local": {
+      "type": "array",
+      "description": "[x east, y up, z south] metres from the terrain origin (engine frame); y is measured from altRef.",
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -200000,
+          "maximum": 200000
+        },
+        {
+          "type": "number",
+          "minimum": -500,
+          "maximum": 9000
+        },
+        {
+          "type": "number",
+          "minimum": -200000,
+          "maximum": 200000
+        }
+      ],
+      "items": false,
+      "minItems": 3
+    },
+    "utm": {
+      "type": "object",
+      "properties": {
+        "zone": {
+          "type": "string",
+          "pattern": "^([1-9]|[1-5][0-9]|60)[C-HJ-NP-X]$",
+          "description": "Zone number and latitude band, e.g. \"32T\"."
+        },
+        "easting": {
+          "type": "number",
+          "minimum": 100000,
+          "maximum": 900000
+        },
+        "northing": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "alt": {
+          "type": "number",
+          "minimum": -500,
+          "maximum": 9000
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "zone",
+        "easting",
+        "northing",
+        "alt"
+      ]
+    },
+    "heading": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 360,
+      "description": "Heading in degrees, clockwise from true north."
+    },
+    "extent": {
+      "type": "object",
+      "properties": {
+        "widthM": {
+          "type": "number",
+          "minimum": 256,
+          "maximum": 200000
+        },
+        "lengthM": {
+          "type": "number",
+          "minimum": 256,
+          "maximum": 200000
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "widthM",
+        "lengthM"
+      ],
+      "description": "Bounded terrain centred on the origin (FR-TER-04a)."
+    },
+    "origin": {
+      "type": "object",
+      "properties": {
+        "geo": {
+          "$ref": "#/$defs/geo"
+        },
+        "altRef": {
+          "$ref": "#/$defs/altRef"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "geo"
+      ],
+      "description": "Geographic origin of the terrain."
+    },
+    "fileRef": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "idList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "uniqueItems": true
+    },
+    "polygon": {
+      "type": "array",
+      "description": "Outline as [x, z] offsets in metres from the item position (engine frame: x east, z south).",
+      "minItems": 3,
+      "maxItems": 256,
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "number",
+            "minimum": -200000,
+            "maximum": 200000
+          },
+          {
+            "type": "number",
+            "minimum": -200000,
+            "maximum": 200000
+          }
+        ],
+        "items": false,
+        "minItems": 2
+      }
+    },
+    "procParams": {
+      "type": "object",
+      "properties": {
+        "octaves": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "featureSizeM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "lacunarity": {
+          "type": "number",
+          "minimum": 1.5,
+          "maximum": 4
+        },
+        "persistence": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.95
+        },
+        "amplitudeM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8000
+        },
+        "baseHeightM": {
+          "type": "number",
+          "minimum": -9000,
+          "maximum": 9000
+        },
+        "mountains": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "warp": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "erosion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "edge": {
+          "enum": [
+            "cliff",
+            "fade",
+            "water"
+          ]
+        },
+        "waterLevelM": {
+          "type": "number",
+          "minimum": -9000,
+          "maximum": 9000
+        },
+        "snowLineM": {
+          "type": "number",
+          "minimum": -9000,
+          "maximum": 9000
+        },
+        "flatZones": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              },
+              "radiusM": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "blendM": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "patternProperties": {
+              "^x-": true
+            },
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "z",
+              "radiusM"
+            ]
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "description": "Overrides of the procedural parameters (SPECIFICATION §4.5.2, §4.10 scene.terrain params)."
+    },
+    "terrain": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "procedural",
+            "online",
+            "file"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "procedural"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/terrainProcedural"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "online"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/terrainOnline"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/terrainFile"
+          }
+        }
+      ]
+    },
+    "terrainProcedural": {
+      "type": "object",
+      "properties": {
+        "source": {},
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "extent": {
+          "$ref": "#/$defs/extent"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Noise seed."
+        },
+        "preset": {
+          "type": "string",
+          "description": "Built-in preset to start from, e.g. \"rolling-hills\"."
+        },
+        "params": {
+          "$ref": "#/$defs/procParams"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "seed"
+      ]
+    },
+    "terrainOnline": {
+      "type": "object",
+      "properties": {
+        "source": {},
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "extent": {
+          "$ref": "#/$defs/extent"
+        },
+        "elevationProvider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider dataset, e.g. \"COP30\"."
+        },
+        "imageryProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxResolutionM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "elevationProvider",
+        "origin"
+      ]
+    },
+    "terrainFile": {
+      "type": "object",
+      "properties": {
+        "source": {},
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "extent": {
+          "$ref": "#/$defs/extent"
+        },
+        "format": {
+          "enum": [
+            "raster",
+            "las",
+            "laz"
+          ]
+        },
+        "elevationFiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "items": {
+            "$ref": "#/$defs/fileRef"
+          }
+        },
+        "crs": {
+          "type": "string"
+        },
+        "verticalDatum": {
+          "type": "string"
+        },
+        "attribution": {
+          "type": "string"
+        },
+        "band": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "surface": {
+          "enum": [
+            "dtm",
+            "dsm"
+          ]
+        },
+        "resolutionM": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 100
+        },
+        "interpolation": {
+          "enum": [
+            "tin",
+            "idw",
+            "max"
+          ]
+        },
+        "classifyGround": {
+          "type": "boolean"
+        },
+        "orthophotoFiles": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/fileRef"
+          }
+        },
+        "orthophotoCrs": {
+          "type": "string"
+        },
+        "orthophotoAttribution": {
+          "type": "string"
+        },
+        "orthophotoBands": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "elevationFiles"
+      ]
+    },
+    "wind": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Wind level 0–10 (Beaufort-based, §4.2.1)."
+        },
+        "fromDeg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360,
+          "description": "Direction the wind blows from."
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false
+    },
+    "cloudLayer": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "cumulus",
+            "stratocumulus",
+            "stratus",
+            "cirrus",
+            "cumulonimbus"
+          ]
+        },
+        "coverOktas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "baseM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "topM": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20000
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "coverOktas",
+        "baseM"
+      ]
+    },
+    "precipitation": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "none",
+            "drizzle",
+            "rain",
+            "snow",
+            "sleet"
+          ]
+        },
+        "intensity": {
+          "enum": [
+            "light",
+            "moderate",
+            "heavy"
+          ]
+        },
+        "rateMmH": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ]
+    },
+    "weatherChange": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "enum": [
+            "clear",
+            "few-clouds",
+            "scattered-clouds",
+            "broken-clouds",
+            "overcast",
+            "mist",
+            "fog",
+            "drizzle",
+            "light-rain",
+            "heavy-rain",
+            "light-snow",
+            "heavy-snow",
+            "thunderstorm"
+          ]
+        },
+        "temperatureC": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 60
+        },
+        "humidityPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "dewPointC": {
+          "type": "number",
+          "minimum": -80,
+          "maximum": 60
+        },
+        "pressureHpa": {
+          "type": "number",
+          "minimum": 850,
+          "maximum": 1100
+        },
+        "wind": {
+          "$ref": "#/$defs/wind"
+        },
+        "clouds": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/cloudLayer"
+          }
+        },
+        "precipitation": {
+          "$ref": "#/$defs/precipitation"
+        },
+        "visibilityM": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 100000
+        },
+        "fog": {
+          "type": "object",
+          "properties": {
+            "topM": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2000
+            },
+            "haze": {
+              "type": "boolean"
+            }
+          },
+          "patternProperties": {
+            "^x-": true
+          },
+          "additionalProperties": false
+        },
+        "atS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "transitionS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "atS"
+      ]
+    },
+    "weather": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "enum": [
+            "clear",
+            "few-clouds",
+            "scattered-clouds",
+            "broken-clouds",
+            "overcast",
+            "mist",
+            "fog",
+            "drizzle",
+            "light-rain",
+            "heavy-rain",
+            "light-snow",
+            "heavy-snow",
+            "thunderstorm"
+          ]
+        },
+        "temperatureC": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 60
+        },
+        "humidityPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "dewPointC": {
+          "type": "number",
+          "minimum": -80,
+          "maximum": 60
+        },
+        "pressureHpa": {
+          "type": "number",
+          "minimum": 850,
+          "maximum": 1100
+        },
+        "wind": {
+          "$ref": "#/$defs/wind"
+        },
+        "clouds": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/cloudLayer"
+          }
+        },
+        "precipitation": {
+          "$ref": "#/$defs/precipitation"
+        },
+        "visibilityM": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 100000
+        },
+        "fog": {
+          "type": "object",
+          "properties": {
+            "topM": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2000
+            },
+            "haze": {
+              "type": "boolean"
+            }
+          },
+          "patternProperties": {
+            "^x-": true
+          },
+          "additionalProperties": false
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/weatherChange"
+          }
+        },
+        "forecast": {
+          "type": "boolean"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "seed",
+        "preset"
+      ],
+      "description": "Seeded weather generator settings (§4.2.3)."
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]+)?)?Z$",
+          "description": "Mission start, ISO 8601 UTC."
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IANA time zone used for display, e.g. \"Europe/Madrid\"."
+        },
+        "lightPollution": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "weather": {
+          "$ref": "#/$defs/weather"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "utc"
+      ]
+    },
+    "vehicle": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "aerial",
+            "ground"
+          ]
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key of a built-in vehicle profile."
+        },
+        "customProfile": {
+          "type": "object",
+          "description": "Full embedded vehicle profile (same format as assets/vehicles)."
+        },
+        "allowProfileChange": {
+          "type": "boolean"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ]
+    },
+    "spawn": {
+      "type": "object",
+      "properties": {
+        "geo": {
+          "$ref": "#/$defs/geo"
+        },
+        "utm": {
+          "$ref": "#/$defs/utm"
+        },
+        "local": {
+          "$ref": "#/$defs/local"
+        },
+        "altRef": {
+          "$ref": "#/$defs/altRef"
+        },
+        "headingDeg": {
+          "$ref": "#/$defs/heading"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "allowKeyboard": {
+          "type": "boolean"
+        },
+        "showMarkers": {
+          "type": "boolean"
+        },
+        "maxAltitudeAglM": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "description": "Height limit above the terrain; null removes it (default 120)."
+        },
+        "vlos": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxDistanceM": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "maxHiddenS": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "patternProperties": {
+            "^x-": true
+          },
+          "additionalProperties": false
+        },
+        "graceS": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "timeLimitS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minBatteryPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "maxStuckS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxCollisionSpeedMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requireLightsOn": {
+          "type": "boolean"
+        },
+        "daylightOnly": {
+          "type": "boolean"
+        },
+        "endAt": {
+          "enum": [
+            "sunset",
+            "sunrise"
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "geo": {
+          "$ref": "#/$defs/geo"
+        },
+        "utm": {
+          "$ref": "#/$defs/utm"
+        },
+        "local": {
+          "$ref": "#/$defs/local"
+        },
+        "altRef": {
+          "$ref": "#/$defs/altRef"
+        },
+        "type": {
+          "enum": [
+            "spawn",
+            "obstacle",
+            "gate",
+            "waypoint",
+            "landingPad",
+            "payload",
+            "pickupZone",
+            "dropZone",
+            "inspectionTarget",
+            "surveyArea",
+            "noFlyZone",
+            "geofence",
+            "pilot",
+            "parkingZone",
+            "ramp",
+            "bridge"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/text"
+        },
+        "headingDeg": {
+          "$ref": "#/$defs/heading"
+        },
+        "shape": {
+          "enum": [
+            "box",
+            "cylinder",
+            "tree",
+            "building",
+            "powerLine",
+            "windTurbine"
+          ]
+        },
+        "radiusM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "widthM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "heightM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "sizeM": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "[width, length] or [width, height, length] in metres."
+        },
+        "polygon": {
+          "$ref": "#/$defs/polygon"
+        },
+        "bottomM": {
+          "type": "number"
+        },
+        "topM": {
+          "type": "number"
+        },
+        "massKg": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ]
+    },
+    "objReachAltitude": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "altitudeAglM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "toleranceM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "holdS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "altitudeAglM"
+      ]
+    },
+    "objReachWaypoint": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "minAltitudeAglM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxAltitudeAglM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "position": {
+          "$ref": "#/$defs/objPosition"
+        },
+        "radiusM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "holdS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxSpeedMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type"
+      ]
+    },
+    "objHover": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "position": {
+          "$ref": "#/$defs/objPosition"
+        },
+        "altitudeAglM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "toleranceM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "altitudeToleranceM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "durationS"
+      ]
+    },
+    "objLand": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "maxErrorM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxTouchdownSpeedMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxHeadingErrorDeg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 180
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "target"
+      ]
+    },
+    "objGateCourse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "gates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "Gate ids in flying order; a gate may appear more than once."
+        },
+        "laps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "strictOrder": {
+          "type": "boolean"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "gates"
+      ]
+    },
+    "objDeliver": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "pickup": {
+          "$ref": "#/$defs/id"
+        },
+        "drop": {
+          "$ref": "#/$defs/id"
+        },
+        "cargoKg": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxDropSpeedMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "pickup",
+        "drop",
+        "cargoKg"
+      ]
+    },
+    "objInspect": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "maxDistanceM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxAngleDeg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 90
+        },
+        "durationS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "target"
+      ]
+    },
+    "objSurvey": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "minAltitudeAglM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxAltitudeAglM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "coveragePct": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "swathWidthM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "target"
+      ]
+    },
+    "objReturnHome": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "radiusM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type"
+      ]
+    },
+    "objPark": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "after": {
+          "$ref": "#/$defs/idList"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "bonus": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        },
+        "maxErrorM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxHeadingErrorDeg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 180
+        },
+        "maxSpeedMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "holdS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "target"
+      ]
+    },
+    "objPosition": {
+      "type": "object",
+      "properties": {
+        "geo": {
+          "$ref": "#/$defs/geo"
+        },
+        "utm": {
+          "$ref": "#/$defs/utm"
+        },
+        "local": {
+          "$ref": "#/$defs/local"
+        },
+        "altRef": {
+          "$ref": "#/$defs/altRef"
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "description": "A position without an item: exactly one of geo, utm, local."
+    },
+    "objective": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "reachAltitude",
+            "reachWaypoint",
+            "hover",
+            "land",
+            "gateCourse",
+            "deliver",
+            "inspect",
+            "survey",
+            "returnHome",
+            "park"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "reachAltitude"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objReachAltitude"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "reachWaypoint"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objReachWaypoint"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "hover"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objHover"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "land"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objLand"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "gateCourse"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objGateCourse"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "deliver"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objDeliver"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "inspect"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objInspect"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "survey"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objSurvey"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "returnHome"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objReturnHome"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "park"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/objPark"
+          }
+        }
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "properties": {
+        "atS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "type": {
+          "enum": [
+            "gpsDrift",
+            "gpsLoss",
+            "motorFailure",
+            "batteryDrop",
+            "compassError",
+            "rcLoss",
+            "baroDrift"
+          ]
+        },
+        "magnitudeM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "motor": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "efficiency": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "offsetDeg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "driftMs": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "atS",
+        "type"
+      ]
+    },
+    "star": {
+      "type": "object",
+      "properties": {
+        "maxTimeS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxErrorM": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minBatteryPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "minScore": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "patternProperties": {
+        "^x-": true
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    }
+  }
+}

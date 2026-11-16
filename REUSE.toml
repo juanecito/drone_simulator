@@ -19,6 +19,7 @@ path = [
     "assets/vehicles/**.json",
     "assets/environment/**.json",
     "assets/providers/**.json",
+    "assets/missions/**.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>"

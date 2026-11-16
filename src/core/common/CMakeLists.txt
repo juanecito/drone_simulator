@@ -6,6 +6,7 @@ configure_file(version.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/ds/common/vers
 ds_add_core_module(common
     SOURCES
         json.cpp
+        json_schema.cpp
         log.cpp
         module.cpp
         random.cpp

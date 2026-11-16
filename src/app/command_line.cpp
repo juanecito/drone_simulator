@@ -66,6 +66,15 @@ common::Result<CommandLine> parseCommandLine(std::span<const std::string> args, 
                 return common::makeError("option '--db' needs a non-empty path");
             }
             options.databaseFile = std::filesystem::path(std::string(*value));
+        } else if (name == "--validate-mission") {
+            const auto value = takeValue();
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            if (value->empty()) {
+                return common::makeError("option '--validate-mission' needs a file");
+            }
+            options.validateMissions.emplace_back(std::string(*value));
         } else if (inlineValue && mode == ParseMode::Strict) {
             return common::makeError(std::format("option '{}' does not take a value", name));
         } else if (inlineValue) {
@@ -101,6 +110,9 @@ std::string helpText() {
         "                           (always on in Debug builds).\n"
         "      --db <path>          Use this database file instead of\n"
         "                           ~/.drone_simulation/drone_simulation.db (for testing).\n"
+        "      --validate-mission <file>\n"
+        "                           Validate a .mission.json file, print its errors and\n"
+        "                           exit (0 = valid, 1 = invalid). May be repeated.\n"
         "\n"
         "Standard Qt options (for example -platform, -style) are also accepted.\n",
         common::kApplicationName, common::kVersion);

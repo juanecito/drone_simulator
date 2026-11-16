@@ -37,3 +37,33 @@ add_test(NAME cli.bad_log_level COMMAND drone_simulator --log-level loud)
 set_tests_properties(cli.bad_log_level PROPERTIES
     WILL_FAIL TRUE
     LABELS "integration;cli")
+
+# --- Mission validation (FR-MIS-16) --------------------------------------------------------
+add_test(NAME cli.validate_mission
+    COMMAND drone_simulator
+        --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/precision-landing-01.mission.json
+        --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/rover-delivery-01.mission.json)
+set_tests_properties(cli.validate_mission PROPERTIES
+    PASS_REGULAR_EXPRESSION "rover-delivery-01.mission.json: valid"
+    FAIL_REGULAR_EXPRESSION "invalid"
+    LABELS "integration;cli")
+
+add_test(NAME cli.validate_mission_invalid
+    COMMAND drone_simulator --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/invalid.mission.json)
+set_tests_properties(cli.validate_mission_invalid PROPERTIES
+    WILL_FAIL TRUE
+    LABELS "integration;cli")
+
+add_test(NAME cli.validate_mission_messages
+    COMMAND drone_simulator --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/invalid.mission.json)
+set_tests_properties(cli.validate_mission_messages PROPERTIES
+    PASS_REGULAR_EXPRESSION "objectives\\[1\\]\\.target: unknown item \"pad2\""
+    LABELS "integration;cli")
+
+# --- Generated documentation stays in sync with the mission schema ----------------------
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME docs.mission_reference
+        COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/scripts/docs/gen_mission_reference.py --check)
+    set_tests_properties(docs.mission_reference PROPERTIES LABELS "unit;docs")
+endif()

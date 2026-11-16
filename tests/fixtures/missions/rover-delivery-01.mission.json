@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "rover-delivery-01",
+  "title": "Hillside delivery",
+  "briefing": "Carry the sample case up the hill and park in the marked bay.",
+  "difficulty": 1,
+  "chapter": "ground-basics",
+  "terrain":  { "source": "procedural", "seed": 734211, "preset": "rolling-hills",
+                "extent": { "widthM": 1500, "lengthM": 1500 } },
+  "environment": { "utc": "2026-04-10T15:00:00Z",
+                   "weather": { "seed": 55, "preset": "overcast", "temperatureC": 12,
+                                "wind": { "level": 2, "fromDeg": 180 },
+                                "timeline": [ { "atS": 300, "transitionS": 90, "preset": "light-rain" } ] } },
+  "vehicle":  { "type": "ground", "profile": "rover-4wd-3kg" },
+  "spawn":    { "local": [0, 0, 0], "headingDeg": 0 },
+  "rules":    { "allowKeyboard": true, "timeLimitS": 600, "minBatteryPct": 10,
+                "maxStuckS": 20 },
+  "items": [
+    { "type": "pilot", "id": "pilot", "local": [200, 0, -260] },
+    { "type": "pickupZone", "id": "pickup", "local": [40, 0, -15],  "radiusM": 3 },
+    { "type": "parkingZone", "id": "bay", "local": [380, 0, -520], "sizeM": [2, 3], "headingDeg": 45 }
+  ],
+  "objectives": [
+    { "id": "load",  "type": "deliver", "pickup": "pickup", "cargoKg": 1.2, "drop": "bay" },
+    { "id": "park",  "type": "park", "target": "bay", "maxErrorM": 0.5,
+      "maxHeadingErrorDeg": 10, "after": ["load"] }
+  ],
+  "scoring":  { "stars": [ { "maxTimeS": 480 }, { "maxTimeS": 300, "maxErrorM": 0.25 } ] }
+}

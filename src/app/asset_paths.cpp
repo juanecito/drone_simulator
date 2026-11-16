@@ -28,10 +28,17 @@ std::filesystem::path findAssetDirectory() {
         }
         log::warn("DS_ASSETS_DIR={} has no shaders/ and sky/; ignoring it", env);
     }
+    // The executable's folder: from Qt once the application exists, otherwise from the
+    // kernel (command-line tools such as --validate-mission run without a QApplication).
+    std::filesystem::path binDir;
     if (QCoreApplication::instance() != nullptr) {
-        const std::filesystem::path installed =
-            std::filesystem::path(QCoreApplication::applicationDirPath().toStdString()) / ".." /
-            "share";
+        binDir = QCoreApplication::applicationDirPath().toStdString();
+    } else {
+        std::error_code ec;
+        binDir = std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
+    }
+    if (!binDir.empty()) {
+        const std::filesystem::path installed = binDir / ".." / "share";
         if (looksLikeAssets(installed)) {
             return installed.lexically_normal();
         }
