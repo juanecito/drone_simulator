@@ -20,6 +20,8 @@ add_library(ds_app_ui STATIC
     main_window.cpp
     mission_library.cpp
     mission_validation.cpp
+    missions_controller.cpp
+    missions_panel.cpp
     settings_controller.cpp
     settings_panel.cpp
     simulation_controller.cpp
@@ -38,6 +40,8 @@ add_library(ds_app_ui STATIC
     include/ds/app/main_window.hpp
     include/ds/app/mission_library.hpp
     include/ds/app/mission_validation.hpp
+    include/ds/app/missions_controller.hpp
+    include/ds/app/missions_panel.hpp
     include/ds/app/opengl_check.hpp
     include/ds/app/settings_controller.hpp
     include/ds/app/settings_panel.hpp

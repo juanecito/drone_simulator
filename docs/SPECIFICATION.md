@@ -1668,10 +1668,23 @@ so Markdown pages appear in the generated site.
 - **Default mission (FR-MIS-01b, done):** `assets/default-missions/first-flight.mission.json`
   is copied into the user's mission folder at start-up if it is missing; the built-in and user
   folders are then scanned and the mission index in the database is synchronised (a file
-  whose id is already taken keeps no row). The Missions tab will list it from that index.
+  whose id is already taken keeps no row).
+- **Missions tab (list, done):** missions grouped by campaign chapter (*Free missions* for
+  missions without a chapter, *Invalid missions* last), with columns *Mission*, *Type*
+  (aerial / ground — text instead of an icon for now), *Stars* (best, ★★☆), *Best* (fastest
+  success, `m:ss.s`) and *Status* (*Available*, *Locked* with the unlock condition in the
+  tooltip, *Unavailable* with the reason, *Invalid*); non-available rows are greyed. The
+  details pane below shows the briefing, objectives (numbered when sequential), conditions
+  (terrain, local start time, weather, vehicle), rules, star thresholds, the user's results,
+  warnings — or every error of an invalid file — and the file path. *Reload* (also
+  *Missions › Reload Missions*) rescans the folders (FR-MIS-01a); *Open Folder* opens the
+  user's mission folder in the file manager. The first available mission is selected and the
+  selection survives a reload. *Start Mission* is shown disabled until mission flight is
+  wired in; *Import mission* stays a disabled menu entry for now. The tab reads everything
+  through `MissionsController` (FR-UI-06).
 - **Next steps:** built-in mission pack (≥ 10 aerial; the 4 ground missions need M6; the 3
-  real-terrain missions need the GDAL raster source of M4), mission index sync at start-up,
-  Missions tab, briefing / debrief dialogs, mission rules in the simulation (time scale,
+  real-terrain missions need the GDAL raster source of M4), *Start*, *Import mission*,
+  briefing / debrief dialogs, mission rules in the simulation (time scale,
   cameras, keyboard, profile lock), item rendering and markers, payload mass in the flight
   model, HUD objective and rule-warning panel, and integration tests driving a real flight.
 

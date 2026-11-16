@@ -34,6 +34,17 @@ terrain, time and weather, vehicle, rules, items, objectives, scheduled failures
 - **Import mission** copies a file, or a whole mission folder (symbolic links are not copied),
   into `~/.drone_simulation/missions/`.
 
+## The Missions tab
+
+The **Missions** tab lists every mission found at start-up, grouped by campaign chapter:
+missions without a chapter under *Free missions*, files with errors under *Invalid missions*.
+Each row shows the vehicle type, your best stars and fastest time, and whether the mission is
+*Available*, *Locked* (hover over it to see what unlocks it), *Unavailable* (data missing,
+e.g. an elevation file) or *Invalid*. Selecting a mission shows its briefing, objectives,
+conditions, rules, star thresholds and your results — or, for an invalid file, every error
+with its JSON path. After adding or editing files press **Reload** (or *Missions › Reload
+Missions*); **Open Folder** opens your mission folder.
+
 ## Validating a mission
 
 ```sh

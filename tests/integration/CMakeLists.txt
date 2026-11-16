@@ -23,7 +23,8 @@ function(ds_add_integration_test target)
 endfunction()
 
 ds_add_integration_test(ds_gui_tests FORCE_OFFSCREEN SOURCES main_window_test.cpp settings_test.cpp
-    scene_panels_test.cpp simulation_panels_test.cpp)
+    scene_panels_test.cpp simulation_panels_test.cpp missions_panel_test.cpp)
+target_compile_definitions(ds_gui_tests PRIVATE DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 ds_add_integration_test(ds_gl_tests SOURCES opengl_test.cpp scene_render_test.cpp)
 target_link_libraries(ds_gl_tests PRIVATE ds::terrain ds::astro)
 target_compile_definitions(ds_gl_tests PRIVATE DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")

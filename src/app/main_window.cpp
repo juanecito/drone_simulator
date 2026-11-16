@@ -26,6 +26,8 @@
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/controls_panel.hpp"
 #include "ds/app/environment_panel.hpp"
+#include "ds/app/missions_controller.hpp"
+#include "ds/app/missions_panel.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/app/settings_panel.hpp"
@@ -63,12 +65,19 @@ QString fromView(std::string_view text) {
 
 }  // namespace
 
-MainWindow::MainWindow(SettingsController* settings, QWidget* parent)
-    : QMainWindow(parent), settings_(settings) {
+MainWindow::MainWindow(SettingsController* settings, MissionsController* missions,
+                       QWidget* parent)
+    : QMainWindow(parent), settings_(settings), missions_(missions) {
     setWindowTitle(fromView(common::kApplicationName));
     setObjectName(QStringLiteral("MainWindow"));
     resize(1280, 800);
     const std::filesystem::path assets = findAssetDirectory();
+    if (missions_ == nullptr) {
+        // Built-in missions only: no user folder is touched.
+        missions_ = new MissionsController(
+            MissionFolders{.assetDir = assets, .userDir = {}, .libraryDir = {}},
+            settings_ != nullptr ? &settings_->storage() : nullptr, this);
+    }
     scene_ = new SceneController(settings_, assets, this);
     const char* noJoysticks = std::getenv("DS_NO_JOYSTICKS");
     simulation_ = new SimulationController(*scene_, settings_, assets,
@@ -140,6 +149,12 @@ void MainWindow::createPanel() {
     tabs_->setObjectName(QStringLiteral("PanelTabs"));
     for (const auto& tab : kTabs) {
         const std::string_view title(tab.title);
+        if (title == "Missions") {
+            auto* panel = new MissionsPanel(*missions_);
+            panel->setObjectName(QStringLiteral("MissionsPanel"));
+            tabs_->addTab(panel, tr(tab.title));
+            continue;
+        }
         if (title == "Terrain") {
             auto* panel = new TerrainPanel(*scene_);
             panel->setObjectName(QStringLiteral("TerrainPanel"));
@@ -214,6 +229,12 @@ void MainWindow::createMenus() {
 
     // Placeholders: enabled as the corresponding milestones land.
     QMenu* missionsMenu = menuBar()->addMenu(tr("&Missions"));
+    missionsMenu->addAction(tr("&Show Missions"), this, [this] {
+        panelDock_->show();
+        tabs_->setCurrentIndex(0);  // Missions tab.
+    });
+    missionsMenu->addAction(tr("&Reload Missions"), missions_, &MissionsController::reload);
+    missionsMenu->addSeparator();
     missionsMenu->addAction(tr("&Import Mission…"))->setEnabled(false);
 
     // Function keys: letters are flight and camera keys in the viewport.

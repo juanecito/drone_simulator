@@ -12,7 +12,7 @@
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/command_line.hpp"
 #include "ds/app/main_window.hpp"
-#include "ds/app/mission_library.hpp"
+#include "ds/app/missions_controller.hpp"
 #include "ds/app/mission_validation.hpp"
 #include "ds/app/opengl_check.hpp"
 #include "ds/app/settings_controller.hpp"
@@ -140,12 +140,9 @@ int main(int argc, char* argv[]) {
     } else {
         ds::log::warn("No user missions: {}", dataDir.error().message);
     }
-    const auto missionLibrary = ds::app::loadMissionLibrary(missionFolders, storage->service.get());
-    if (!missionLibrary) {
-        ds::log::error("Cannot load the missions: {}", missionLibrary.error().message);
-    }
+    ds::app::MissionsController missions(missionFolders, storage->service.get());
 
-    ds::app::MainWindow window(&settings);
+    ds::app::MainWindow window(&settings, &missions);
     QObject::connect(&window, &ds::app::MainWindow::fatalError, &app,
                      [&window](const QString& message) {
                          showFatalError(&window, message);
