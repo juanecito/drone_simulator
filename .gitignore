@@ -25,3 +25,4 @@ compile_commands.json
 # Only local repository
 /biblio/*.pdf
 /CLAUDE.md
+.claude/
