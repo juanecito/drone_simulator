@@ -12,11 +12,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-bool isMissionFile(const fs::path& p) {
-    const std::string name = p.filename().string();
-    return name.size() > 13 && name.ends_with(".mission.json");
-}
-
 std::vector<fs::path> missionFilesIn(const fs::path& dir) {
     std::vector<fs::path> out;
     std::error_code ec;
@@ -36,10 +31,29 @@ std::string keyOf(const fs::path& file) {
         return (*j)["id"].get<std::string>();
     }
     std::string stem = file.filename().string();
-    return stem.substr(0, stem.size() - std::string_view(".mission.json").size());
+    const std::string_view suffix = stem.ends_with(".mission.json") ? ".mission.json" : ".json";
+    return stem.substr(0, stem.size() - suffix.size());
 }
 
 }  // namespace
+
+bool isMissionFile(const fs::path& file) {
+    const std::string name = file.filename().string();
+    if (name.starts_with('.') || name.ends_with(".schema.json")) {
+        return false;  // Hidden and editor temporary files, JSON schemas.
+    }
+    if (name.size() > 13 && name.ends_with(".mission.json")) {
+        return true;
+    }
+    if (name.size() <= 5 || !name.ends_with(".json")) {
+        return false;
+    }
+    const auto json = common::readJsonFile(file, kMaxMissionFileBytes);
+    if (!json) {
+        return true;  // Unreadable or malformed: listed as invalid so the author sees why.
+    }
+    return json->is_object() && (json->contains("schemaVersion") || json->contains("objectives"));
+}
 
 std::vector<fs::path> findMissionFiles(const fs::path& folder) {
     std::vector<fs::path> out = missionFilesIn(folder);
@@ -136,7 +150,9 @@ common::Result<fs::path> importMission(const fs::path& source, const fs::path& u
     }
     if (fs::is_regular_file(status)) {
         if (!isMissionFile(source)) {
-            return common::makeError("a mission file must end in .mission.json");
+            return common::makeError(std::format(
+                "{} is not a mission file (a .json file with \"schemaVersion\")",
+                source.filename().string()));
         }
         const fs::path target = userDir / source.filename();
         if (fs::exists(target, ec) && !overwrite) {
@@ -154,7 +170,7 @@ common::Result<fs::path> importMission(const fs::path& source, const fs::path& u
     const auto files = missionFilesIn(source);
     if (files.size() != 1) {
         return common::makeError(std::format("a mission folder must contain exactly one "
-                                             ".mission.json file ({} found)",
+                                             "mission file ({} found)",
                                              files.size()));
     }
     const fs::path target = userDir / source.filename();

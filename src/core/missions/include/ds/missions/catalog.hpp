@@ -28,8 +28,15 @@ struct CatalogEntry {
     std::string key;  ///< Mission id (from the file even when invalid, else the file stem).
 };
 
-/// @brief Mission files directly in @p folder (`*.mission.json`) and in its sub-folders
-/// (one mission folder each, with its `dem/` and `ortho/` files), sorted by path.
+/// @brief Whether @p file is taken as a mission file (FR-MIS-01): every `*.mission.json`, and
+/// every other `*.json` that is malformed or whose top-level object has `schemaVersion` or
+/// `objectives` (so other JSON files in a mission folder are left alone). Names starting with
+/// '.' and `*.schema.json` files are never missions.
+[[nodiscard]] bool isMissionFile(const std::filesystem::path& file);
+
+/// @brief Mission files (isMissionFile()) directly in @p folder and in its sub-folders (one
+/// mission folder each, with its `dem/` and `ortho/` files), sorted by path. Symbolic links
+/// are skipped.
 [[nodiscard]] std::vector<std::filesystem::path> findMissionFiles(const std::filesystem::path& folder);
 
 /// @brief Loads every mission of the built-in folder and the user folder. Invalid files are
@@ -39,15 +46,15 @@ struct CatalogEntry {
                                                      const std::filesystem::path& userDir,
                                                      const ValidationContext& context);
 
-/// @brief Copies a mission into @p userDir (FR-MIS-01): a `.mission.json` file alone, or a
-/// mission folder (exactly one `.mission.json` at its top) with everything in it. Symlinks are
+/// @brief Copies a mission into @p userDir (FR-MIS-01): a mission file alone, or a mission
+/// folder (exactly one mission file at its top) with everything in it. Symlinks are
 /// not copied. Fails if the target exists, unless @p overwrite.
-/// @return The path of the imported `.mission.json`.
+/// @return The path of the imported mission file.
 [[nodiscard]] common::Result<std::filesystem::path> importMission(
     const std::filesystem::path& source, const std::filesystem::path& userDir,
     bool overwrite = false);
 
-/// @brief Installs the default missions (FR-MIS-01b): copies each `*.mission.json` of
+/// @brief Installs the default missions (FR-MIS-01b): copies each mission file of
 /// @p defaultsDir into @p userDir (created if needed) unless a file of that name is already
 /// there, or a mission with the same id already exists in @p userDir. Existing files are
 /// never overwritten, so the user's edits are kept; a deleted default mission is installed

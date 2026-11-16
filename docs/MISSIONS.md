@@ -7,7 +7,11 @@ terrain, time and weather, vehicle, rules, items, objectives, scheduled failures
 
 ## Files and folders
 
-- **Format:** UTF-8, strict JSON (no comments), extension `.mission.json`, at most 5 MB.
+- **Format:** UTF-8, strict JSON (no comments), extension `.json`, at most 5 MB. The
+  extension `.mission.json` is recommended: such files are always treated as missions. Any
+  other `.json` file counts as a mission when its top-level object has `schemaVersion` or
+  `objectives`, or when it is not valid JSON (it is then listed as invalid, with the parse
+  error); other JSON files, `*.schema.json` and files whose name starts with `.` are ignored.
 - **Schema:** `assets/missions/mission.schema.json` (JSON Schema draft 2020-12). The application
   validates with this same file; add `"$schema": "<path to mission.schema.json>"` to get
   completion and validation in editors such as VS Code.
@@ -16,8 +20,10 @@ terrain, time and weather, vehicle, rules, items, objectives, scheduled failures
 - **`schemaVersion`** is required (currently `1`). A file written for a newer version is
   rejected with *"version N is newer than this application supports"*.
 - **Locations:** built-in missions in `/opt/drone_simulator/share/missions/`, the user's in
-  `~/.drone_simulation/missions/`. A mission is either a single `.mission.json` file, or a
-  folder with exactly one `.mission.json` at its top plus its data (`dem/`, `ortho/`). Each
+  `~/.drone_simulation/missions/`. **Every valid mission in these folders is added to the list
+  of missions automatically at start-up** — just drop the file in the folder. A mission is
+  either a single mission file, or a folder with exactly one mission file at its top plus its
+  data (`dem/`, `ortho/`). Invalid files are listed too, marked invalid with their errors. Each
   mission `id` must be unique; a user mission cannot reuse the id of a built-in one.
 - **Default mission:** at every start the application makes sure your mission folder holds
   *First flight* ([`assets/default-missions/first-flight.mission.json`](../assets/default-missions/first-flight.mission.json)):

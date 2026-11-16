@@ -827,7 +827,11 @@ constraints, detect failure, score the attempt, and report results.
 
 **Each mission is described by one JSON file**, which is the single source of truth.
 
-- **File:** UTF-8, strict JSON (no comments), extension `.mission.json`, max 5 MB.
+- **File:** UTF-8, strict JSON (no comments), extension `.json` (`.mission.json` recommended),
+  max 5 MB. In the mission folders every `*.mission.json` is a mission, and so is every other
+  `*.json` whose top-level object has `schemaVersion` or `objectives` (a malformed `.json` is
+  listed as invalid so its author sees why); other JSON files, `*.schema.json` and names
+  starting with `.` are ignored.
 - **Self-contained:** the file holds everything needed to play the mission: terrain source
   and area, environment, vehicle, rules, items, objectives, failures and scoring. It refers
   to nothing outside itself except by stable keys of **built-in** resources
@@ -841,8 +845,9 @@ constraints, detect failure, score the attempt, and report results.
 - **Versioning:** `schemaVersion` is required; older versions are migrated on load,
   newer versions are rejected with a clear message.
 - **Locations:** built-in missions in `/opt/drone_simulator/share/missions/`; the user's
-  missions in `$HOME/.drone_simulation/missions/` (scanned at startup). A mission is either a
-  single `.mission.json` file or a **folder** with the JSON plus its `dem/` files; *Import
+  missions in `$HOME/.drone_simulation/missions/` (scanned at startup: **every valid mission
+  file there is listed automatically**, whatever its name). A mission is either a single
+  mission file or a **folder** with the JSON plus its `dem/` files; *Import
   mission* copies the file or the whole folder there.
 - **Default mission:** at every start the application makes sure the user's mission folder
   holds the **default mission** *First flight* (`first-flight.mission.json`, shipped in
@@ -930,7 +935,7 @@ The full reference of every field, objective, failure and scoring option is in
 
 | ID | Requirement | Pri |
 |----|-------------|-----|
-| FR-MIS-01 | Missions are loaded **only from JSON files** (§4.9.1): the built-in pack and the user's mission folder. Each file is validated against `mission.schema.json`, then semantically (references between ids, objectives allowed for the vehicle type, positions inside the terrain extent, reachable thresholds). Errors give the file, JSON path and a readable message (e.g. `objectives[1].target: unknown item "pad2"`); an invalid file never crashes the app and is listed as invalid. | M |
+| FR-MIS-01 | Missions are loaded **only from JSON files** (§4.9.1): the built-in pack and the user's mission folder. At every start both folders (and their mission sub-folders) are scanned and **every valid mission is added to the list of missions** automatically — `*.mission.json` files and any other `*.json` file that is a mission (top-level `schemaVersion` or `objectives`); no registration or import step is needed. Each file is validated against `mission.schema.json`, then semantically (references between ids, objectives allowed for the vehicle type, positions inside the terrain extent, reachable thresholds). Errors give the file, JSON path and a readable message (e.g. `objectives[1].target: unknown item "pad2"`); an invalid file never crashes the app and is listed as invalid. | M |
 | FR-MIS-01a | *Reload missions* rescans the folders; changed files are picked up (file hash). Automatic reload when a file changes on disk (S). | M / S |
 | FR-MIS-01b | **Default mission.** At start-up, before the folders are scanned, every mission of `share/default-missions/` is copied into `$HOME/.drone_simulation/missions/` (folder created with mode `0700`, file `0600`) **unless** a file of that name already exists there or a user mission already has that `id`. Existing files are never overwritten (the user's edits are kept); a deleted default mission is installed again at the next start. The default mission is then listed with the user's missions (origin *user*, outside the campaign, so always unlocked). v1.0 ships one: **`first-flight`** — aerial, procedural flat farmland (`flatlands` preset), clear summer morning, light wind, sub-250 g camera drone, keyboard allowed, no time limit; objectives in order: climb to 10 m, reach a beacon 60 m north at 10 m AGL, land on the home pad (≤ 1 m from its centre); stars for finishing in ≤ 120 s and ≤ 60 s. If the folder cannot be written the application still starts, with the built-in missions only. | M |
 | FR-MIS-02 | A mission defines its own terrain inline: **procedural** (seed + parameters, optionally starting from a built-in preset), **online** (elevation/imagery provider keys, origin) or **file** (elevation files in the mission folder or geodata library, §4.5.4), optionally with **orthophoto files** (§4.5.5), with optional dimensions (`terrain.extent`, FR-TER-04a). Online terrain must be fully cached before PreFlight (download offered in the briefing). If the provider is unavailable or not configured (e.g. missing API key), the area isn't covered, or the elevation file is missing, invalid or doesn't match its `sha256`, the mission is listed as unavailable with the reason. | M |
