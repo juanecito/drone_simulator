@@ -12,6 +12,7 @@
 #include <fstream>
 
 #include "ds/app/mission_library.hpp"
+#include "ds/common/json.hpp"
 #include "ds/storage/mission_store.hpp"
 #include "ds/storage/storage_service.hpp"
 
@@ -64,17 +65,26 @@ TEST(MissionLibrary, DefaultMissionIsInstalledAndListedAtStart) {
     // does not replace the row; a broken file is listed as invalid with its errors.
     fs::copy_file(installed, data / "missions" / "other.mission.json");  // Sorts after it.
     std::ofstream(data / "missions" / "broken.mission.json") << "{ \"id\": \"broken\" }";
+    // Any valid mission in the folder is listed, whatever its file name (FR-MIS-01).
+    std::ifstream in(installed);
+    auto mine = ds::common::Json::parse(in);
+    mine["id"] = "my-hover";
+    mine["title"] = "My hover";
+    std::ofstream(data / "missions" / "my-hover.json") << mine.dump(2);
     library = loadMissionLibrary(folders, service->get());
     ASSERT_TRUE(library);
     EXPECT_TRUE(library->installed.empty());
-    EXPECT_EQ(library->entries.size(), 3U);
+    EXPECT_EQ(library->entries.size(), 4U);
     rows = index(**service);
-    ASSERT_EQ(rows.size(), 2U);
+    ASSERT_EQ(rows.size(), 3U);
     EXPECT_EQ(rows[0].mission.missionKey, "broken");
     EXPECT_EQ(rows[0].mission.status, "invalid");
     EXPECT_NE(rows[0].mission.validationErrorsJson.find("missing required property"),
               std::string::npos);
     EXPECT_EQ(rows[1].mission.filePath, installed.string());
+    EXPECT_EQ(rows[2].mission.missionKey, "my-hover");
+    EXPECT_EQ(rows[2].mission.title, "My hover");
+    EXPECT_EQ(rows[2].mission.status, "valid");
 
     // Without a user folder only the built-in missions are listed (none yet), and the user's
     // rows are kept as missing.
@@ -83,8 +93,9 @@ TEST(MissionLibrary, DefaultMissionIsInstalledAndListedAtStart) {
     ASSERT_TRUE(library);
     EXPECT_TRUE(library->entries.empty());
     rows = index(**service);
-    ASSERT_EQ(rows.size(), 2U);
+    ASSERT_EQ(rows.size(), 3U);
     EXPECT_EQ(rows[1].mission.status, "missing");
+    EXPECT_EQ(rows[2].mission.status, "missing");
 }
 
 TEST(MissionLibrary, MissingSchemaIsAnError) {

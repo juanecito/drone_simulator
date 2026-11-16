@@ -107,8 +107,9 @@ User data — one SQLite database per operating-system user — lives in
 `$HOME/.drone_simulation/drone_simulation.db` (folder mode `0700`, file `0600`). It holds the
 settings, including the window layout, the terrain and the environment, which are restored at
 the next start; the user's terrain presets, vehicle profiles and controller mappings; and a
-record of each flight. Your own missions go in `$HOME/.drone_simulation/missions/`; at every
-start the default mission *First flight* is put there if it is missing. If the folder
+record of each flight. Your own missions go in `$HOME/.drone_simulation/missions/`: every valid
+mission file there (`.json`) is added to the list of missions at start-up, and the default
+mission *First flight* is put there if it is missing. If the folder
 cannot be created, the program warns and runs with a temporary in-memory database. `--db <path>`
 uses another database file (for testing). Uninstalling the package never touches user data.
 

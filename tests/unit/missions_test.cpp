@@ -606,6 +606,44 @@ TEST(MissionCatalog, ScanFindsFilesFoldersAndDuplicates) {
     EXPECT_EQ(byKey("rover.mission.json").key, "rover-delivery-01");
 }
 
+TEST(MissionCatalog, AnyJsonMissionIsFound) {
+    TempDir user("ds_missions_json");
+    fs::copy_file(kFixtures / "precision-landing-01.mission.json", user.path / "landing.json");
+    std::ofstream(user.path / "draft.json") << R"({"objectives": []})";   // Unfinished mission.
+    std::ofstream(user.path / "typo.json") << R"({"schemaVersion": 1,)";  // Malformed.
+    std::ofstream(user.path / "settings.json") << R"({"volume": 3})";     // Not a mission.
+    std::ofstream(user.path / "list.json") << "[1, 2]";
+    std::ofstream(user.path / "mission.schema.json") << R"({"schemaVersion": 1})";
+    std::ofstream(user.path / ".landing.json.swp.json") << R"({"schemaVersion": 1})";
+    std::ofstream(user.path / "readme.txt") << R"({"schemaVersion": 1})";
+    fs::create_directories(user.path / "valley");
+    fs::copy_file(kFixtures / "rover-delivery-01.mission.json", user.path / "valley" / "valley.json");
+    std::ofstream(user.path / "valley" / "metadata.json") << R"({"author": "me"})";
+
+    std::vector<std::string> names;
+    for (const fs::path& f : findMissionFiles(user.path)) {
+        names.push_back(f.lexically_relative(user.path).string());
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"draft.json", "landing.json", "typo.json",
+                                               "valley/valley.json"}));
+
+    const auto entries = scanMissions({}, user.path, context());
+    ASSERT_EQ(entries.size(), 4U);
+    EXPECT_FALSE(entries[0].load.valid());  // draft.json: listed with its errors.
+    EXPECT_EQ(entries[0].key, "draft");
+    EXPECT_TRUE(entries[1].load.valid()) << entries[1].load.report();
+    EXPECT_EQ(entries[1].key, "precision-landing-01");
+    EXPECT_FALSE(entries[2].load.valid());
+    EXPECT_EQ(entries[2].key, "typo");
+    EXPECT_TRUE(entries[3].load.valid()) << entries[3].load.report();
+
+    // Plain .json missions can be imported too, alone or as a folder.
+    TempDir dest("ds_missions_json_import");
+    EXPECT_TRUE(importMission(user.path / "landing.json", dest.path));
+    EXPECT_TRUE(importMission(user.path / "valley", dest.path));
+    EXPECT_FALSE(importMission(user.path / "settings.json", dest.path));
+}
+
 TEST(MissionCatalog, ImportCopiesFilesAndFolders) {
     TempDir src("ds_missions_import_src");
     TempDir user("ds_missions_import_user");

@@ -111,7 +111,7 @@ std::string helpText() {
         "      --db <path>          Use this database file instead of\n"
         "                           ~/.drone_simulation/drone_simulation.db (for testing).\n"
         "      --validate-mission <file>\n"
-        "                           Validate a .mission.json file, print its errors and\n"
+        "                           Validate a mission file (.json), print its errors and\n"
         "                           exit (0 = valid, 1 = invalid). May be repeated.\n"
         "\n"
         "Standard Qt options (for example -platform, -style) are also accepted.\n",
