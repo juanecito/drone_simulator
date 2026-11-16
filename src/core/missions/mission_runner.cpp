@@ -36,29 +36,6 @@ double headingDifference(double a, double b) {
     return d > 180.0 ? 360.0 - d : d;
 }
 
-std::string defaultTitle(const ObjectiveSpec& o) {
-    switch (o.type) {
-        case ObjectiveType::ReachAltitude:
-            return std::format("Climb to {:g} m", o.altitudeAglM.value_or(0.0));
-        case ObjectiveType::ReachWaypoint:
-            return o.target.empty() ? std::string("Reach the waypoint")
-                                    : std::format("Reach {}", o.target);
-        case ObjectiveType::Hover:
-            return std::format("Hover for {:g} s", o.durationS.value_or(0.0));
-        case ObjectiveType::Land: return std::format("Land on {}", o.target);
-        case ObjectiveType::GateCourse:
-            return o.laps > 1 ? std::format("Fly the gate course ({} laps)", o.laps)
-                              : std::string("Fly the gate course");
-        case ObjectiveType::Deliver:
-            return std::format("Deliver {:g} kg from {} to {}", o.cargoKg, o.pickup, o.drop);
-        case ObjectiveType::Inspect: return std::format("Inspect {}", o.target);
-        case ObjectiveType::Survey: return std::format("Survey {}", o.target);
-        case ObjectiveType::ReturnHome: return "Return home";
-        case ObjectiveType::Park: return std::format("Park in {}", o.target);
-    }
-    return o.id;
-}
-
 // Runtime state of one objective.
 struct Tracker {
     const ObjectiveSpec* spec = nullptr;
@@ -304,7 +281,7 @@ struct MissionRunner::Impl {
             t.spec = &o;
             t.status.id = o.id;
             t.status.type = o.type;
-            t.status.title = o.title.empty() ? defaultTitle(o) : o.title;
+            t.status.title = objectiveTitle(mission, o);
             t.status.optional = o.optional;
             const auto findItem = [&](const std::string& key) {
                 const items::Item* item = registry.find(key);

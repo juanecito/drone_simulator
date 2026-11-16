@@ -22,6 +22,7 @@ class QTabWidget;
 namespace ds::app {
 
 class EnvironmentPanel;
+class MissionsController;
 class SceneController;
 class SettingsController;
 class SimulationController;
@@ -39,8 +40,11 @@ public:
     /// @param settings User settings, or null to run without persistence (tests). If given, it
     ///        must outlive the window: the saved geometry and dock layout are restored here and
     ///        saved again when the window closes (FR-UI-03).
+    /// @param missions The mission list for the Missions tab, or null: the window then lists
+    ///        the built-in missions only (tests). If given, it must outlive the window.
     /// @param parent Parent widget, normally null.
-    explicit MainWindow(SettingsController* settings = nullptr, QWidget* parent = nullptr);
+    explicit MainWindow(SettingsController* settings = nullptr,
+                        MissionsController* missions = nullptr, QWidget* parent = nullptr);
     /// @brief Stops the simulation before the scene it depends on is destroyed.
     ~MainWindow() override;
 
@@ -53,6 +57,8 @@ public:
     [[nodiscard]] Viewport* viewport() const noexcept { return viewport_; }
     /// @brief The free-mode scene (terrain, time, camera).
     [[nodiscard]] SceneController* scene() const noexcept { return scene_; }
+    /// @brief The mission list shown in the Missions tab.
+    [[nodiscard]] MissionsController* missions() const noexcept { return missions_; }
     /// @brief The flight simulation (vehicle, loop, input).
     [[nodiscard]] SimulationController* simulation() const noexcept { return simulation_; }
     /// @brief The dockable tab panel.
@@ -96,6 +102,7 @@ private:
     SettingsController* settings_ = nullptr;
     SceneController* scene_ = nullptr;
     SimulationController* simulation_ = nullptr;
+    MissionsController* missions_ = nullptr;
     Viewport* viewport_ = nullptr;
     EnvironmentPanel* environmentPanel_ = nullptr;
     QDockWidget* panelDock_ = nullptr;

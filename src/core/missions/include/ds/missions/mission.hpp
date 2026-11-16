@@ -250,4 +250,8 @@ struct MissionDefinition {
     [[nodiscard]] const ObjectiveSpec* objective(std::string_view objectiveId) const noexcept;
 };
 
+/// @brief Display text of objective @p o of @p mission: its `title`, or a generated one such as
+/// "Land on Home pad" (items by their name when they have one).
+[[nodiscard]] std::string objectiveTitle(const MissionDefinition& mission, const ObjectiveSpec& o);
+
 }  // namespace ds::missions
