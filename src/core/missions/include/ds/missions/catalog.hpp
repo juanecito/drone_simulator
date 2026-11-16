@@ -47,6 +47,16 @@ struct CatalogEntry {
     const std::filesystem::path& source, const std::filesystem::path& userDir,
     bool overwrite = false);
 
+/// @brief Installs the default missions (FR-MIS-01b): copies each `*.mission.json` of
+/// @p defaultsDir into @p userDir (created if needed) unless a file of that name is already
+/// there, or a mission with the same id already exists in @p userDir. Existing files are
+/// never overwritten, so the user's edits are kept; a deleted default mission is installed
+/// again.
+/// @return The files created (empty if nothing had to be done); an error only if @p userDir
+///         cannot be created. A file that cannot be copied is skipped.
+[[nodiscard]] common::Result<std::vector<std::filesystem::path>> installDefaultMissions(
+    const std::filesystem::path& defaultsDir, const std::filesystem::path& userDir);
+
 /// @brief A mission's place in the campaign.
 struct CampaignMission {
     std::string key;             ///< Mission id.

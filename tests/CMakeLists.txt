@@ -42,9 +42,10 @@ set_tests_properties(cli.bad_log_level PROPERTIES
 add_test(NAME cli.validate_mission
     COMMAND drone_simulator
         --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/precision-landing-01.mission.json
-        --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/rover-delivery-01.mission.json)
+        --validate-mission ${PROJECT_SOURCE_DIR}/tests/fixtures/missions/rover-delivery-01.mission.json
+        --validate-mission ${PROJECT_SOURCE_DIR}/assets/default-missions/first-flight.mission.json)
 set_tests_properties(cli.validate_mission PROPERTIES
-    PASS_REGULAR_EXPRESSION "rover-delivery-01.mission.json: valid"
+    PASS_REGULAR_EXPRESSION "first-flight.mission.json: valid"
     FAIL_REGULAR_EXPRESSION "invalid"
     LABELS "integration;cli")
 

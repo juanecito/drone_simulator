@@ -87,6 +87,39 @@ std::vector<CatalogEntry> scanMissions(const fs::path& builtInDir, const fs::pat
     return entries;
 }
 
+common::Result<std::vector<fs::path>> installDefaultMissions(const fs::path& defaultsDir,
+                                                             const fs::path& userDir) {
+    std::error_code ec;
+    if (fs::create_directories(userDir, ec)) {
+        // Private like the data folder it lives in (NFR-SEC-01).
+        fs::permissions(userDir, fs::perms::owner_all, fs::perm_options::replace, ec);
+    }
+    if (ec || !fs::is_directory(userDir, ec)) {
+        return common::makeError(std::format("cannot create {}: {}", userDir.string(),
+                                             ec ? ec.message() : "not a folder"));
+    }
+    std::set<std::string> userKeys;
+    for (const fs::path& file : findMissionFiles(userDir)) {
+        userKeys.insert(keyOf(file));
+    }
+    std::vector<fs::path> created;
+    for (const fs::path& source : missionFilesIn(defaultsDir)) {
+        const fs::path target = userDir / source.filename();
+        const std::string key = keyOf(source);
+        if (fs::exists(fs::symlink_status(target, ec)) || userKeys.contains(key)) {
+            continue;
+        }
+        if (!fs::copy_file(source, target, fs::copy_options::skip_existing, ec) || ec) {
+            continue;
+        }
+        fs::permissions(target, fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::replace, ec);
+        userKeys.insert(key);
+        created.push_back(target);
+    }
+    return created;
+}
+
 common::Result<fs::path> importMission(const fs::path& source, const fs::path& userDir,
                                        bool overwrite) {
     std::error_code ec;

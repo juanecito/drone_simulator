@@ -627,6 +627,72 @@ TEST(MissionCatalog, ImportCopiesFilesAndFolders) {
     EXPECT_FALSE(importMission(src.path, user.path));  // No mission file at its top.
 }
 
+TEST(MissionCatalog, DefaultMissionIsValidAndSimple) {
+    const fs::path file =
+        fs::path(DS_TEST_ASSETS_DIR) / "default-missions" / "first-flight.mission.json";
+    const auto r = loadMissionFile(file, context());
+    ASSERT_TRUE(r.valid()) << r.report();
+    EXPECT_TRUE(r.warnings.empty()) << r.report();
+    EXPECT_TRUE(r.unavailable.empty());  // Procedural terrain: playable offline.
+    const MissionDefinition& m = *r.definition;
+    EXPECT_EQ(m.id, "first-flight");
+    EXPECT_EQ(m.difficulty, 1);
+    EXPECT_TRUE(m.chapter.empty());  // Outside the campaign: always unlocked.
+    EXPECT_FALSE(m.rules.timeLimitS);
+    EXPECT_TRUE(m.failures.empty());
+
+    // It can be flown: climb, beacon, back to the pad.
+    auto runner = makeRunner(m);
+    Pilot p = startFlight(*runner);
+    p.moveTo(Vec3(0, 10, 0), 5.0);
+    p.moveTo(Vec3(0, 10, -60), 12.0);
+    p.moveTo(Vec3(0.2, 3, 0), 12.0);
+    p.land(Vec3(0.2, 0, 0), 0.5);
+    ASSERT_EQ(runner->state(), MissionState::Succeeded);
+    EXPECT_EQ(runner->result()->stars, 3);
+}
+
+TEST(MissionCatalog, InstallDefaultMissions) {
+    TempDir defaults("ds_missions_defaults");
+    TempDir home("ds_missions_home");
+    fs::copy_file(fs::path(DS_TEST_ASSETS_DIR) / "default-missions" / "first-flight.mission.json",
+                  defaults.path / "first-flight.mission.json");
+    std::ofstream(defaults.path / "notes.txt") << "not a mission";
+    const fs::path user = home.path / "missions";
+
+    auto created = installDefaultMissions(defaults.path, user);  // Creates the folder.
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_EQ(created->size(), 1U);
+    const fs::path file = user / "first-flight.mission.json";
+    EXPECT_EQ(created->front(), file);
+    EXPECT_FALSE(fs::exists(user / "notes.txt"));
+    EXPECT_EQ(fs::status(user).permissions() & fs::perms::all, fs::perms::owner_all);
+    EXPECT_EQ(fs::status(file).permissions() & fs::perms::all,
+              fs::perms::owner_read | fs::perms::owner_write);
+
+    // The user's edits are kept.
+    std::ofstream(file) << "{ \"id\": \"first-flight\", \"title\": \"edited\" }";
+    created = installDefaultMissions(defaults.path, user);
+    ASSERT_TRUE(created);
+    EXPECT_TRUE(created->empty());
+    EXPECT_NE(ds::common::readJsonFile(file, 1U << 20U)->dump().find("edited"), std::string::npos);
+
+    // Not installed again when the mission lives under another name or in a folder…
+    fs::create_directories(user / "mine");
+    fs::rename(file, user / "mine" / "renamed.mission.json");
+    EXPECT_TRUE(installDefaultMissions(defaults.path, user)->empty());
+    EXPECT_FALSE(fs::exists(file));
+    // …but restored once it is gone.
+    fs::remove_all(user / "mine");
+    created = installDefaultMissions(defaults.path, user);
+    ASSERT_EQ(created->size(), 1U);
+    EXPECT_TRUE(loadMissionFile(file, context()).valid());
+
+    // A user folder that cannot be created is an error.
+    std::ofstream(home.path / "file") << "x";
+    EXPECT_FALSE(installDefaultMissions(defaults.path, home.path / "file" / "missions"));
+}
+
 TEST(MissionCatalog, CampaignUnlocks) {
     const std::vector<CampaignMission> missions{
         {"b1", "basics", 1, std::nullopt},
