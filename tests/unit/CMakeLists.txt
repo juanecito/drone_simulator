@@ -10,7 +10,10 @@ add_executable(ds_unit_tests
     flight_test.cpp
     geo_test.cpp
     input_test.cpp
+    items_test.cpp
+    json_schema_test.cpp
     log_test.cpp
+    missions_test.cpp
     modules_test.cpp
     net_test.cpp
     physics_test.cpp

@@ -18,6 +18,7 @@ add_library(ds_app_ui STATIC
     terrain_panel.cpp
     opengl_check.cpp
     main_window.cpp
+    mission_validation.cpp
     settings_controller.cpp
     settings_panel.cpp
     simulation_controller.cpp
@@ -34,6 +35,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/scene_controller.hpp
     include/ds/app/terrain_panel.hpp
     include/ds/app/main_window.hpp
+    include/ds/app/mission_validation.hpp
     include/ds/app/opengl_check.hpp
     include/ds/app/settings_controller.hpp
     include/ds/app/settings_panel.hpp
@@ -55,6 +57,8 @@ target_link_libraries(ds_app_ui PUBLIC
     ds::weather
     ds::input
     ds::physics
+    ds::items
+    ds::missions
     ds::sim
     Qt6::Widgets
     Qt6::OpenGL

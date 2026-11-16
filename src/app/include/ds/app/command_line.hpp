@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "ds/common/error.hpp"
 #include "ds/common/log.hpp"
@@ -25,6 +26,8 @@ struct CommandLine {
     std::optional<log::Level> logLevel;  ///< `--log-level <trace|debug|info|warn|error|off>`.
     /// `--db <path>`: database file to use instead of the per-user default (FR-X-03).
     std::optional<std::filesystem::path> databaseFile;
+    /// `--validate-mission <file>` (repeatable): validate mission files and exit (FR-MIS-16).
+    std::vector<std::filesystem::path> validateMissions;
 };
 
 /// @brief How strictly unknown arguments are treated.

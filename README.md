@@ -34,8 +34,11 @@ Full instructions, presets and packaging: [docs/BUILDING.md](docs/BUILDING.md).
 
 ```
 drone_simulator [--log-level trace|debug|info|warn|error|off] [--gl-debug] [--db <path>]
-                [--version] [--help]
+                [--validate-mission <file>] [--version] [--help]
 ```
+
+`--validate-mission <file>` checks a mission file against the mission schema and the semantic
+rules, prints its errors and exits (0 = valid); see [docs/MISSIONS.md](docs/MISSIONS.md).
 
 **Flying.** Press `F5` (*Simulation › Start*). The view switches to the chase camera. Then:
 

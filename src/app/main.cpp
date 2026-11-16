@@ -11,6 +11,7 @@
 
 #include "ds/app/command_line.hpp"
 #include "ds/app/main_window.hpp"
+#include "ds/app/mission_validation.hpp"
 #include "ds/app/opengl_check.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/app/user_storage.hpp"
@@ -77,6 +78,13 @@ int main(int argc, char* argv[]) {
     }
     if (early->logLevel) {
         ds::log::setLevel(*early->logLevel);
+    }
+    // FR-MIS-16: mission authors and CI validate files without a display.
+    if (!early->validateMissions.empty()) {
+        std::string report;
+        const int code = ds::app::validateMissionFiles(early->validateMissions, report);
+        std::print("{}", report);
+        return code;
     }
     setDefaultSurfaceFormat(early->glDebug || kDebugBuild);
 

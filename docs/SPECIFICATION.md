@@ -845,7 +845,7 @@ constraints, detect failure, score the attempt, and report results.
   mission* copies the file or the whole folder there.
 - **Units and coordinates:** SI units; positions as `geo` `[lat, lon, alt]` with `altRef`
   (`AGL`/`AMSL`), as `utm` `{zone, easting, northing, alt}`, or as `local` metres from the
-  terrain origin.
+  terrain origin in the engine frame (`[x east, y up, z south]`).
 
 **Example — aerial mission on online terrain:**
 
@@ -859,7 +859,8 @@ constraints, detect failure, score the attempt, and report results.
   "chapter": "basics",
   "terrain": {
     "source": "online",
-    "elevationProvider": "aws-terrarium",
+    "elevationProvider": "opentopography",
+    "dataset": "COP30",
     "imageryProvider": null,
     "origin": { "geo": [46.5100, 7.9800, 0], "altRef": "AGL" },
     "extent": { "widthM": 3000, "lengthM": 2000 }
@@ -904,6 +905,7 @@ constraints, detect failure, score the attempt, and report results.
   "rules":    { "allowKeyboard": true, "timeLimitS": 600, "minBatteryPct": 10,
                 "maxStuckS": 20 },
   "items": [
+    { "type": "pilot", "id": "pilot", "local": [200, 0, -260] },
     { "type": "pickupZone", "id": "pickup", "local": [40, 0, -15],  "radiusM": 3 },
     { "type": "parkingZone", "id": "bay", "local": [380, 0, -520], "sizeM": [2, 3], "headingDeg": 45 }
   ],
@@ -1620,6 +1622,43 @@ so Markdown pages appear in the generated site.
   payloads from `/vsimem/`, LAS/LAZ → DTM rasterization with PDAL and the COG cache,
   orthophoto mosaics and GPU streaming, attribution overlay, Terrain tab (online/file),
   Settings → Data providers with the OS keyring (QtKeychain), and the integration tests.
+
+**M5 implementation notes** (in progress; deliberate scope decisions):
+
+- **Step 1 — Core items and missions (done):** `core/items`: item types and shapes, the
+  registry with 64-bit generational ids, CRUD, change notifications, undo/redo (generations of
+  removed items are never reissued, also across undo), a uniform-grid spatial index (radius,
+  box, point-in-zone, ray casts against solid items), terrain placement for AGL/AMSL items and
+  trigger detection (direction-aware gates tested along the whole tick segment, zone
+  enter/exit, waypoint reach). `core/missions`: the mission model, loader and validator
+  (schema, then semantic checks: references and their item types, dependency cycles, vehicle
+  type, profiles, providers and presets, item properties per type, extent, no-fly zone /
+  geofence vs. spawn, reachable thresholds, weather plausibility, time zone, file-terrain path
+  rules; missing elevation files make a mission *unavailable*, not invalid), placement of
+  items in the world, the flight-rules monitor (also usable in free mode), the mission runner
+  (lifecycle, all objective types including survey and inspect, failures, failure injection
+  events, scoring and stars) and the catalogue (folder scan, duplicate ids, import, campaign
+  unlocks). `core/storage`: `MissionStore` (index sync that keeps progress of missing files,
+  attempts, best attempt, progress view). `core/common`: a validator for the JSON Schema
+  subset used by the project (unsupported keywords make the schema itself invalid, so it never
+  silently checks less than it says). `drone_simulator --validate-mission <file>` (FR-MIS-16)
+  runs without a display. `docs/MISSIONS.md` holds the guide and a field reference generated
+  from the schema by `scripts/docs/gen_mission_reference.py`.
+- **Schema validation is in-house** rather than a third-party JSON Schema library: the subset
+  needed is small, and it keeps the dependency list unchanged.
+- **Local coordinates** use the engine frame (`z` = south), like the examples; polygon outlines
+  are `[x, z]` offsets from the item position, rotated by its heading.
+- **Pick-up and drop** need no extra input: the vehicle stays in the zone, low (≤ 1 m AGL) and
+  slow (≤ 0.5 m/s), for 1 s. **Landing** counts after the first touchdown following flight,
+  once the vehicle has settled (< 0.3 m/s for 1 s); the touchdown speed is the descent rate
+  just before contact. **Return home** needs the vehicle to have left the home radius first.
+- **Stars:** success gives the first star; `scoring.stars` holds at most two thresholds, for
+  the second and third star. Score formulas are documented in `docs/MISSIONS.md`.
+- **Next steps:** built-in mission pack (≥ 10 aerial; the 4 ground missions need M6; the 3
+  real-terrain missions need the GDAL raster source of M4), mission index sync at start-up,
+  Missions tab, briefing / debrief dialogs, mission rules in the simulation (time scale,
+  cameras, keyboard, profile lock), item rendering and markers, payload mass in the flight
+  model, HUD objective and rule-warning panel, and integration tests driving a real flight.
 
 ---
 
