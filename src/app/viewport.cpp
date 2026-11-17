@@ -58,11 +58,23 @@ Viewport::Viewport(SceneController* scene, SimulationController* simulation, QWi
 
 Viewport::~Viewport() {
     // GL resources owned by the renderer must be released with the context current.
-    if (context() != nullptr) {
+    if (QOpenGLContext* glContext = context()) {
+        // ~QOpenGLWidget destroys the context after this object is gone: no callback then.
+        disconnect(glContext, &QOpenGLContext::aboutToBeDestroyed, this, &Viewport::releaseGl);
         makeCurrent();
         renderer_.reset();
         doneCurrent();
     }
+}
+
+void Viewport::releaseGl() {
+    // The context is about to be destroyed (Qt replaces it when the window's graphics device
+    // is lost or the widget changes window). Its objects are deleted while it can still be
+    // made current; initializeGL() then rebuilds them in the new context.
+    makeCurrent();
+    renderer_->releaseResources();
+    doneCurrent();
+    log::info("OpenGL context replaced; renderer resources released");
 }
 
 void Viewport::setRenderSettings(const graphics::RenderSettings& settings) {
@@ -82,6 +94,9 @@ void Viewport::initializeGL() {
         return;
     }
 
+    // Direct connection: the slot makes the dying context current (Qt's documented pattern).
+    connect(glContext, &QOpenGLContext::aboutToBeDestroyed, this, &Viewport::releaseGl,
+            static_cast<Qt::ConnectionType>(Qt::DirectConnection | Qt::UniqueConnection));
     auto info = renderer_->initialize(&resolveGlFunction, glContext);
     if (!info) {
         log::error("OpenGL initialisation failed: {}", info.error().message);
@@ -101,7 +116,8 @@ void Viewport::initializeGL() {
             return;
         }
         // Continuous rendering, paced by the buffer swap (V-Sync).
-        connect(this, &QOpenGLWidget::frameSwapped, this, qOverload<>(&QWidget::update));
+        connect(this, &QOpenGLWidget::frameSwapped, this, qOverload<>(&QWidget::update),
+                Qt::UniqueConnection);
     }
     clock_.start();
     statsClock_.start();

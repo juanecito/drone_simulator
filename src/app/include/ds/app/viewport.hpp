@@ -83,6 +83,9 @@ signals:
 
 protected:
     /// @brief Loads OpenGL, validates the context and loads the shaders.
+    /// @details Runs again whenever Qt replaces the widget's context (the graphics device was
+    /// lost, or the widget moved to another window); the old context's resources are released
+    /// just before that context is destroyed.
     void initializeGL() override;
     /// @brief Advances the scene and renders one frame at device-pixel resolution.
     void paintGL() override;
@@ -108,6 +111,7 @@ private:
     bool flightKey(SimulationController& sim, int key, bool pressed);
     bool commandKey(SimulationController& sim, int key);
     void captureMouse();
+    void releaseGl();
     void renderScene(const graphics::FrameTarget& target);
     void paintHud(const SimulationController& sim);
     void paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera);

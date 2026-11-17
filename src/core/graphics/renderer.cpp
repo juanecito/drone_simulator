@@ -62,6 +62,13 @@ void GLAD_API_PTR onGlDebugMessage(GLenum source, GLenum /*type*/, GLuint id, GL
 
 common::Result<GlInfo> Renderer::initialize(GlProcLoader loader, void* user) {
     initialized_ = false;
+    if (impl_ != nullptr) {
+        // Left over from a previous context that was destroyed without releaseResources().
+        // Its objects died with that context; deleting them now would delete whatever objects
+        // of the current context have the same names, so the wrappers are leaked on purpose.
+        log::warn("OpenGL resources of a previous context were not released; abandoning them");
+        [[maybe_unused]] Impl* abandoned = impl_.release();  // NOLINT: deliberate leak.
+    }
     if (loader == nullptr) {
         return common::makeError("No OpenGL function loader was provided.");
     }
@@ -481,10 +488,17 @@ Renderer::~Renderer() = default;
 
 bool Renderer::hasResources() const noexcept { return impl_ != nullptr; }
 
+void Renderer::releaseResources() noexcept {
+    impl_.reset();
+    initialized_ = false;
+}
+
 common::Result<void> Renderer::loadResources(const RendererResources& resources) {
     if (!initialized_) {
         return common::makeError("The renderer is not initialised.");
     }
+    // The old objects go first: their names may be reused by the new ones.
+    impl_.reset();
     auto impl = std::make_unique<Impl>(resources.shaderDirectory);
     auto& lib = impl->shaders;
     const auto compute = [](const char* file) {
