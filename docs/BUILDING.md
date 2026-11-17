@@ -41,6 +41,7 @@ All builds use CMake presets; build trees go to `build/<preset>/`.
 | `relwithdebinfo` | Optimised with debug symbols. |
 | `asan` | Debug + AddressSanitizer + UndefinedBehaviorSanitizer. |
 | `coverage` | Debug + coverage instrumentation. |
+| `profile` | Release optimisation + debug info + frame pointers, for `perf` / hotspot (see [Profiling](#profiling)). |
 | `ci` | Debug with compiler warnings **and** Doxygen warnings treated as errors. |
 
 ```sh
@@ -98,6 +99,42 @@ fixed time for the simulation can fail with no memory error at all. Known noise 
 libraries (font cache, GL drivers, D-Bus) is suppressed by `tests/valgrind.supp`. Never add
 our own code there. `--gen-suppressions` writes a suppression block for every error into the
 log, which helps extend the file. The script exits with 1 if anything failed.
+
+## Profiling
+
+The `profile` preset builds with the same optimisation as `release` (so the hot spots are
+the ones users get) plus `-g` and frame pointers (`DS_ENABLE_PROFILING`). It does not enable
+the desktop-integration files.
+
+```sh
+cmake --preset profile
+cmake --build --preset profile
+
+# Access to performance monitoring and observability operations is limited.
+# Consider adjusting /proc/sys/kernel/perf_event_paranoid setting to open
+# access to performance monitoring and observability operations for processes without CAP_PERFMON, CAP_SYS_PTRACE or CAP_SYS_ADMIN Linux capability.
+# More information can be found at 'Perf events and tool security' document:
+# https://www.kernel.org/doc/html/latest/admin-guide/perf-security.html
+# Usually perf_event_paranoid setting is 3:
+
+#  -1: Allow use of (almost) all events by all users
+#      Ignore mlock limit after perf_event_mlock_kb without CAP_IPC_LOCK
+# >= 0: Disallow raw and ftrace function tracepoint access
+# >= 1: Disallow CPU event access
+# >= 2: Disallow kernel profiling
+# To make the adjusted perf_event_paranoid setting permanent preserve it in /etc/sysctl.conf (e.g. kernel.perf_event_paranoid = <setting>)
+# sudo echo "-1" > /proc/sys/kernel/perf_event_paranoid
+
+perf record -g -o build/profile/perf.data -- build/profile/src/app/drone_simulator
+# sudo echo "3" > /proc/sys/kernel/perf_event_paranoid
+perf report -i build/profile/perf.data
+```
+
+Frame pointers only cover our own code: system libraries (Qt, Mesa/NVIDIA, SDL) are built
+without them, so stacks through them are cut short. Use `perf record --call-graph dwarf`
+for full stacks (larger files, more overhead), or open `perf.data` in hotspot for a flame
+graph. `SceneRenderTest.FrameTimeAt1080p` in `ds_gl_tests` is a repeatable render workload
+to profile.
 
 ## Shaders and data files at run time
 

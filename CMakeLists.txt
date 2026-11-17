@@ -26,12 +26,14 @@ option(DS_BUILD_TESTS "Build unit and integration tests" ON)
 option(DS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(DS_ENABLE_SANITIZERS "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(DS_ENABLE_COVERAGE "Build with coverage instrumentation" OFF)
+option(DS_ENABLE_PROFILING "Build with debug info and frame pointers for sampling profilers (perf, hotspot)" OFF)
 option(DS_PACKAGE_DESKTOP_INTEGRATION
     "Install desktop entry, icon, /usr/bin symlink and DEP-5 copyright (absolute paths; for the .deb package)" OFF)
 
 include(GNUInstallDirs)
 include(CompilerWarnings)
 include(Sanitizers)
+include(Profiling)
 include(Hardening)
 include(CoreModules)
 

@@ -60,6 +60,15 @@
       }
     },
     {
+      "name": "profile",
+      "displayName": "Release + debug info + frame pointers (perf, hotspot)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "DS_ENABLE_PROFILING": "ON"
+      }
+    },
+    {
       "name": "ci",
       "displayName": "CI (Debug, warnings as errors, docs warnings as errors)",
       "inherits": "base",
@@ -90,6 +99,10 @@
     {
       "name": "coverage",
       "configurePreset": "coverage"
+    },
+    {
+      "name": "profile",
+      "configurePreset": "profile"
     },
     {
       "name": "ci",
@@ -137,6 +150,11 @@
       "name": "coverage",
       "inherits": "base",
       "configurePreset": "coverage"
+    },
+    {
+      "name": "profile",
+      "inherits": "base",
+      "configurePreset": "profile"
     },
     {
       "name": "ci",
