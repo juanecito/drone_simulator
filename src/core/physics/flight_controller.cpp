@@ -45,6 +45,9 @@ std::string_view armBlockText(ArmBlock block) noexcept {
         case ArmBlock::Crashed: return "Crashed — reset the drone";
         case ArmBlock::LinkLost: return "No RC link";
         case ArmBlock::SwitchNotCycled: return "Turn the arm switch off first";
+        case ArmBlock::ThrottleNotCentred: return "Throttle not in neutral";
+        case ArmBlock::RolledOver: return "Rolled over — reset the vehicle";
+        case ArmBlock::InWater: return "In the water — reset the vehicle";
     }
     return "";
 }

@@ -276,11 +276,16 @@ sim::GroundFunction SimulationController::groundFunction() const {
     // A private query object: the world reads it from the simulation thread.
     auto query = std::make_shared<const terrain::TerrainQuery>(scene_->source(), scene_->layout(),
                                                                scene_->terrain().origin.heightM);
-    return [query](double x, double z) {
+    const std::optional<double> water = scene_->source()->waterLevel();
+    const double snowLine = scene_->source()->snowLine();
+    return [query, water, snowLine](double x, double z) {
         physics::GroundSample g;
         g.heightM = query->height(x, z);
         const terrain::Normal n = query->normal(x, z);
         g.normal = physics::Vec3(n.x, n.y, n.z);
+        // The material drawn on the terrain sets the tyre grip of ground drones.
+        g.material =
+            physics::surfaceFromTerrain(terrain::dominantMaterial(g.heightM, n.y, water, snowLine));
         return g;
     };
 }

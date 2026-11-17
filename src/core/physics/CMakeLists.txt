@@ -9,13 +9,18 @@ ds_add_core_module(physics
         aerial_vehicle.cpp
         aerodynamics.cpp
         atmosphere.cpp
+        drive_controller.cpp
         estimator.cpp
         flight_controller.cpp
         frames.cpp
+        ground_profile.cpp
+        ground_vehicle.cpp
         module.cpp
         powertrain.cpp
         rigid_body.cpp
         sensors.cpp
+        surface.cpp
+        vehicle_factory.cpp
         wind.cpp
     DEPS
         ds::common

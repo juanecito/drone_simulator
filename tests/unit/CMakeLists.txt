@@ -9,6 +9,7 @@ add_executable(ds_unit_tests
     command_line_test.cpp
     flight_test.cpp
     geo_test.cpp
+    ground_test.cpp
     input_test.cpp
     items_test.cpp
     json_schema_test.cpp

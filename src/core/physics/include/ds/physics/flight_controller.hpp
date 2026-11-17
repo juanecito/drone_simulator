@@ -8,6 +8,7 @@
 
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/physics/estimator.hpp"
+#include "ds/physics/pilot_command.hpp"
 
 /// @file
 /// @brief Onboard flight controller of the aerial drone (FR-PHY-12/13/14): rate curves,
@@ -18,37 +19,6 @@
 /// @ingroup physics
 
 namespace ds::physics {
-
-/// @brief Flight modes (Position hold and Return-to-home arrive in milestone M7).
-enum class FlightMode { Acro, Angle, AltitudeHold };
-
-/// @brief Display name of @p mode ("Acro", "Angle", "Alt hold").
-[[nodiscard]] std::string_view flightModeName(FlightMode mode) noexcept;
-
-/// @brief Pilot commands of one tick (from the RC transmitter, gamepad or keyboard).
-struct PilotCommand {
-    double throttle = 0.0;                ///< 0 … 1 (aerial collective).
-    double roll = 0.0;                    ///< −1 … 1, positive = roll right.
-    double pitch = 0.0;                   ///< −1 … 1, positive = stick forward (nose down).
-    double yaw = 0.0;                     ///< −1 … 1, positive = yaw right.
-    bool arm = false;                     ///< Arm switch position.
-    FlightMode mode = FlightMode::Angle;  ///< Selected flight mode.
-    bool linkValid = true;                ///< False while the RC link is lost.
-};
-
-/// @brief Why arming was refused (FR-PHY-14).
-enum class ArmBlock {
-    None,             ///< Arming allowed.
-    ThrottleNotLow,   ///< Throttle stick must be at minimum.
-    NotLevel,         ///< Tilted more than 25°.
-    BatteryCritical,  ///< Battery empty or critical.
-    Crashed,          ///< Reset the vehicle first.
-    LinkLost,         ///< No RC link.
-    SwitchNotCycled,  ///< Arm switch was on at start-up or after a disarm.
-};
-
-/// @brief Message for @p block.
-[[nodiscard]] std::string_view armBlockText(ArmBlock block) noexcept;
 
 /// @brief Facts about the vehicle the controller may know.
 struct VehicleConditions {

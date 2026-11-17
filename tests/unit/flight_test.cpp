@@ -59,7 +59,7 @@ input::ControlInputs takeOff(sim::World& world, double climbSeconds = 2.5) {
     run(world, c, 0.5);
     c.arm = true;
     run(world, c, 0.5);
-    EXPECT_TRUE(world.vehicle().controller().armed());
+    EXPECT_TRUE(world.vehicle().armed());
     c.throttle = 1.0;
     run(world, c, climbSeconds);
     c.throttle = 0.5;
@@ -610,7 +610,7 @@ TEST(FlightController, AcroRateStepHasNoSustainedOscillation) {
         sim::World world = makeWorld(p);
         input::ControlInputs c = takeOff(world);
         c.flightMode = 0;
-        c.throttle = world.vehicle().controller().collective();
+        c.throttle = world.aerialVehicle()->controller().collective();
         run(world, c, 0.3);
         c.roll = 0.5;
         const double target = rateFromStick(p.controller.rates[0], 0.5) * kDeg;
