@@ -109,7 +109,7 @@ public:
         const double climb = heightM < 0.0 ? -std::clamp(0.5 * agl, 0.3, 1.5)
                                            : std::clamp(0.8 * (heightM - agl), -2.5, 2.5);
         // Throttle centred until armed (arming is refused with the stick up).
-        c.throttle = world_->vehicle().controller().armed() ? climbStick(climb) : 0.5;
+        c.throttle = world_->vehicle().armed() ? climbStick(climb) : 0.5;
         // Horizontal: velocity towards the target, limited, then tilt (stick) from the
         // velocity error, in the drone's heading frame.
         glm::dvec2 to(target.x - b.position.x, target.z - b.position.z);
@@ -131,7 +131,7 @@ private:
     // Stick for a climb rate: outside the centre dead band, proportional up to maxClimbMs.
     [[nodiscard]] double climbStick(double climbMs) const {
         constexpr double kDeadband = 0.1;  // Half-width 0.05 around the centre.
-        const double maxClimb = world_->vehicle().profile().controller.maxClimbMs;
+        const double maxClimb = world_->aerialVehicle()->profile().controller.maxClimbMs;
         const double f = std::clamp(climbMs / maxClimb, -1.0, 1.0);
         if (std::abs(f) < 1e-3) {
             return 0.5;

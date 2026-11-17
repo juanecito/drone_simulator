@@ -129,6 +129,8 @@ uses another database file (for testing). Uninstalling the package never touches
 - [Building](docs/BUILDING.md) — toolchain, presets, tests, docs, `.deb` packaging.
 - [Flight model](docs/FLIGHT_MODEL.md) — frames, physics, flight controller, reference
   profiles and validation.
+- [Ground model](docs/GROUND_MODEL.md) — ground drone: suspension, tyres, drivetrain, drive
+  controller, reference profile and checks (M6, in progress).
 - API reference: `cmake --build --preset debug --target docs`, then open
   `build/debug/docs/html/index.html`.
 

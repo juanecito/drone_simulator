@@ -7,6 +7,7 @@
 
 #include "ds/common/random.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/flight_controller.hpp"
 #include "ds/physics/sensors.hpp"
 #include "ds/physics/vehicle.hpp"
 
@@ -35,7 +36,7 @@ public:
     /// obstacle removed. A hard hit is a Collision event, and above half the frame's crash
     /// speed (or with spinning propellers) a crash "collision with <name>". Call after
     /// resolveCollisions().
-    void resolveObstacles(const ObstacleProbe& probe);
+    void resolveObstacles(const ObstacleProbe& probe) override;
     [[nodiscard]] std::vector<VehicleEvent> takeEvents() override;
     [[nodiscard]] const RigidBodyState& bodyState() const noexcept override { return body_; }
     [[nodiscard]] VehicleTelemetry telemetry() const override;
@@ -43,24 +44,28 @@ public:
         return points_;
     }
     [[nodiscard]] double restHeightM() const noexcept override;
+    [[nodiscard]] bool armed() const noexcept override { return controller_.armed(); }
+    [[nodiscard]] const CameraParams& camera() const noexcept override { return profile_.camera; }
 
     /// @brief Profile.
     [[nodiscard]] const AerialProfile& profile() const noexcept { return profile_; }
     /// @brief Flight controller (tests).
     [[nodiscard]] const FlightController& controller() const noexcept { return controller_; }
     /// @brief Battery.
-    [[nodiscard]] const Battery& battery() const noexcept { return battery_; }
+    [[nodiscard]] const Battery& battery() const noexcept override { return battery_; }
     /// @brief Last sensor readings.
-    [[nodiscard]] const SensorReadings& sensors() const noexcept { return sensors_.readings(); }
+    [[nodiscard]] const SensorReadings& sensors() const noexcept override {
+        return sensors_.readings();
+    }
     /// @brief Mass properties (including payload).
-    [[nodiscard]] const MassProperties& mass() const noexcept { return mass_; }
+    [[nodiscard]] const MassProperties& mass() const noexcept override { return mass_; }
     /// @brief Rotor speeds, rad/s.
     [[nodiscard]] const std::array<double, AerialProfile::kMotorCount>& rotorSpeeds()
         const noexcept {
         return omega_;
     }
     /// @brief Overrides the state (tests; e.g. drop from a height).
-    void setBodyState(const RigidBodyState& state) noexcept { body_ = state; }
+    void setBodyState(const RigidBodyState& state) noexcept override { body_ = state; }
     /// @brief Bypasses the flight controller with fixed ESC commands (tests, system
     /// identification); empty to use the controller again. Applied only while armed, unless
     /// @p evenIfDisarmed.
@@ -71,9 +76,9 @@ public:
     }
     /// @brief Attaches a payload of @p massKg at @p offsetBody with drag area @p dragAreaM2
     /// (FR-PHY-08).
-    void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2);
+    void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2) override;
     /// @brief Releases the payload.
-    void releasePayload();
+    void releasePayload() override;
     /// @brief Disables gravity, drag and contacts (free-fall and RK4 tests).
     void setIdealConditions(bool gravityOnly) noexcept { gravityOnly_ = gravityOnly; }
     /// @brief Last non-gravitational acceleration, body frame.

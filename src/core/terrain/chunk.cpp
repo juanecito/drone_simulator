@@ -117,6 +117,21 @@ std::uint32_t classifyMaterial(double height, double normalY, std::optional<doub
            (static_cast<std::uint32_t>(q[2]) << 16U) | (static_cast<std::uint32_t>(q[3]) << 24U);
 }
 
+Material dominantMaterial(double height, double normalY, std::optional<double> waterLevel,
+                          double snowLine) {
+    const std::uint32_t packed = classifyMaterial(height, normalY, waterLevel, snowLine);
+    std::uint32_t best = 0;
+    std::uint32_t bestWeight = 0;
+    for (std::uint32_t i = 0; i < 4; ++i) {
+        const std::uint32_t weight = (packed >> (8U * i)) & 0xFFU;
+        if (weight > bestWeight) {
+            best = i;
+            bestWeight = weight;
+        }
+    }
+    return static_cast<Material>(best);
+}
+
 std::vector<std::uint16_t> buildChunkIndices(int gridSize) {
     const int n = gridSize;
     std::vector<std::uint16_t> indices;

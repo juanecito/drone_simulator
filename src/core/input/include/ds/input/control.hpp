@@ -24,6 +24,9 @@ struct ControlInputs {
     double roll = 0.0;                       ///< −1 … 1, positive = right.
     double pitch = 0.0;                      ///< −1 … 1, positive = stick forward.
     double yaw = 0.0;                        ///< −1 … 1, positive = right.
+    double drive = 0.0;                      ///< Ground: −1 full reverse … 1 full forward.
+    double steering = 0.0;                   ///< Ground: −1 … 1, positive = turn right.
+    bool brake = false;                      ///< Ground: brake.
     bool arm = false;                        ///< Arm switch.
     int flightMode = 1;                      ///< 0 … kFlightModeCount − 1.
     bool beeper = false;                     ///< Beeper switch.

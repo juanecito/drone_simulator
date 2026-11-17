@@ -174,7 +174,7 @@ TEST(World, StartsOnTheGroundAndPublishesArmingEvents) {
     world.tick(c, 0.002);
     c.arm = true;
     world.tick(c, 0.002);
-    ASSERT_TRUE(world.vehicle().controller().armed());
+    ASSERT_TRUE(world.vehicle().armed());
     EXPECT_TRUE(std::ranges::any_of(
         events, [](const Event& e) { return std::holds_alternative<ArmRefusedEvent>(e); }));
     EXPECT_TRUE(std::ranges::any_of(events, [](const Event& e) {

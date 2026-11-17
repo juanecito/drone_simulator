@@ -1759,6 +1759,40 @@ so Markdown pages appear in the generated site.
   launch, abort, stored attempts, debrief choices, the Retry menu entry, import, the
   free-rules setting and the Items tab; a GL test rendering a mission in flight.
 
+**M6 implementation notes** (in progress; deliberate scope decisions):
+
+- **Step 1 — Ground vehicle core (done):** the `Vehicle` interface now carries everything the
+  loop, missions and statistics need (armed state, battery, mass, camera, sensors, obstacle
+  contacts, payload), and `sim::World` runs either type from a `VehicleProfile`
+  (`std::variant` of the aerial and ground profiles; `World::aerialVehicle()` /
+  `groundVehicle()` for type-specific access). `core/physics` gains the ground profile (JSON in
+  `assets/vehicles/ground/`, editable parameter table, derived figures of FR-GND-13), the
+  surface materials, the drive controller and `GroundVehicle`: per-wheel spring–damper
+  suspension against a per-wheel terrain plane, Magic Formula tyres on the combined slip with
+  the surface's grip and rolling resistance, one DC gear motor per wheel on the shared battery
+  model, dynamic and holding brakes, static friction when parked, wheel encoders, rollover,
+  stuck and water detection, body and wheel contacts with obstacles. The world publishes
+  `RolloverEvent`, `VehicleStuckEvent` and `WaterEnteredEvent` and feeds the mission runner's
+  ground fields (rolled over, stuck time, in water). The terrain lookup reports the material
+  drawn on the terrain (rock → paved, grass, sand, snow). Reference profile
+  **`rover-4wd-3kg`**. Model and checks: `docs/GROUND_MODEL.md`.
+- **Layouts:** 4- and 6-wheel skid steering (FR-GND-01 M, and 6WD of the S item without
+  rocker-bogie geometry). Ackermann crawlers and tracked rovers, and the 6WD and crawler
+  reference profiles (S), come later.
+- **Drive modes:** Manual (arcade mix) and Speed control. Tank-style sticks are an input
+  mapping (`t = (L + R)/2`, `s = (L − R)/2`). The transmitter's mode index selects Manual for 0
+  and 1 (the default) and Speed control for 2 and 3; Heading hold (S), traction control (S),
+  regenerative braking (S) and the waypoint autopilot (C) are not in this step.
+- **Pilot controls:** `ControlInputs` and `PilotCommand` gain `drive` (−1 … 1), `steering` and
+  `brake`; the keyboard and joystick mappings for ground drones are step 2.
+- **Next steps:** ground input mapping (keyboard `W/S`, `A/D`, `Space` brake; gamepad
+  triggers) and arming key; vehicle type in the Vehicle tab (ground profiles, parameters and
+  derived figures), storage of ground profiles; ground visuals (body, rotating wheels,
+  suspension travel, headlights and tail lights) and cameras; ground HUD (speed, heading,
+  pitch/roll with the rollover warning from the load transfer, slope, wheel slip, drive mode);
+  ramps and bridges as driving surfaces; the parking-zone item and objective; at least four
+  ground missions.
+
 ---
 
 ## 11. Decisions, Assumptions & Open Questions

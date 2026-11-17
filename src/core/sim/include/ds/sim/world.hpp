@@ -15,6 +15,8 @@
 #include "ds/items/registry.hpp"
 #include "ds/missions/flight_rules.hpp"
 #include "ds/physics/aerial_vehicle.hpp"
+#include "ds/physics/ground_vehicle.hpp"
+#include "ds/physics/vehicle_factory.hpp"
 #include "ds/physics/wind.hpp"
 #include "ds/sim/events.hpp"
 #include "ds/sim/mission_session.hpp"
@@ -29,8 +31,9 @@
 
 namespace ds::sim {
 
-/// @brief Terrain lookup: height, normal and friction at world (x, z). Must be thread-safe.
-using GroundFunction = std::function<physics::GroundSample(double x, double z)>;
+/// @brief Terrain lookup: height, normal, friction and material at world (x, z). Must be
+/// thread-safe.
+using GroundFunction = physics::GroundQuery;
 
 /// @brief Flat ground at height 0 (tests).
 [[nodiscard]] GroundFunction flatGround(double heightM = 0.0);
@@ -41,7 +44,7 @@ using GroundFunction = std::function<physics::GroundSample(double x, double z)>;
 
 /// @brief Configuration of a world.
 struct WorldConfig {
-    physics::AerialProfile profile;     ///< Vehicle.
+    physics::VehicleProfile profile;    ///< Vehicle (aerial or ground).
     std::uint64_t seed = 1;             ///< Session seed (sensors, wind).
     GroundFunction ground;              ///< Terrain (flat ground at 0 if empty).
     std::optional<double> waterLevelM;  ///< Water surface, if any.
@@ -68,6 +71,10 @@ struct FreeFlightRules {
 
 /// @brief Maps a transmitter flight-mode index to the vehicle's mode.
 [[nodiscard]] physics::FlightMode toFlightMode(int index) noexcept;
+
+/// @brief Maps a transmitter mode index to the ground drone's drive mode: 0 and 1 (the
+/// default) = Manual, 2 and above = Speed control.
+[[nodiscard]] physics::DriveMode toDriveMode(int index) noexcept;
 
 /// @brief Converts device controls into the vehicle's pilot command.
 [[nodiscard]] physics::PilotCommand toPilotCommand(const input::ControlInputs& controls) noexcept;
@@ -100,8 +107,8 @@ public:
     void setWind(const weather::WindSettings& wind);
     /// @brief Sets the simulation clock.
     void setUtc(astro::UtcTime utc) noexcept;
-    /// @brief Replaces the vehicle (new profile) and resets.
-    void setProfile(const physics::AerialProfile& profile);
+    /// @brief Replaces the vehicle (new profile, either type) and resets.
+    void setProfile(const physics::VehicleProfile& profile);
     /// @brief Changes the visibility (VLOS limit).
     void setVisibility(double visibilityM) noexcept { config_.visibilityM = visibilityM; }
     /// @brief Changes the geographic origin (sun position).
@@ -127,9 +134,17 @@ public:
     /// @brief Event bus (handlers run on the simulation thread).
     [[nodiscard]] EventBus& events() noexcept { return events_; }
     /// @brief The vehicle.
-    [[nodiscard]] physics::AerialVehicle& vehicle() noexcept { return *vehicle_; }
+    [[nodiscard]] physics::Vehicle& vehicle() noexcept { return *vehicle_; }
     /// @brief The vehicle.
-    [[nodiscard]] const physics::AerialVehicle& vehicle() const noexcept { return *vehicle_; }
+    [[nodiscard]] const physics::Vehicle& vehicle() const noexcept { return *vehicle_; }
+    /// @brief The vehicle if it is an aerial drone, else null.
+    [[nodiscard]] physics::AerialVehicle* aerialVehicle() noexcept;
+    /// @brief The vehicle if it is an aerial drone, else null.
+    [[nodiscard]] const physics::AerialVehicle* aerialVehicle() const noexcept;
+    /// @brief The vehicle if it is a ground drone, else null.
+    [[nodiscard]] physics::GroundVehicle* groundVehicle() noexcept;
+    /// @brief The vehicle if it is a ground drone, else null.
+    [[nodiscard]] const physics::GroundVehicle* groundVehicle() const noexcept;
     /// @brief Wind model.
     [[nodiscard]] const physics::WindModel& wind() const noexcept { return wind_; }
     /// @brief Environment of the last tick.
@@ -156,7 +171,7 @@ private:
     void checkFreeRules();
 
     WorldConfig config_;
-    std::unique_ptr<physics::AerialVehicle> vehicle_;
+    std::unique_ptr<physics::Vehicle> vehicle_;
     physics::WindModel wind_;
     physics::EnvironmentSample env_;
     EventBus events_;

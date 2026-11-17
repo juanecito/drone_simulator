@@ -133,6 +133,11 @@ struct ChunkBounds {
 [[nodiscard]] std::uint32_t classifyMaterial(double height, double normalY,
                                              std::optional<double> waterLevel, double snowLine);
 
+/// @brief The material with the largest weight in classifyMaterial() (tyre grip of ground
+/// drones, FR-GND-04).
+[[nodiscard]] Material dominantMaterial(double height, double normalY,
+                                        std::optional<double> waterLevel, double snowLine);
+
 /// @brief Octahedral encoding of a unit vector into 2 × snorm16.
 [[nodiscard]] std::uint32_t encodeNormal(double x, double y, double z) noexcept;
 

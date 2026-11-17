@@ -45,6 +45,11 @@ physics::FlightMode toFlightMode(int index) noexcept {
     }
 }
 
+physics::DriveMode toDriveMode(int index) noexcept {
+    // Low and middle switch positions (the default index is 1) drive manually.
+    return index <= 1 ? physics::DriveMode::Manual : physics::DriveMode::SpeedControl;
+}
+
 physics::PilotCommand toPilotCommand(const input::ControlInputs& c) noexcept {
     physics::PilotCommand p;
     p.throttle = std::clamp(c.throttle, 0.0, 1.0);
@@ -53,6 +58,10 @@ physics::PilotCommand toPilotCommand(const input::ControlInputs& c) noexcept {
     p.yaw = std::clamp(c.yaw, -1.0, 1.0);
     p.arm = c.arm;
     p.mode = toFlightMode(c.flightMode);
+    p.drive = std::clamp(c.drive, -1.0, 1.0);
+    p.steering = std::clamp(c.steering, -1.0, 1.0);
+    p.brake = c.brake;
+    p.driveMode = toDriveMode(c.flightMode);
     p.linkValid = c.linkValid;
     return p;
 }
@@ -103,7 +112,7 @@ std::string describe(const Event& event) {
             } else if constexpr (std::is_same_v<T, MissionFailedEvent>) {
                 return "Mission failed: " + e.reason;
             } else if constexpr (std::is_same_v<T, RolloverEvent>) {
-                return "Rollover";
+                return "Rolled over — reset the vehicle";
             } else if constexpr (std::is_same_v<T, VehicleStuckEvent>) {
                 return "Vehicle stuck";
             } else if constexpr (std::is_same_v<T, GatePassedEvent>) {
@@ -122,7 +131,7 @@ World::World(WorldConfig config) : config_(std::move(config)) {
     if (!config_.ground) {
         config_.ground = flatGround();
     }
-    vehicle_ = std::make_unique<physics::AerialVehicle>(config_.profile, config_.seed);
+    vehicle_ = physics::makeVehicle(config_.profile, config_.seed);
     clockBase_ = config_.startUtc;
     clockBaseTime_ = 0.0;
     reset();
@@ -130,6 +139,22 @@ World::World(WorldConfig config) : config_(std::move(config)) {
 }
 
 World::~World() = default;
+
+physics::AerialVehicle* World::aerialVehicle() noexcept {
+    return dynamic_cast<physics::AerialVehicle*>(vehicle_.get());
+}
+
+const physics::AerialVehicle* World::aerialVehicle() const noexcept {
+    return dynamic_cast<const physics::AerialVehicle*>(vehicle_.get());
+}
+
+physics::GroundVehicle* World::groundVehicle() noexcept {
+    return dynamic_cast<physics::GroundVehicle*>(vehicle_.get());
+}
+
+const physics::GroundVehicle* World::groundVehicle() const noexcept {
+    return dynamic_cast<const physics::GroundVehicle*>(vehicle_.get());
+}
 
 void World::setGeoOrigin(const geo::Geodetic& origin) noexcept {
     config_.geoOrigin = origin;
@@ -157,7 +182,7 @@ void World::setFreeFlightRules(std::optional<FreeFlightRules> rules) {
     freeMonitor_.reset();
     if (rules) {
         freeMonitor_ = std::make_unique<missions::FlightRulesMonitor>(
-            missions::RulesSpec{}, physics::VehicleType::Aerial, rules->pilotPosition, nullptr,
+            missions::RulesSpec{}, vehicle_->type(), rules->pilotPosition, nullptr,
             terrainLineOfSight(config_.ground));
     }
 }
@@ -166,13 +191,13 @@ void World::checkFreeRules() {
     if (!freeMonitor_ || mission_) {
         return;
     }
-    const physics::AerialVehicle& v = *vehicle_;
+    const physics::Vehicle& v = *vehicle_;
     const physics::RigidBodyState& body = v.bodyState();
     missions::FlightRuleSample r;
     r.timeS = time_;
     r.position = body.position;
     r.aglM = body.position.y - env_.ground.heightM - v.restHeightM();
-    r.armed = v.controller().armed() && !v.telemetry().crashed;
+    r.armed = v.armed() && !v.telemetry().crashed;
     r.lightsOn = controls_.lights;
     r.sunElevationDeg = sunElevationDeg_;
     r.visibilityM = config_.visibilityM;
@@ -198,6 +223,7 @@ physics::EnvironmentSample World::sampleEnvironment(const physics::Vec3& positio
     env.ground = config_.ground(position.x, position.z);
     env.groundPoint = physics::Vec3(position.x, env.ground.heightM, position.z);
     env.waterLevelM = config_.waterLevelM;
+    env.groundQuery = &config_.ground;
     env.air = physics::airAt(config_.originAltitudeM + position.y, config_.air,
                              config_.originAltitudeM + env.ground.heightM);
     env.qnhHpa = config_.air.pressureHpa;
@@ -261,9 +287,13 @@ void World::setWind(const weather::WindSettings& wind) {
     restartWind();
 }
 
-void World::setProfile(const physics::AerialProfile& profile) {
+void World::setProfile(const physics::VehicleProfile& profile) {
+    const bool typeChanged = physics::profileType(profile) != vehicle_->type();
     config_.profile = profile;
-    vehicle_ = std::make_unique<physics::AerialVehicle>(config_.profile, config_.seed);
+    vehicle_ = physics::makeVehicle(config_.profile, config_.seed);
+    if (typeChanged && freeRules_) {
+        setFreeFlightRules(freeRules_);  // The rules depend on the vehicle type.
+    }
     reset();
 }
 
@@ -298,6 +328,11 @@ void World::publishVehicleEvents() {
             case Kind::ArmRefused: events_.publish(ArmRefusedEvent{e.text}); break;
             case Kind::FailsafeOn: events_.publish(FailsafeEvent{true}); break;
             case Kind::FailsafeOff: events_.publish(FailsafeEvent{false}); break;
+            case Kind::Rollover:
+                incidents_.push_back({missions::VehicleIncident::Kind::Rollover, 0.0, {}});
+                events_.publish(RolloverEvent{});
+                break;
+            case Kind::Stuck: events_.publish(VehicleStuckEvent{}); break;
             case Kind::NumericalReset:
                 // A mission attempt with invalid numbers counts as failed (NFR-REL-02).
                 incidents_.push_back(
@@ -323,7 +358,7 @@ void World::resolveObstacles() {
     }
     // Items near the vehicle that stop it; gate posts reach a few metres below the opening.
     constexpr double kQueryRadiusM = 4.0;
-    physics::AerialVehicle& v = *vehicle_;
+    physics::Vehicle& v = *vehicle_;
     struct Near {
         const items::Item* item;
         double massKg;
@@ -360,7 +395,7 @@ void World::resolveObstacles() {
 
 void World::tick(const input::ControlInputs& controls, double dt) {
     controls_ = controls;
-    physics::AerialVehicle& v = *vehicle_;
+    physics::Vehicle& v = *vehicle_;
     // Environment at the vehicle (terrain queried once per tick).
     const physics::RigidBodyState& body = v.bodyState();
     const physics::GroundSample g = config_.ground(body.position.x, body.position.z);
@@ -388,7 +423,7 @@ void World::tick(const input::ControlInputs& controls, double dt) {
     // Statistics.
     const physics::RigidBodyState& after = v.bodyState();
     stats_.durationS = time_;
-    const bool armed = v.controller().armed();
+    const bool armed = v.armed();
     if (armed) {
         stats_.flightTimeS += dt;
         stats_.distanceM += glm::length(after.position - lastPosition_);
@@ -401,13 +436,13 @@ void World::tick(const input::ControlInputs& controls, double dt) {
 }
 
 void World::fillSnapshot(WorldSnapshot& s) const {
-    const physics::AerialVehicle& v = *vehicle_;
+    const physics::Vehicle& v = *vehicle_;
     s.tick = ticks_;
     s.simTimeS = time_;
     s.utc = utc();
     s.hasVehicle = true;
-    s.profileKey = config_.profile.key;
-    s.profileName = config_.profile.name;
+    s.profileKey = physics::profileKey(config_.profile);
+    s.profileName = physics::profileName(config_.profile);
     s.body = v.bodyState();
     s.controls = controls_;
     s.attitude = physics::eulerFromOrientation(s.body.orientation);

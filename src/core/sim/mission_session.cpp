@@ -31,7 +31,7 @@ MissionSession::MissionSession(std::unique_ptr<missions::MissionRunner> runner)
 MissionSession::~MissionSession() = default;
 
 missions::VehicleSample MissionSession::sample(const World& world) {
-    const physics::AerialVehicle& v = world.vehicle();
+    const physics::Vehicle& v = world.vehicle();
     const physics::RigidBodyState& body = v.bodyState();
     const physics::VehicleTelemetry t = v.telemetry();
     missions::VehicleSample s;
@@ -48,13 +48,18 @@ missions::VehicleSample MissionSession::sample(const World& world) {
     s.batteryPct = 100.0 * t.battery.stateOfCharge;
     s.lightsOn = world.controls().lights;
     // FPV camera axis: forward, tilted up (body FRD: up is −z).
-    const double uptilt = common::degToRad(v.profile().camera.uptiltDeg);
+    const double uptilt = common::degToRad(v.camera().uptiltDeg);
     s.cameraForward = glm::normalize(
         physics::bodyToWorld(body.orientation, {std::cos(uptilt), 0.0, -std::sin(uptilt)}));
     s.sunElevationDeg = world.sunElevationDeg();
     s.visibilityM = world.config().visibilityM;
     if (const auto water = world.config().waterLevelM) {
         s.inWater = body.position.y < *water;
+    }
+    if (t.type == physics::VehicleType::Ground) {
+        s.rolledOver = t.ground.rolledOver;
+        s.stuckS = t.ground.stuckS;
+        s.inWater = s.inWater || t.ground.inWater;
     }
     return s;
 }

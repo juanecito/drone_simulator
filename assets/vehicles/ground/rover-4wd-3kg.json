@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "vehicleType": "ground",
+  "layout": "skid-steer-4wd",
+  "key": "rover-4wd-3kg",
+  "name": "4WD skid-steer rover ~3 kg (generic)",
+  "description": "Generic hobby 4WD rover kit: aluminium chassis, four 37 mm 12 V brushed gear motors (30:1, ~330 rpm), 130 mm rubber wheels on short-travel spring-damper suspension, 3S 3000 mAh LiPo, FPV camera, GPS and IMU.",
+  "chassis": {
+    "massKg": 3.0,
+    "cogHeightM": 0.11,
+    "lengthM": 0.4,
+    "widthM": 0.24,
+    "heightM": 0.13,
+    "clearanceM": 0.05,
+    "inertiaXxKgM2": 0.025,
+    "inertiaYyKgM2": 0.046,
+    "inertiaZzKgM2": 0.06,
+    "dragAreaForwardM2": 0.04,
+    "dragAreaSideM2": 0.06,
+    "dragAreaVerticalM2": 0.11,
+    "crashSpeedMs": 4.0
+  },
+  "wheels": {
+    "wheelbaseM": 0.26,
+    "trackWidthM": 0.3,
+    "radiusM": 0.065,
+    "widthM": 0.05,
+    "inertiaKgM2": 0.0002
+  },
+  "suspension": {
+    "stiffnessNPerM": 600,
+    "dampingNsPerM": 25,
+    "travelM": 0.03
+  },
+  "tyre": {
+    "gripScale": 1.0,
+    "stiffnessB": 12,
+    "shapeC": 1.35,
+    "rollingResistanceScale": 1.0
+  },
+  "drivetrain": {
+    "motorKv": 850,
+    "motorResistanceOhm": 2.4,
+    "motorNoLoadCurrentA": 0.25,
+    "motorInertiaKgM2": 1.5e-06,
+    "gearRatio": 30,
+    "gearEfficiency": 0.7,
+    "maxCurrentA": 6,
+    "brakeTorqueNm": 0.8
+  },
+  "battery": {
+    "chemistry": "lipo",
+    "cellsInSeries": 3,
+    "capacityAh": 3.0,
+    "cellResistanceOhm": 0.008,
+    "maxDischargeC": 25,
+    "massKg": 0.24,
+    "heatCapacityJPerK": 220,
+    "coolingWPerK": 0.5,
+    "lowCellVoltage": 3.5,
+    "criticalCellVoltage": 3.3,
+    "cutoffCellVoltage": 3.0
+  },
+  "electrical": {
+    "avionicsCurrentA": 0.6,
+    "escEfficiency": 0.93
+  },
+  "sensors": {
+    "gyroNoiseDps": 0.1,
+    "gyroBiasDps": 0.5,
+    "gyroBiasWalkDps": 0.005,
+    "accelNoiseMs2": 0.05,
+    "accelBiasMs2": 0.05,
+    "vibrationMs2": 0.6,
+    "baroNoiseM": 0.3,
+    "baroRateHz": 50,
+    "gpsRateHz": 10,
+    "gpsHorizontalNoiseM": 1.2,
+    "gpsVerticalNoiseM": 2.5,
+    "gpsVelocityNoiseMs": 0.08,
+    "gpsAcquisitionS": 25,
+    "magNoiseDeg": 1.0
+  },
+  "encoders": {
+    "countsPerRev": 360
+  },
+  "controller": {
+    "steeringGain": 0.8,
+    "throttleExpo": 0.2,
+    "cruiseSpeedMs": 1.8,
+    "speedP": 0.6,
+    "speedI": 1.2,
+    "failsafeDelayS": 0.5
+  },
+  "limits": {
+    "wadingDepthM": 0.05,
+    "stuckDetectS": 5.0
+  },
+  "camera": {
+    "uptiltDeg": 5,
+    "fovDeg": 110
+  }
+}

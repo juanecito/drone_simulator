@@ -15,6 +15,7 @@
 #include "ds/common/json.hpp"
 #include "ds/physics/frames.hpp"
 #include "ds/physics/powertrain.hpp"
+#include "ds/physics/profile_params.hpp"
 
 /// @file
 /// @brief Aerial drone profile: every physical, motor, propeller, battery, sensor and
@@ -147,22 +148,8 @@ struct AerialProfile {
 /// @brief Serialises a profile (round-trips through aerialProfileFromJson()).
 [[nodiscard]] common::Json aerialProfileToJson(const AerialProfile& profile);
 
-/// @brief Kind of an editable parameter.
-enum class ParamKind { Number, Integer };
-
-/// @brief An editable numeric profile parameter (Vehicle tab).
-struct ParamDescriptor {
-    std::string_view pointer;                         ///< JSON pointer, e.g. "/motor/kv".
-    std::string_view group;                           ///< Group shown in the Vehicle tab.
-    std::string_view label;                           ///< Label.
-    std::string_view unit;                            ///< Unit symbol ("" if none).
-    double min;                                       ///< Smallest valid value.
-    double max;                                       ///< Largest valid value.
-    int decimals;                                     ///< Decimals shown.
-    ParamKind kind;                                   ///< Number or integer.
-    std::function<double(const AerialProfile&)> get;  ///< Reads the value.
-    std::function<void(AerialProfile&, double)> set;  ///< Writes the value.
-};
+/// @brief An editable numeric aerial profile parameter (Vehicle tab).
+using ParamDescriptor = BasicParamDescriptor<AerialProfile>;
 
 /// @brief All editable numeric parameters, in display order. The JSON reader uses the same
 /// ranges, so the editor can never produce a profile the loader rejects.
