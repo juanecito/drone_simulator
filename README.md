@@ -4,6 +4,9 @@ Realistic 3D desktop simulator for **aerial drones** (multirotors) and **ground 
 (RC rovers), with mission-based play, real-world or procedural terrain, weather and an
 astronomically correct day/night sky.
 
+![image alt text](docs/img/screenshot_drone_simulator.png)
+
+
 - **Language:** C++23 · **GUI:** Qt 6 Widgets · **Graphics:** OpenGL 4.5 core
 - **Build:** CMake + Ninja · **Tests:** GoogleTest + CTest · **Docs:** Doxygen + Markdown
 - **Platform:** Debian 13 (amd64), distributed as a `.deb` package installed in `/opt/drone_simulator`
