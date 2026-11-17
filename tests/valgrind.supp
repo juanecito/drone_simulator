@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+# SPDX-License-Identifier: MIT
+#
+# Valgrind suppressions for scripts/test/run-valgrind.sh: one-time allocations and known
+# false positives inside system libraries (font cache, GL drivers, D-Bus/GLib), as in
+# tests/lsan.supp. Never suppress frames of our own code (NFR-REL-05).
+# "..." matches any number of frames, so each entry hides errors whose stack passes
+# through the named library.
+
+# --- Leaks: allocations kept for the life of the process ------------------------------------
+{
+   fontconfig-cache
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libfontconfig.so*
+}
+{
+   dbus-connection
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libdbus-1.so*
+}
+{
+   # Dependency list of a dlopen()ed library that stays loaded (Qt plugins, GL vendor library).
+   dlopen-dependency-list
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   fun:malloc
+   ...
+   fun:_dl_map_object_deps
+}
+{
+   nvidia-glx
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libGLX_nvidia.so*
+}
+{
+   nvidia-glcore
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-eglcore
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libnvidia-eglcore.so*
+}
+{
+   mesa-gallium
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libgallium*.so*
+}
+{
+   mesa-llvm
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   ...
+   obj:*/libLLVM*.so*
+}
+
+# --- X11: request padding bytes are never initialised by libxcb -----------------------------
+{
+   xcb-writev-padding
+   Memcheck:Param
+   writev(vector[0])
+   ...
+   obj:*/libxcb.so*
+}
+
+# --- Proprietary NVIDIA driver: uninitialised values in its own memory ----------------------
+# The driver uses custom allocators and ioctls that Valgrind cannot follow.
+{
+   nvidia-glcore-cond
+   Memcheck:Cond
+   ...
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-glcore-value8
+   Memcheck:Value8
+   ...
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-glcore-addr4
+   Memcheck:Addr4
+   ...
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-glcore-addr8
+   Memcheck:Addr8
+   ...
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-glx-cond
+   Memcheck:Cond
+   ...
+   obj:*/libGLX_nvidia.so*
+}
+{
+   nvidia-glcore-realloc-zero
+   Memcheck:ReallocZero
+   fun:realloc
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-glcore-memalign-zero
+   Memcheck:BadSize
+   fun:posix_memalign
+   obj:*/libnvidia-glcore.so*
+}
+{
+   nvidia-ioctl
+   Memcheck:Param
+   ioctl(generic)
+   ...
+   obj:*/libnvidia-*.so*
+}

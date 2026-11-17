@@ -76,6 +76,29 @@ ctest --preset debug -L integration     # GUI, OpenGL and command-line tests
   asserts 60 FPS on hardware renderers.
 - **Command-line tests** run the real executable (`--version`, `--help`, invalid options).
 
+### Valgrind
+
+`scripts/test/run-valgrind.sh` runs the test executables under Valgrind (memcheck by default;
+`--tool helgrind` or `drd` for threading errors). Each executable runs once under Valgrind,
+two at a time (`-j N`). Use a build without sanitizers: the default is `build/debug`, and
+ASan builds are refused.
+
+```sh
+scripts/test/run-valgrind.sh                                  # all except ds_gl_tests
+scripts/test/run-valgrind.sh -f 'MissionRunner.*' ds_unit_tests
+scripts/test/run-valgrind.sh --tool helgrind ds_mission_flight_tests
+scripts/test/run-valgrind.sh --gl -f 'Viewport.*' ds_gl_tests  # native OpenGL, slow
+scripts/test/run-valgrind.sh --help
+```
+
+Logs go to `build/debug/valgrind/<executable>.{valgrind,test}.log`. The summary keeps
+**Valgrind errors** (invalid accesses, uninitialised values, definite or indirect leaks)
+apart from **test failures**. Tests run 20–50× slower under Valgrind, so a test that waits a
+fixed time for the simulation can fail with no memory error at all. Known noise from system
+libraries (font cache, GL drivers, D-Bus) is suppressed by `tests/valgrind.supp`. Never add
+our own code there. `--gen-suppressions` writes a suppression block for every error into the
+log, which helps extend the file. The script exits with 1 if anything failed.
+
 ## Shaders and data files at run time
 
 The program looks for `shaders/` and `sky/` in `$DS_ASSETS_DIR`, then in `<executable>/../share`

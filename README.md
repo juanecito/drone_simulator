@@ -140,6 +140,7 @@ third_party/glad/    Generated OpenGL 4.5 core loader
 packaging/           Desktop entry, icon, Debian copyright
 cmake/               Build helpers (warnings, sanitizers, modules, docs, packaging)
 scripts/ci/          Dependency install and .deb clean-install test
+scripts/test/        Test helpers (run the tests under Valgrind)
 scripts/data/        Generators of the astronomy tables, star catalogue and moon texture
 scripts/fixtures/    Generators of the reference data the tests compare against
 assets/shaders/      GLSL 4.50 shaders (installed to share/shaders)
