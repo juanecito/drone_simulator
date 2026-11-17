@@ -3,6 +3,7 @@
 
 #include "ds/app/settings_panel.hpp"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QFormLayout>
@@ -64,6 +65,24 @@ SettingsPanel::SettingsPanel(SettingsController& settings, QWidget* parent)
                 coordinates_->setCurrentIndex(coordinates_->findData(int(display)));
             });
 
+    // Flight rules (FR-MIS-06d).
+    enforceRules_ = new QCheckBox(tr("&End free flights that break a flight rule"));
+    enforceRules_->setObjectName(QStringLiteral("EnforceRulesCheck"));
+    enforceRules_->setToolTip(
+        tr("Free mode always shows warnings for the 120 m height limit and visual line of "
+           "sight. When checked, a rule broken for longer than allowed also ends the flight, "
+           "as in a mission."));
+    enforceRules_->setChecked(settings.enforceFreeFlightRules());
+    connect(enforceRules_, &QCheckBox::toggled, this,
+            [this](bool on) { settings_->setEnforceFreeFlightRules(on); });
+    connect(&settings, &SettingsController::enforceFreeFlightRulesChanged, this, [this](bool on) {
+        const QSignalBlocker blocker(enforceRules_);
+        enforceRules_->setChecked(on);
+    });
+    auto* rulesGroup = new QGroupBox(tr("Flight rules"));
+    auto* rulesLayout = new QVBoxLayout(rulesGroup);
+    rulesLayout->addWidget(enforceRules_);
+
     auto* displayGroup = new QGroupBox(tr("Display"));
     auto* displayForm = new QFormLayout(displayGroup);
     displayForm->addRow(tr("&Units:"), units_);
@@ -100,6 +119,7 @@ SettingsPanel::SettingsPanel(SettingsController& settings, QWidget* parent)
 
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(displayGroup);
+    layout->addWidget(rulesGroup);
     layout->addWidget(dataGroup);
     layout->addWidget(later);
     layout->addStretch(1);

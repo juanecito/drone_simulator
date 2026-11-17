@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "basics-04-crosswind",
+  "title": "Crosswind transit",
+  "briefing": "A moderate breeze blows from the west across your track. Fly to the two beacons to the north and come back to land, keeping the battery above 20 %. The wind will push you east: lean into it.",
+  "difficulty": 3,
+  "chapter": "basics",
+  "order": 4,
+  "terrain": {
+    "source": "procedural",
+    "seed": 404,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [52.0907, 5.1214, 5],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-10-03T10:00:00Z",
+    "timeZone": "Europe/Amsterdam",
+    "weather": {
+      "seed": 1,
+      "preset": "broken-clouds",
+      "temperatureC": 12,
+      "wind": {
+        "level": 4,
+        "fromDeg": 270
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 300,
+    "minBatteryPct": 20
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "b1",
+      "name": "Beacon 1",
+      "local": [0, 20, -150],
+      "radiusM": 5
+    },
+    {
+      "type": "waypoint",
+      "id": "b2",
+      "name": "Beacon 2",
+      "local": [0, 20, -300],
+      "radiusM": 5
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "b1",
+      "type": "reachWaypoint",
+      "target": "b1"
+    },
+    {
+      "id": "b2",
+      "type": "reachWaypoint",
+      "target": "b2"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 200
+      },
+      {
+        "maxTimeS": 140,
+        "minBatteryPct": 50
+      }
+    ]
+  }
+}

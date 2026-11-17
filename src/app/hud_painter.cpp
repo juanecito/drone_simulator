@@ -7,7 +7,9 @@
 #include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <vector>
@@ -19,6 +21,8 @@ QColor colorFor(sim::HudLevel level) {
     switch (level) {
         case sim::HudLevel::Caution: return {255, 190, 40};
         case sim::HudLevel::Warning: return {255, 70, 60};
+        case sim::HudLevel::Good: return {110, 230, 120};
+        case sim::HudLevel::Muted: return {170, 170, 170};
         case sim::HudLevel::Normal: break;
     }
     return {245, 245, 245};
@@ -198,6 +202,104 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
     p.restore();
 }
 
+namespace {
+
+// Mission panel (left, under the position panel); returns its bottom edge.
+double missionPanel(QPainter& p, QPointF at, const sim::HudMission& m, double maxWidth) {
+    const QFontMetricsF fm(p.font());
+    const double line = fm.height() * 1.1;
+    std::vector<std::pair<QString, sim::HudLevel>> lines;
+    lines.emplace_back(QString::fromStdString(m.title), sim::HudLevel::Normal);
+    lines.emplace_back(QString::fromStdString(m.state.text + "   " + m.timer.text),
+                       m.timer.level != sim::HudLevel::Normal ? m.timer.level : m.state.level);
+    for (const sim::HudItem& o : m.objectives) {
+        lines.emplace_back(QString::fromStdString(o.text), o.level);
+    }
+    for (const sim::HudItem& n : m.notes) {
+        lines.emplace_back(QString::fromStdString(n.text), n.level);
+    }
+    double width = 0.0;
+    for (auto& [text, level] : lines) {
+        text = fm.elidedText(text, Qt::ElideRight, maxWidth);
+        width = std::max(width, fm.horizontalAdvance(text));
+    }
+    const QRectF plate(at.x() - 6, at.y() - 4, width + 12,
+                       line * static_cast<double>(lines.size()) + 8);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 110));
+    p.drawRoundedRect(plate, 4, 4);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        // The state line uses the state's colour, the title is white.
+        const QColor color =
+            i == 1 && m.timer.level == sim::HudLevel::Normal ? colorFor(m.state.level)
+                                                              : colorFor(lines[i].second);
+        outlinedText(p, at, lines[i].first, color, Qt::AlignLeft);
+        at.ry() += line;
+    }
+    return plate.bottom();
+}
+
+// Guidance marker: a diamond over the target with its label, or an arrow at the screen edge
+// pointing towards it.
+void marker(QPainter& p, const QRectF& area, const graphics::Camera& camera,
+            const sim::HudMarker& m, double scale) {
+    const double r = 7.0 * scale;
+    const QRectF inner = area.adjusted(30 * scale, 30 * scale, -30 * scale, -30 * scale);
+    const auto projected = projectToScreen(camera, area, m.position);
+    const QColor color(90, 220, 255);
+    if (projected && inner.contains(*projected)) {
+        const QPointF c = *projected;
+        QPolygonF diamond{{c.x(), c.y() - r}, {c.x() + r, c.y()}, {c.x(), c.y() + r},
+                          {c.x() - r, c.y()}};
+        p.setPen(QPen(QColor(0, 0, 0, 200), 3.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawPolygon(diamond);
+        p.setPen(QPen(color, 1.8));
+        p.drawPolygon(diamond);
+        outlinedText(p, {c.x(), c.y() + r + 2}, QString::fromStdString(m.label), color,
+                     Qt::AlignHCenter);
+        return;
+    }
+    // Off screen or behind: an arrow at the edge, on the side to turn to.
+    QPointF dir;
+    const glm::dvec3 rel = m.position - camera.position;
+    const glm::vec4 v = camera.view() * glm::vec4(glm::vec3(rel), 0.0F);
+    dir = QPointF(v.x, -v.y);  // Left/right and up/down as seen from the camera.
+    const double len = std::hypot(dir.x(), dir.y());
+    if (len < 1e-6) {
+        dir = QPointF(0.0, 1.0);
+    } else {
+        dir /= len;
+    }
+    const QPointF c = inner.center();
+    const double tx = std::abs(dir.x()) > 1e-6 ? 0.5 * inner.width() / std::abs(dir.x()) : 1e9;
+    const double ty = std::abs(dir.y()) > 1e-6 ? 0.5 * inner.height() / std::abs(dir.y()) : 1e9;
+    const QPointF tip = c + dir * std::min(tx, ty);
+    const QPointF side(-dir.y(), dir.x());
+    QPolygonF arrow{tip, tip - dir * (2.2 * r) + side * r, tip - dir * (2.2 * r) - side * r};
+    p.setPen(QPen(QColor(0, 0, 0, 200), 2.0));
+    p.setBrush(color);
+    p.drawPolygon(arrow);
+    const QPointF label = tip - dir * (3.5 * r);
+    outlinedText(p, {label.x(), label.y() - 0.5 * QFontMetricsF(p.font()).height()},
+                 QString::fromStdString(m.label), color, Qt::AlignHCenter);
+}
+
+}  // namespace
+
+std::optional<QPointF> projectToScreen(const graphics::Camera& camera, const QRectF& area,
+                                       const glm::dvec3& world) {
+    const glm::vec4 clip =
+        camera.viewProjection() * glm::vec4(glm::vec3(world - camera.position), 1.0F);
+    if (clip.w <= 1e-4F) {
+        return std::nullopt;
+    }
+    const double x = clip.x / clip.w;
+    const double y = clip.y / clip.w;
+    return QPointF(area.left() + (0.5 + 0.5 * x) * area.width(),
+                   area.top() + (0.5 - 0.5 * y) * area.height());
+}
+
 void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
               const HudPaintOptions& options) {
     p.save();
@@ -240,6 +342,20 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
         }
     }
 
+    // Mission panel under the position panel; guidance markers.
+    double leftColumnTop = area.center().y() - line;
+    if (hud.mission) {
+        const double top = area.top() + margin + 4.0 * line;
+        const double bottom = missionPanel(p, {area.left() + margin, top}, *hud.mission,
+                                           0.42 * area.width());
+        leftColumnTop = std::max(leftColumnTop, bottom + 0.6 * line);
+    }
+    if (options.camera != nullptr) {
+        for (const sim::HudMarker& m : hud.markers) {
+            marker(p, area, *options.camera, m, options.scale);
+        }
+    }
+
     // Clocks and timer (top right).
     column(p, {area.right() - margin, area.top() + margin},
            {&hud.clockLocal, &hud.clockUtc, &hud.timer}, Qt::AlignRight);
@@ -261,7 +377,7 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
 
     // Heights and climb (left middle); speeds, distances and wind (right middle).
     const double middle = area.center().y() - line;
-    column(p, {area.left() + margin, middle},
+    column(p, {area.left() + margin, std::max(middle, leftColumnTop)},
            {&hud.altitudeAgl, &hud.altitudeAmsl, &hud.verticalSpeed}, Qt::AlignLeft);
     column(p, {area.right() - margin, middle},
            {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind}, Qt::AlignRight);

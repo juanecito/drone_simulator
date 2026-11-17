@@ -382,9 +382,42 @@ struct MissionRunner::Impl {
         }
     }
 
+    // Where the pilot has to go next for objective @p t (guidance markers).
+    void updateTarget(Tracker& t) const {
+        ItemId item;
+        std::optional<Vec3> point;
+        switch (t.spec->type) {
+            case ObjectiveType::ReachAltitude: break;
+            case ObjectiveType::GateCourse:
+                if (!t.gates.empty()) {
+                    item = t.gates[t.gatesPassed % t.gates.size()];
+                }
+                break;
+            case ObjectiveType::Deliver: item = t.carrying ? t.drop : t.pickup; break;
+            case ObjectiveType::ReturnHome: point = spawn; break;
+            default:
+                item = t.target;
+                if (!item.valid() && t.spec->position) {
+                    point = t.point;
+                }
+                break;
+        }
+        t.status.targetKey.clear();
+        t.status.targetName.clear();
+        t.status.targetPosition = point;
+        if (const items::Item* found = registry.get(item)) {
+            t.status.targetKey = found->key;
+            t.status.targetName = found->name.empty() ? found->key : found->name;
+            t.status.targetPosition = found->transform.toWorld(found->shape.offsetM);
+        } else if (t.spec->type == ObjectiveType::ReturnHome) {
+            t.status.targetName = "Home";
+        }
+    }
+
     void syncStatuses() {
         statuses.clear();
-        for (const Tracker& t : trackers) {
+        for (Tracker& t : trackers) {
+            updateTarget(t);
             statuses.push_back(t.status);
         }
     }

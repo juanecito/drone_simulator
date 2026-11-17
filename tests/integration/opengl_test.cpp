@@ -208,4 +208,32 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
     EXPECT_GT(freeBlue, 15);
 }
 
+// A mission in flight (M5): the mission's items are drawn and the HUD shows the mission panel.
+TEST(Viewport, MissionItemsAndPanelAreDrawn) {
+    DS_REQUIRE_OPENGL_45();
+
+    ds::app::MainWindow window;
+    QSignalSpy ready(window.viewport(), &ds::app::Viewport::glReady);
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
+    if (ready.isEmpty()) {
+        ASSERT_TRUE(ready.wait(5000)) << "viewport did not initialise";
+    }
+    QTest::qWait(500);
+    const int freeObjects = window.viewport()->frameStats().objectsDrawn;
+    const auto launched = window.launchMission("racing-01-gate-run");
+    ASSERT_TRUE(launched.has_value()) << launched.error().message;
+    QTest::qWait(2000);  // Terrain streaming and exposure adaptation.
+    const QImage image = window.viewport()->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        image.save(QString::fromUtf8(dir) + QStringLiteral("/mission_view.png"));
+    }
+    // Pad, five gates (frame, posts, arrow) on top of the free-flight scene.
+    EXPECT_GE(window.viewport()->frameStats().objectsDrawn, freeObjects + 6);
+    EXPECT_TRUE(window.simulation()->missionStatus().active);
+    window.endMission();
+    EXPECT_FALSE(window.simulation()->missionActive());
+}
+
 }  // namespace

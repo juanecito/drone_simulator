@@ -54,9 +54,13 @@ public:
     /// @brief The schema document.
     [[nodiscard]] const Json& document() const noexcept;
 
+    /// @brief Copy.
     JsonSchema(const JsonSchema&) = default;
+    /// @brief Copy assignment.
     JsonSchema& operator=(const JsonSchema&) = default;
+    /// @brief Move.
     JsonSchema(JsonSchema&&) noexcept = default;
+    /// @brief Move assignment.
     JsonSchema& operator=(JsonSchema&&) noexcept = default;
     ~JsonSchema();
 

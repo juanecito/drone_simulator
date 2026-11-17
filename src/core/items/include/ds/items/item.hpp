@@ -178,6 +178,24 @@ struct Item {
     void worldBounds(Vec3& lo, Vec3& hi) const noexcept;
 };
 
+/// @brief A point inside an obstacle: the way out and how deep it is.
+struct SurfaceContact {
+    Vec3 normal{0.0, 1.0, 0.0};  ///< Unit world direction out of the obstacle.
+    double depthM = 0.0;         ///< Distance to the surface along @ref normal.
+};
+
+/// @brief Thickness of a gate's frame bars for a gate of half width @p halfWidthM and half
+/// height @p halfHeightM (drawn and solid).
+[[nodiscard]] double gateFrameThicknessM(double halfWidthM, double halfHeightM) noexcept;
+
+/// @brief True if @p item stops the vehicle: solid items and gate frames.
+[[nodiscard]] bool blocksVehicle(const Item& item) noexcept;
+
+/// @brief Contact of the world point @p p with @p item's solid volume (boxes, cylinders —
+/// trees, masts, buildings — and gate frames with their posts down to the ground), or nullopt
+/// if @p p is outside it or the item does not block vehicles.
+[[nodiscard]] std::optional<SurfaceContact> obstacleContact(const Item& item, const Vec3& p);
+
 /// @brief Default shape for an item of @p type built from its JSON @p properties (`radiusM`,
 /// `sizeM`, `widthM`, `heightM`, `polygon`, `bottomM`/`topM`, `shape`, …).
 /// @details Missing values get defaults: waypoint radius 2 m, landing pad radius 1 m, zones

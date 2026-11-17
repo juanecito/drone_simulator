@@ -23,6 +23,7 @@
 #include "ds/common/json.hpp"
 #include "ds/storage/mission_store.hpp"
 #include "ds/storage/storage_service.hpp"
+#include "test_assets.hpp"
 
 namespace {
 
@@ -61,7 +62,10 @@ struct Fixture {
         EXPECT_TRUE(s.has_value());
         storage = std::move(*s);
         missions = std::make_unique<MissionsController>(
-            ds::app::MissionFolders{.assetDir = kAssets, .userDir = userDir(), .libraryDir = {}},
+            ds::app::MissionFolders{
+                .assetDir = ds::test::assetsWithoutMissionPack(home.path().toStdString()),
+                .userDir = userDir(),
+                .libraryDir = {}},
             storage.get());
     }
     [[nodiscard]] fs::path userDir() const {
@@ -95,11 +99,11 @@ TEST(MissionsPanel, ListsTheDefaultMissionWithItsDetails) {
     for (const char* text : {"First flight", "Climb to 10 m", "Fly to the beacon",
                              "Land on the home pad", "Procedural, flatlands", "Europe/Madrid",
                              "wind level 1", "camera-250g", "Height limit 120 m",
-                             "No time limit", "Keyboard allowed", "time ≤ 1:00.0",
+                             "No time limit", "Keyboard flying allowed", "time ≤ 1:00.0",
                              "first-flight.mission.json"}) {
         EXPECT_TRUE(details.contains(QString::fromUtf8(text))) << text;
     }
-    EXPECT_FALSE(panel.findChild<QPushButton*>(QStringLiteral("StartMission"))->isEnabled());
+    EXPECT_TRUE(panel.findChild<QPushButton*>(QStringLiteral("StartMission"))->isEnabled());
     EXPECT_TRUE(panel.findChild<QPushButton*>(QStringLiteral("OpenMissionsFolder"))->isEnabled());
 }
 
@@ -182,10 +186,13 @@ TEST(MissionsPanel, MainWindowShowsTheMissionsTab) {
     ASSERT_NE(panel, nullptr);
     EXPECT_EQ(panel->selectedMission(), "first-flight");
 
-    // Without a controller the window lists the built-in missions only (none yet).
+    // Without a controller the window lists the built-in missions only.
     const ds::app::MainWindow plain;
     ASSERT_NE(plain.missions(), nullptr);
     EXPECT_TRUE(plain.missions()->folders().userDir.empty());
+    for (const auto& row : plain.missions()->missions()) {
+        EXPECT_EQ(plain.missions()->entry(row).origin, ds::missions::MissionOrigin::BuiltIn);
+    }
     EXPECT_NE(qobject_cast<MissionsPanel*>(plain.tabs()->widget(0)), nullptr);
 }
 

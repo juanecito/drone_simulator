@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "id": "basics-02-square",
+  "title": "Square circuit",
+  "briefing": "Fly a square at 15 m: three corner beacons in order, then back to the pad. Turn the drone to face where you are going — the beacons are 80 m apart.",
+  "difficulty": 1,
+  "chapter": "basics",
+  "order": 2,
+  "terrain": {
+    "source": "procedural",
+    "seed": 202,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [39.4699, -0.3763, 15],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-05-10T08:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 1,
+      "preset": "few-clouds",
+      "temperatureC": 19,
+      "wind": {
+        "level": 1,
+        "fromDeg": 90
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "c1",
+      "name": "North-west beacon",
+      "local": [0, 15, -80],
+      "radiusM": 4
+    },
+    {
+      "type": "waypoint",
+      "id": "c2",
+      "name": "North-east beacon",
+      "local": [80, 15, -80],
+      "radiusM": 4
+    },
+    {
+      "type": "waypoint",
+      "id": "c3",
+      "name": "South-east beacon",
+      "local": [80, 15, 0],
+      "radiusM": 4
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "c1",
+      "type": "reachWaypoint",
+      "target": "c1"
+    },
+    {
+      "id": "c2",
+      "type": "reachWaypoint",
+      "target": "c2"
+    },
+    {
+      "id": "c3",
+      "type": "reachWaypoint",
+      "target": "c3"
+    },
+    {
+      "id": "home",
+      "type": "returnHome",
+      "title": "Return home",
+      "radiusM": 4
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 150
+      },
+      {
+        "maxTimeS": 100
+      }
+    ]
+  }
+}

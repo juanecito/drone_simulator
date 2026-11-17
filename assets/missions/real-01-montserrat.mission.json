@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "real-01-montserrat",
+  "title": "Montserrat ridge",
+  "briefing": "Real terrain from OpenTopography (Copernicus 30 m): climb from the monastery terraces to the ridge beacon and come back. Needs your OpenTopography API key (Settings › Data providers); the area is downloaded before the flight.",
+  "difficulty": 3,
+  "chapter": "real-terrain",
+  "order": 1,
+  "terrain": {
+    "source": "online",
+    "elevationProvider": "opentopography",
+    "dataset": "COP30",
+    "origin": {
+      "geo": [41.5934, 1.8376, 0],
+      "altRef": "AGL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-05-23T08:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 3,
+      "preset": "few-clouds",
+      "temperatureC": 17,
+      "wind": {
+        "level": 2,
+        "fromDeg": 320
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "geo": [41.5934, 1.8376, 0],
+    "altRef": "AGL",
+    "headingDeg": 340
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 480
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Terrace pad",
+      "geo": [41.5934, 1.8376, 0],
+      "altRef": "AGL",
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "ridge",
+      "name": "Ridge beacon",
+      "geo": [41.5967, 1.8352, 30],
+      "altRef": "AGL",
+      "radiusM": 6
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "ridge",
+      "type": "reachWaypoint",
+      "target": "ridge"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 240
+      },
+      {
+        "maxTimeS": 160
+      }
+    ]
+  }
+}

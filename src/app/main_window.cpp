@@ -7,6 +7,10 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QFileDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QTimer>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
@@ -19,13 +23,19 @@
 #include <QVBoxLayout>
 
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <string_view>
 #include <utility>
 
 #include "ds/app/asset_paths.hpp"
+#include "ds/app/mission_setup.hpp"
 #include "ds/app/controls_panel.hpp"
 #include "ds/app/environment_panel.hpp"
+#include "ds/app/items_controller.hpp"
+#include "ds/app/items_panel.hpp"
+#include "ds/app/mission_dialogs.hpp"
 #include "ds/app/missions_controller.hpp"
 #include "ds/app/missions_panel.hpp"
 #include "ds/app/scene_controller.hpp"
@@ -56,7 +66,7 @@ constexpr std::array<PlaceholderTab, 8> kTabs{{
     {QT_TRANSLATE_NOOP("ds::app::MainWindow", "Items"), "M5"},
     {QT_TRANSLATE_NOOP("ds::app::MainWindow", "Environment"), "M2"},
     {QT_TRANSLATE_NOOP("ds::app::MainWindow", "Settings"), "M1"},
-    {QT_TRANSLATE_NOOP("ds::app::MainWindow", "History"), "M5"},
+    {QT_TRANSLATE_NOOP("ds::app::MainWindow", "History"), "M7"},
 }};
 
 QString fromView(std::string_view text) {
@@ -82,12 +92,23 @@ MainWindow::MainWindow(SettingsController* settings, MissionsController* mission
     const char* noJoysticks = std::getenv("DS_NO_JOYSTICKS");
     simulation_ = new SimulationController(*scene_, settings_, assets,
                                            noJoysticks == nullptr || *noJoysticks == '\0', this);
+    items_ = new ItemsController(*scene_, settings_, this);
+    simulation_->setFreeItems(items_->items());
+    connect(items_, &ItemsController::changed, this,
+            [this] { simulation_->setFreeItems(items_->items()); });
     createViewport();
     createPanel();
     createMenus();
     createStatusBar();
     updateSimulationActions();
+    updateMissionActions();
     restoreLayout();
+    connect(simulation_, &SimulationController::missionActiveChanged, this,
+            &MainWindow::updateMissionActions);
+    connect(simulation_, &SimulationController::missionStateChanged, this,
+            &MainWindow::updateMissionActions);
+    connect(simulation_, &SimulationController::missionFinished, this,
+            &MainWindow::onMissionFinished);
 }
 
 MainWindow::~MainWindow() {
@@ -150,14 +171,32 @@ void MainWindow::createPanel() {
     for (const auto& tab : kTabs) {
         const std::string_view title(tab.title);
         if (title == "Missions") {
-            auto* panel = new MissionsPanel(*missions_);
-            panel->setObjectName(QStringLiteral("MissionsPanel"));
-            tabs_->addTab(panel, tr(tab.title));
+            missionsPanel_ = new MissionsPanel(*missions_);
+            missionsPanel_->setObjectName(QStringLiteral("MissionsPanel"));
+            connect(missionsPanel_, &MissionsPanel::startRequested, this,
+                    &MainWindow::startMission);
+            if (settings_ != nullptr) {
+                // The last mission selected comes back on the next start (FR-UI-03).
+                if (const auto saved = settings_->readJson(settings_keys::kLastMission)) {
+                    const QJsonDocument doc = QJsonDocument::fromJson("[" + *saved + "]");
+                    missionsPanel_->selectMission(doc.array().at(0).toString().toStdString());
+                }
+                connect(missionsPanel_, &MissionsPanel::missionSelected, this,
+                        [this](const std::string& key) {
+                            settings_->writeJson(settings_keys::kLastMission,
+                                                 QJsonDocument(QJsonArray{QString::fromStdString(key)})
+                                                     .toJson(QJsonDocument::Compact)
+                                                     .mid(1)
+                                                     .chopped(1));
+                        });
+            }
+            tabs_->addTab(missionsPanel_, tr(tab.title));
             continue;
         }
         if (title == "Terrain") {
             auto* panel = new TerrainPanel(*scene_);
             panel->setObjectName(QStringLiteral("TerrainPanel"));
+            terrainPanel_ = panel;
             tabs_->addTab(panel, tr(tab.title));
             continue;
         }
@@ -167,9 +206,17 @@ void MainWindow::createPanel() {
             tabs_->addTab(panel, tr(tab.title));
             continue;
         }
+        if (title == "Items") {
+            auto* panel = new ItemsPanel(*items_, *simulation_, *scene_);
+            panel->setObjectName(QStringLiteral("ItemsPanel"));
+            itemsPanel_ = panel;
+            tabs_->addTab(panel, tr(tab.title));
+            continue;
+        }
         if (title == "Vehicle") {
             auto* panel = new VehiclePanel(*simulation_);
             panel->setObjectName(QStringLiteral("VehiclePanel"));
+            vehiclePanel_ = panel;
             tabs_->addTab(panel, tr(tab.title));
             continue;
         }
@@ -227,15 +274,27 @@ void MainWindow::createMenus() {
     quitAction->setShortcut(QKeySequence::Quit);
     quitAction->setMenuRole(QAction::QuitRole);
 
-    // Placeholders: enabled as the corresponding milestones land.
     QMenu* missionsMenu = menuBar()->addMenu(tr("&Missions"));
     missionsMenu->addAction(tr("&Show Missions"), this, [this] {
         panelDock_->show();
         tabs_->setCurrentIndex(0);  // Missions tab.
     });
-    missionsMenu->addAction(tr("&Reload Missions"), missions_, &MissionsController::reload);
+    startMissionAction_ = missionsMenu->addAction(tr("S&tart Mission…"), this, [this] {
+        startMission(missionsPanel_->selectedMission());
+    });
+    retryMissionAction_ = missionsMenu->addAction(tr("Re&try Mission"), this, [this] {
+        closeDebrief();
+        simulation_->retryMission();
+        viewport_->setFocus();
+    });
+    abortMissionAction_ = missionsMenu->addAction(tr("&Abort Mission"), simulation_,
+                                                  &SimulationController::abortMission);
+    endMissionAction_ =
+        missionsMenu->addAction(tr("&Back to Free Flight"), this, &MainWindow::endMission);
     missionsMenu->addSeparator();
-    missionsMenu->addAction(tr("&Import Mission…"))->setEnabled(false);
+    missionsMenu->addAction(tr("&Reload Missions"), missions_, &MissionsController::reload);
+    missionsMenu->addAction(tr("&Import Mission…"), this, [this] { chooseImport(false); });
+    missionsMenu->addAction(tr("Import Mission &Folder…"), this, [this] { chooseImport(true); });
 
     // Function keys: letters are flight and camera keys in the viewport.
     QMenu* simulationMenu = menuBar()->addMenu(tr("&Simulation"));
@@ -286,6 +345,9 @@ void MainWindow::createStatusBar() {
     statusBar()->addWidget(positionLabel_, 1);
     fpsLabel_ = new QLabel;
     fpsLabel_->setObjectName(QStringLiteral("FpsLabel"));
+    missionLabel_ = new QLabel;
+    missionLabel_->setObjectName(QStringLiteral("MissionLabel"));
+    statusBar()->addPermanentWidget(missionLabel_);
     statusBar()->addPermanentWidget(stateLabel_);
     statusBar()->addPermanentWidget(fpsLabel_);
     statusBar()->addPermanentWidget(glLabel_);
@@ -378,6 +440,223 @@ void MainWindow::updateCameraReadout() {
 void MainWindow::onGlFailed(const QString& message) {
     glLabel_->setText(tr("OpenGL: unavailable"));
     emit fatalError(message);
+}
+
+// --- Mission flow ----------------------------------------------------------------------------
+
+MissionBriefingDialog* MainWindow::briefingDialog() const noexcept { return briefing_.data(); }
+MissionDebriefDialog* MainWindow::debriefDialog() const noexcept { return debrief_.data(); }
+
+void MainWindow::startMission(const std::string& key) {
+    const MissionRow* row = missions_->find(key);
+    if (row == nullptr || row->status != MissionStatus::Available || briefing_ ||
+        simulation_->missionActive()) {
+        return;
+    }
+    const bool keyboardOnly = !simulation_->joystickMapping().has_value();
+    briefing_ = new MissionBriefingDialog(*row, missions_->entry(*row), simulation_->profiles(),
+                                          keyboardOnly, this);
+    briefing_->setAttribute(Qt::WA_DeleteOnClose);
+    connect(briefing_, &QDialog::finished, this, [this, key](int result) {
+        // Closed: no longer "the open briefing", even before Qt deletes it.
+        const QString profile = briefing_ ? briefing_->chosenProfile() : QString();
+        briefing_.clear();
+        if (result != QDialog::Accepted) {
+            return;
+        }
+        if (auto launched = launchMission(key, profile); !launched) {
+            QMessageBox::warning(this, tr("Mission"),
+                                 tr("The mission cannot be started: %1")
+                                     .arg(QString::fromStdString(launched.error().message)));
+        }
+    });
+    briefing_->open();
+}
+
+common::Result<void> MainWindow::launchMission(const std::string& key, const QString& profileKey) {
+    if (simulation_->missionActive()) {
+        return common::makeError("another mission is being flown");
+    }
+    const MissionRow* row = missions_->find(key);
+    if (row == nullptr || row->status != MissionStatus::Available) {
+        return common::makeError("the mission is not available");
+    }
+    const missions::MissionDefinition& mission = *missions_->entry(*row).load.definition;
+    auto profile = profileKey.isEmpty()
+                       ? missionProfile(mission,
+                                        [this](const std::string& k) {
+                                            return simulation_->profileFor(QString::fromStdString(k));
+                                        })
+                       : simulation_->profileFor(profileKey);
+    if (!profile) {
+        return std::unexpected(profile.error());
+    }
+    if (auto started = simulation_->startMission(mission, *profile); !started) {
+        return started;
+    }
+    missionKey_ = key;
+    lastAttemptId_.reset();
+    // Fly full view (FR-UI-04): the panel comes back after the mission.
+    panelWasVisible_ = panelDock_->isVisible();
+    panelDock_->hide();
+    viewport_->setFocus();
+    statusBar()->showMessage(tr("Arm the drone to start the mission"), 8000);
+    return {};
+}
+
+void MainWindow::closeDebrief() {
+    if (debrief_) {
+        debrief_->disconnect(this);  // Not a choice of the pilot's.
+        debrief_->close();
+        debrief_.clear();
+    }
+}
+
+void MainWindow::endMission() {
+    closeDebrief();
+    if (!simulation_->missionActive()) {
+        return;
+    }
+    simulation_->endMission();
+    missionKey_.clear();
+    if (panelWasVisible_) {
+        panelDock_->show();
+    }
+}
+
+void MainWindow::onMissionFinished() {
+    const sim::MissionStatus& status = simulation_->missionStatus();
+    if (!status.result || missionKey_.empty()) {
+        return;
+    }
+    // The personal best before this attempt, then the attempt itself (FR-MIS-11, FR-MIS-12).
+    bestBefore_ = missions_->bestAttempt(missionKey_);
+    const astro::UtcTime started =
+        simulation_->snapshot().utc -
+        std::chrono::milliseconds(std::llround(status.elapsedS * 1000.0));
+    auto id = missions_->recordAttempt(missionKey_, *status.result, started);
+    lastAttemptId_ = id ? std::optional<std::int64_t>(*id) : std::nullopt;
+    const std::uint64_t attempt = status.attempt;
+    QTimer::singleShot(kDebriefDelayMs, this, [this, attempt] {
+        if (simulation_->missionActive() && simulation_->missionStatus().attempt == attempt &&
+            simulation_->missionStatus().result) {
+            simulation_->pause();
+            showDebrief();
+        }
+    });
+}
+
+void MainWindow::showDebrief() {
+    const sim::MissionStatus& status = simulation_->missionStatus();
+    const missions::MissionDefinition* mission = simulation_->mission();
+    if (debrief_ || mission == nullptr || !status.result) {
+        return;
+    }
+    const MissionRow* next = missions_->nextMission(missionKey_);
+    debrief_ = new MissionDebriefDialog(*mission, *status.result, status.path, bestBefore_,
+                                        next != nullptr, this);
+    debrief_->setAttribute(Qt::WA_DeleteOnClose);
+    const std::string nextKey = next != nullptr ? next->key : std::string();
+    connect(debrief_, &QDialog::finished, this, [this, nextKey] {
+        const auto choice = debrief_ ? debrief_->choice() : MissionDebriefDialog::Choice::Back;
+        debrief_.clear();  // Closed: a later attempt gets its own debrief.
+        switch (choice) {
+            case MissionDebriefDialog::Choice::Retry:
+                simulation_->retryMission();
+                viewport_->setFocus();
+                break;
+            case MissionDebriefDialog::Choice::Next:
+                endMission();
+                missionsPanel_->selectMission(nextKey);
+                startMission(nextKey);
+                break;
+            case MissionDebriefDialog::Choice::Back: endMission(); break;
+        }
+    });
+    debrief_->open();
+}
+
+void MainWindow::chooseImport(bool folder) {
+    const QString source =
+        folder ? QFileDialog::getExistingDirectory(this, tr("Import Mission Folder"))
+               : QFileDialog::getOpenFileName(this, tr("Import Mission"), QString(),
+                                              tr("Mission files (*.json)"));
+    if (!source.isEmpty()) {
+        importMission(source);
+    }
+}
+
+void MainWindow::importMission(const QString& source) {
+    auto imported = missions_->importMission(source.toStdString());
+    if (!imported && imported.error().message.ends_with("already exists")) {
+        const auto answer = QMessageBox::question(
+            this, tr("Import Mission"),
+            tr("%1\n\nReplace the mission in your folder?")
+                .arg(QString::fromStdString(imported.error().message)));
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+        imported = missions_->importMission(source.toStdString(), true);
+    }
+    if (!imported) {
+        QMessageBox::warning(this, tr("Import Mission"),
+                             tr("The mission cannot be imported: %1")
+                                 .arg(QString::fromStdString(imported.error().message)));
+        return;
+    }
+    // Select it: its row is the one whose file is the imported one.
+    for (const MissionRow& row : missions_->missions()) {
+        if (missions_->entry(row).load.file == *imported) {
+            missionsPanel_->selectMission(row.key);
+            const QString state = row.status == MissionStatus::Invalid
+                                      ? tr("it has errors, see the Missions tab")
+                                      : tr("ready");
+            statusBar()->showMessage(
+                tr("Imported %1 — %2").arg(QString::fromStdString(row.title), state), 8000);
+            break;
+        }
+    }
+    panelDock_->show();
+    tabs_->setCurrentWidget(missionsPanel_);
+}
+
+void MainWindow::updateMissionActions() {
+    const bool active = simulation_->missionActive();
+    const auto state = simulation_->missionStatus().state;
+    const bool running = active && (state == missions::MissionState::InProgress ||
+                                    state == missions::MissionState::PreFlight);
+    startMissionAction_->setEnabled(!active);
+    retryMissionAction_->setEnabled(active);
+    abortMissionAction_->setEnabled(running);
+    endMissionAction_->setEnabled(active);
+    missionsPanel_->setMissionActive(active);
+    // Mission rules: the scene and the vehicle are the mission's (FR-MIS-09).
+    // The Items tab shows the mission's items, read only.
+    for (QWidget* w : {terrainPanel_, vehiclePanel_, static_cast<QWidget*>(environmentPanel_)}) {
+        if (w != nullptr) {
+            w->setEnabled(!active);
+        }
+    }
+    resetAction_->setEnabled(!active);
+    if (!active) {
+        missionLabel_->clear();
+        return;
+    }
+    const missions::MissionDefinition* mission = simulation_->mission();
+    QString text;
+    switch (state) {
+        case missions::MissionState::Briefing:
+        case missions::MissionState::PreFlight: text = tr("pre-flight"); break;
+        case missions::MissionState::InProgress: text = tr("in progress"); break;
+        case missions::MissionState::Succeeded: text = tr("succeeded"); break;
+        case missions::MissionState::Failed: text = tr("failed"); break;
+        case missions::MissionState::Aborted: text = tr("aborted"); break;
+        case missions::MissionState::Debrief: text = tr("debrief"); break;
+    }
+    missionLabel_->setText(tr("Mission: %1 — %2")
+                               .arg(mission != nullptr ? QString::fromStdString(mission->title)
+                                                       : QString(),
+                                    text));
 }
 
 }  // namespace ds::app

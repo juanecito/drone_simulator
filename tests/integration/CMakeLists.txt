@@ -23,7 +23,8 @@ function(ds_add_integration_test target)
 endfunction()
 
 ds_add_integration_test(ds_gui_tests FORCE_OFFSCREEN SOURCES main_window_test.cpp settings_test.cpp
-    scene_panels_test.cpp simulation_panels_test.cpp missions_panel_test.cpp)
+    scene_panels_test.cpp simulation_panels_test.cpp missions_panel_test.cpp
+    mission_pack_test.cpp)
 target_compile_definitions(ds_gui_tests PRIVATE DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 ds_add_integration_test(ds_gl_tests SOURCES opengl_test.cpp scene_render_test.cpp)
 target_link_libraries(ds_gl_tests PRIVATE ds::terrain ds::astro)
@@ -32,3 +33,7 @@ ds_add_integration_test(ds_storage_integration_tests FORCE_OFFSCREEN SOURCES sto
     mission_library_test.cpp)
 target_compile_definitions(ds_storage_integration_tests PRIVATE
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
+ds_add_integration_test(ds_mission_flight_tests FORCE_OFFSCREEN SOURCES mission_flight_test.cpp)
+target_compile_definitions(ds_mission_flight_tests PRIVATE
+    DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
+ds_add_integration_test(ds_mission_flow_tests FORCE_OFFSCREEN SOURCES mission_flow_test.cpp)

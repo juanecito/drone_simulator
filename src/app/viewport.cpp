@@ -314,6 +314,7 @@ void Viewport::paintHud(const SimulationController& sim) {
     options.horizon = sim.cameraMode() == graphics::CameraMode::Fpv;
     options.blinkOn = (ms / 500) % 2 == 0;
     options.scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
+    options.camera = &lastCamera_;
     ds::app::paintHud(painter, rect(), sim.hud(), options);
 }
 

@@ -45,17 +45,28 @@ struct PayloadReleasedEvent {};
 /// @brief A mission objective was completed (M5).
 struct ObjectiveCompletedEvent {
     std::string objectiveId;  ///< Objective.
+    std::string title;        ///< Its display text.
 };
 /// @brief A mission objective failed (M5).
 struct ObjectiveFailedEvent {
     std::string objectiveId;  ///< Objective.
     std::string reason;       ///< Why.
+    std::string title;        ///< Its display text.
 };
 /// @brief The mission succeeded (M5).
 struct MissionSucceededEvent {};
 /// @brief The mission failed (M5).
 struct MissionFailedEvent {
     std::string reason;  ///< Why.
+};
+/// @brief Something else the mission reports (start, wrong gate, failure injected, abort).
+struct MissionMessageEvent {
+    std::string text;  ///< Message.
+};
+/// @brief Free mode with enforced flight rules (FR-MIS-06d): a rule was broken for longer than
+/// allowed, the flight ends.
+struct FlightRuleBrokenEvent {
+    std::string message;  ///< The rule's warning text.
 };
 /// @brief Battery warning level changed.
 struct BatteryWarningEvent {
@@ -91,7 +102,7 @@ using EventBus =
     common::EventBus<CollisionEvent, CrashEvent, GatePassedEvent, ZoneEnteredEvent, ZoneExitedEvent,
                      PayloadAttachedEvent, PayloadReleasedEvent, ObjectiveCompletedEvent,
                      ObjectiveFailedEvent, MissionSucceededEvent, MissionFailedEvent,
-                     BatteryWarningEvent, RolloverEvent, VehicleStuckEvent, WaterEnteredEvent,
+                     MissionMessageEvent, FlightRuleBrokenEvent, BatteryWarningEvent, RolloverEvent, VehicleStuckEvent, WaterEnteredEvent,
                      SimResetEvent, ArmingEvent, ArmRefusedEvent, FailsafeEvent,
                      NumericalResetEvent>;
 /// @brief Any simulation event.

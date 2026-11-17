@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -47,6 +48,16 @@ struct EnvironmentSample {
     GroundSample ground;                ///< Terrain under the vehicle (local plane for contacts).
     std::optional<double> waterLevelM;  ///< World height of the water surface, if any.
 };
+
+/// @brief A collision point inside an obstacle (see AerialVehicle::resolveObstacles()).
+struct ObstacleContact {
+    Vec3 normal{0.0, 1.0, 0.0};  ///< Unit world direction out of the obstacle.
+    double depthM = 0.0;         ///< Penetration along @ref normal.
+    std::string name;            ///< Obstacle name, for the crash reason.
+};
+
+/// @brief The contact of a world point with the obstacles around it, or nullopt.
+using ObstacleProbe = std::function<std::optional<ObstacleContact>(const Vec3& point)>;
 
 /// @brief Something that happened to the vehicle during a tick.
 struct VehicleEvent {

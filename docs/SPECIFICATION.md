@@ -1634,7 +1634,7 @@ so Markdown pages appear in the generated site.
   orthophoto mosaics and GPU streaming, attribution overlay, Terrain tab (online/file),
   Settings → Data providers with the OS keyring (QtKeychain), and the integration tests.
 
-**M5 implementation notes** (in progress; deliberate scope decisions):
+**M5 implementation notes** (done; deliberate scope decisions):
 
 - **Step 1 — Core items and missions (done):** `core/items`: item types and shapes, the
   registry with 64-bit generational ids, CRUD, change notifications, undo/redo (generations of
@@ -1679,14 +1679,74 @@ so Markdown pages appear in the generated site.
   warnings — or every error of an invalid file — and the file path. *Reload* (also
   *Missions › Reload Missions*) rescans the folders (FR-MIS-01a); *Open Folder* opens the
   user's mission folder in the file manager. The first available mission is selected and the
-  selection survives a reload. *Start Mission* is shown disabled until mission flight is
-  wired in; *Import mission* stays a disabled menu entry for now. The tab reads everything
+  selection survives a reload, and the last selected mission comes back at the next start
+  (FR-UI-03). *Start* (or a double click) opens the briefing. The tab reads everything
   through `MissionsController` (FR-UI-06).
-- **Next steps:** built-in mission pack (≥ 10 aerial; the 4 ground missions need M6; the 3
-  real-terrain missions need the GDAL raster source of M4), *Start*, *Import mission*,
-  briefing / debrief dialogs, mission rules in the simulation (time scale,
-  cameras, keyboard, profile lock), item rendering and markers, payload mass in the flight
-  model, HUD objective and rule-warning panel, and integration tests driving a real flight.
+- **Mission flow (FR-UI-07, done):** *Start* → **briefing** (top-down map with shaded terrain,
+  items, take-off point and heading, pilot, scale bar and north; briefing text, objectives,
+  conditions, rules, stars; the day/night situation of FR-MIS-06a with sunrise, sunset, sun
+  elevation, the Moon's phase and a night warning; the vehicle profile when the mission allows
+  a change; a warning when the mission needs a controller and none is set up) → *Fly*: the
+  mission's terrain and environment replace the free scene without overwriting it, the panel
+  hides (FR-UI-04), the vehicle waits on the spawn point in PreFlight and the clock starts on
+  arming → the attempt ends (success, failure or *Missions › Abort Mission*), is **stored at
+  once** in the user's database (FR-MIS-12), and after 1.5 s the simulation pauses on the
+  **debrief** (outcome, stars, per-objective results, score breakdown, penalties, the flight
+  path over the map, the comparison with the personal best before this attempt) with *Retry*
+  (a clean attempt from PreFlight), *Next mission* (the next available one in list order) and
+  *Back to free flight* (the free scene, vehicle and camera come back as they were).
+  *Missions › Import Mission… / Import Mission Folder…* copy into the user's folder (asking
+  before replacing), reload and select the mission.
+- **Mission rules in the simulation:** time scale fixed at 1×, no Free camera, no reset or
+  moved home, the vehicle profile locked (unless the mission allows choosing it in the
+  briefing), keyboard input refused when `allowKeyboard` is false, the Terrain, Environment
+  and Vehicle tabs disabled. Payloads attach their mass (and drag) to the flight model and
+  are released at the drop zone. **Solid items and gate frames are obstacles** for the
+  flight model: every collision point (propeller tips, landing gear, top) is tested against
+  them; contact pushes the drone out and removes its velocity into the obstacle; a hit above
+  half the crash speed — or any hit above 1 m/s with spinning propellers — is a crash
+  (*"collision with Mast"*), which fails a mission. Gear contacts on top of an obstacle count
+  as standing on the ground.
+- **HUD (FR-GFX-14):** a mission panel (title, state, timer with the time limit — caution
+  below 30 s, warning below 10 s —, one line per objective with its detail and the distance
+  to its target, pre-flight problems, cargo) and guidance markers on the current targets
+  (diamond on screen, arrow at the edge when off screen), hidden when `rules.showMarkers` is
+  false. Rule warnings (height, distance, line of sight, no-fly zones, …) appear with the
+  other warnings, in missions and in free flight.
+- **Item rendering:** pads, gates (frame, posts down to the ground, direction arrow),
+  obstacles (box, building, cylinder, tree, power line, wind turbine), payloads, inspection
+  targets, the pilot, and translucent no-fly zones, geofences, pickup/drop zones and survey
+  areas; the current targets glow.
+- **Free-mode flight rules (FR-MIS-06d):** *Settings › Flight rules › End the flight when a
+  rule is broken* (off by default). The rules are always monitored in free flight and shown as
+  warnings; when the setting is on, a broken rule pauses the flight.
+- **Items tab (done):** the free scene's items — list, add-item palette (gate, waypoint,
+  landing pad, box, pole, tree, building, inspection target, pickup/drop zone, no-fly zone;
+  placed 15 m in front of the drone), property editor (name, east/north or latitude/longitude,
+  altitude AGL/AMSL, heading, shape, radius, width, length, height, enabled), snap to terrain,
+  duplicate, delete, undo/redo and the gate order. The items are drawn and solid in free
+  flight, follow the terrain when it changes (AGL) and are saved with the scene in the user's
+  settings (`scene.items`). During a mission the tab lists the mission's items, read only.
+- **Built-in mission pack (done):** 12 playable aerial missions in `assets/missions/` in three
+  chapters — *Basics* (hover, square circuit, precision landing on a hillside, crosswind
+  transit), *Racing* (gate run, forest slalom with strict order) and *Operations* (parcel
+  delivery, mast inspection, field survey, restricted airspace, dusk patrol with lights and
+  VLOS, alpine valley relay) — covering every aerial objective type, plus *Montserrat ridge*
+  on online terrain, listed as unavailable until the online elevation source (M4) is built.
+  Each sits on real-world coordinates and site elevations; a test checks that pads are on
+  level ground, beacons and gates above the terrain and everything inside the terrain area.
+- **Deferred:** the 4 ground missions (M6) and the real-terrain missions (GDAL/online sources
+  of M4); physical effects of scheduled failures (the runner raises the events; the flight
+  model reacts in M7, with failure injection); mouse picking of items in the viewport
+  (FR-ITM-06, *S*); a gate-course timer in free flight; the mission editor (FR-MIS-14, *C*);
+  the History tab (M7).
+- **Tests:** headless missions flown by a stick autopilot through the real world, flight
+  model, controller and runner (*First flight* to three stars, the *Gate run* through every
+  gate in its arrow direction, cargo mass during a delivery, height-limit failure, crash
+  into the mast, crash and abort, retry, free-mode rules with and without enforcement, solid
+  free-flight items); the mission pack's validity and placement; GUI tests of the briefing,
+  launch, abort, stored attempts, debrief choices, the Retry menu entry, import, the
+  free-rules setting and the Items tab; a GL test rendering a mission in flight.
 
 ---
 

@@ -214,15 +214,116 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
             {"CANNOT ARM: " + std::string(physics::armBlockText(t.armBlock)), HudLevel::Caution});
     }
     if (t.crashed) {
-        h.warnings.push_back({"CRASHED — PRESS R TO RESET", HudLevel::Warning});
+        h.warnings.push_back({s.mission.active ? "CRASHED" : "CRASHED — PRESS R TO RESET",
+                              HudLevel::Warning});
     }
     if (t.failsafe) {
         h.warnings.push_back({"RC LINK LOST — LANDING", HudLevel::Warning});
     }
-    if (h.altitudeAgl.level == HudLevel::Warning) {
+    // Flight rules (FR-MIS-06b, FR-MIS-06d): broken ones in red, close ones in amber.
+    bool heightRule = false;
+    for (const missions::RuleWarning& w : s.ruleWarnings) {
+        heightRule = heightRule || w.rule == missions::FlightRule::Height;
+        h.warnings.push_back({w.message, w.broken ? HudLevel::Warning : HudLevel::Caution});
+    }
+    if (h.altitudeAgl.level == HudLevel::Warning && !heightRule) {
         h.warnings.push_back({"ABOVE 120 m AGL", HudLevel::Warning});
     }
+    buildMissionHud(s.mission, pos, o, h);
     return h;
+}
+
+std::string missionClock(double seconds) {
+    const double t = std::max(seconds, 0.0);
+    const auto tenths = static_cast<long long>(std::floor(t * 10.0));
+    return std::format("{}:{:02d}.{}", tenths / 600, static_cast<int>((tenths / 10) % 60),
+                       static_cast<int>(tenths % 10));
+}
+
+void buildMissionHud(const MissionStatus& m, const physics::Vec3& vehicle, const HudOptions& o,
+                     HudModel& h) {
+    h.mission.reset();
+    h.markers.clear();
+    if (!m.active) {
+        return;
+    }
+    using missions::MissionState;
+    using missions::ObjectiveState;
+    HudMission panel;
+    panel.title = m.title;
+    switch (m.state) {
+        case MissionState::Briefing: panel.state = {"BRIEFING", HudLevel::Normal}; break;
+        case MissionState::PreFlight:
+            panel.state = {m.preflightProblems.empty() ? "PRE-FLIGHT — ARM TO START"
+                                                       : "PRE-FLIGHT — NOT READY",
+                           HudLevel::Caution};
+            break;
+        case MissionState::InProgress: panel.state = {"IN PROGRESS", HudLevel::Normal}; break;
+        case MissionState::Succeeded:
+        case MissionState::Debrief:
+            panel.state = m.result && m.result->outcome != MissionState::Succeeded
+                              ? HudItem{"MISSION ENDED", HudLevel::Warning}
+                              : HudItem{"MISSION SUCCEEDED", HudLevel::Good};
+            break;
+        case MissionState::Failed:
+            panel.state = {"MISSION FAILED" + (m.result && !m.result->failureReason.empty()
+                                                   ? ": " + m.result->failureReason
+                                                   : std::string()),
+                           HudLevel::Warning};
+            break;
+        case MissionState::Aborted: panel.state = {"MISSION ABORTED", HudLevel::Warning}; break;
+    }
+    panel.timer.text = "T " + missionClock(m.elapsedS);
+    if (m.timeLimitS) {
+        panel.timer.text += " / " + missionClock(*m.timeLimitS);
+        const double left = *m.timeLimitS - m.elapsedS;
+        if (m.state == MissionState::InProgress && left < 30.0) {
+            panel.timer.level = left < 10.0 ? HudLevel::Warning : HudLevel::Caution;
+        }
+    }
+    for (const missions::ObjectiveStatus& obj : m.objectives) {
+        HudItem line;
+        std::string text = obj.title;
+        if (obj.optional) {
+            text += " (bonus)";
+        }
+        switch (obj.state) {
+            case ObjectiveState::Completed:
+                line = {"✓ " + text, HudLevel::Good};
+                break;
+            case ObjectiveState::Failed:
+                line = {"✗ " + text + (obj.detail.empty() ? "" : " — " + obj.detail),
+                        HudLevel::Warning};
+                break;
+            case ObjectiveState::Locked: line = {"· " + text, HudLevel::Muted}; break;
+            case ObjectiveState::Active: {
+                std::string extra = obj.detail;
+                if (obj.targetPosition) {
+                    const double d = glm::length(*obj.targetPosition - vehicle);
+                    extra += (extra.empty() ? "" : ", ") + length(d, o.imperial, 0);
+                }
+                line = {"▸ " + text + (extra.empty() ? "" : " — " + extra), HudLevel::Normal};
+                if (o.showMarkers && obj.targetPosition && m.state == MissionState::InProgress) {
+                    const std::string name =
+                        obj.targetName.empty() ? obj.title : obj.targetName;
+                    h.markers.push_back(
+                        {std::format("{} {}", name,
+                                     length(glm::length(*obj.targetPosition - vehicle),
+                                            o.imperial, 0)),
+                         *obj.targetPosition});
+                }
+                break;
+            }
+        }
+        panel.objectives.push_back(std::move(line));
+    }
+    for (const std::string& p : m.preflightProblems) {
+        panel.notes.push_back({"Not ready: " + p, HudLevel::Caution});
+    }
+    if (m.payloadKg > 0.0) {
+        panel.notes.push_back({std::format("Cargo {:.2f} kg", m.payloadKg), HudLevel::Normal});
+    }
+    h.mission = std::move(panel);
 }
 
 }  // namespace ds::sim

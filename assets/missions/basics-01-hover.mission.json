@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "basics-01-hover",
+  "title": "Hold steady",
+  "briefing": "Your first lesson in control. Climb to 5 m, hold the drone over the pad for ten seconds without drifting, then put it back down. Altitude hold does the height for you: concentrate on the sticks that move you sideways.",
+  "difficulty": 1,
+  "chapter": "basics",
+  "order": 1,
+  "terrain": {
+    "source": "procedural",
+    "seed": 101,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [39.4699, -0.3763, 15],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-05-10T07:30:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 1,
+      "preset": "few-clouds",
+      "temperatureC": 18,
+      "wind": {
+        "level": 1,
+        "fromDeg": 90
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "showMarkers": true
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "climb",
+      "type": "reachAltitude",
+      "title": "Climb to 5 m",
+      "altitudeAglM": 5
+    },
+    {
+      "id": "hover",
+      "type": "hover",
+      "title": "Hover over the pad for 10 s",
+      "position": {
+        "local": [0, 5, 0]
+      },
+      "toleranceM": 1.5,
+      "altitudeToleranceM": 1,
+      "durationS": 10
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "title": "Land on the pad",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 60
+      },
+      {
+        "maxTimeS": 40
+      }
+    ]
+  }
+}

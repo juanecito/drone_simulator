@@ -5,6 +5,8 @@ ds_add_core_module(sim
     SOURCES
         fixed_step.cpp
         hud.cpp
+        item_visuals.cpp
+        mission_session.cpp
         module.cpp
         simulation_loop.cpp
         world.cpp

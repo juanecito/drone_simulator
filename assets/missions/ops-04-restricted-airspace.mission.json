@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "ops-04-restricted-airspace",
+  "title": "Restricted airspace",
+  "briefing": "The farm gate beacon is 400 m north, but a village lies in between and its airspace is closed (red zone). Fly around it, reach the beacon and come back to land. Entering the zone ends the mission.",
+  "difficulty": 3,
+  "chapter": "operations",
+  "order": 4,
+  "terrain": {
+    "source": "procedural",
+    "seed": 1010,
+    "preset": "rolling-hills",
+    "origin": {
+      "geo": [41.6488, -0.8891, 210],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    },
+    "params": {
+      "flatZones": [
+        {
+          "x": 0,
+          "z": 0,
+          "radiusM": 30,
+          "blendM": 30
+        }
+      ]
+    }
+  },
+  "environment": {
+    "utc": "2026-09-05T08:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 1,
+      "preset": "clear",
+      "temperatureC": 23,
+      "wind": {
+        "level": 2,
+        "fromDeg": 30
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 360
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "noFlyZone",
+      "id": "village",
+      "name": "Village",
+      "local": [0, 0, -200],
+      "radiusM": 80
+    },
+    {
+      "type": "waypoint",
+      "id": "gate-beacon",
+      "name": "Farm gate",
+      "local": [0, 25, -400],
+      "radiusM": 5
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "beacon",
+      "type": "reachWaypoint",
+      "title": "Reach the farm gate beacon",
+      "target": "gate-beacon"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 200
+      },
+      {
+        "maxTimeS": 140
+      }
+    ]
+  }
+}

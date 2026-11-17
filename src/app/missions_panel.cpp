@@ -166,6 +166,9 @@ QString missionDetailsHtml(const MissionRow& row, const missions::CatalogEntry& 
         for (const std::string& r : entry.load.unavailable) {
             reasons << html(r);
         }
+        if (reasons.isEmpty() && !row.statusDetail.empty()) {
+            reasons << html(row.statusDetail);
+        }
         out += QStringLiteral("<p><b>%1</b></p>").arg(tr("Not playable yet:")) + list(reasons);
     }
     if (!m.briefing.empty()) {
@@ -213,7 +216,10 @@ QString missionDetailsHtml(const MissionRow& row, const missions::CatalogEntry& 
     if (m.rules.minBatteryPct > 0.0) {
         rules << tr("Keep the battery above %1 %").arg(number(m.rules.minBatteryPct));
     }
-    rules << (m.rules.allowKeyboard ? tr("Keyboard allowed") : tr("Controller or transmitter required"));
+    // Keyboard flying is a special rule (listed below) when allowed.
+    if (!m.rules.allowKeyboard) {
+        rules << tr("Controller or transmitter required");
+    }
     for (const std::string& r : m.rules.specialRules) {
         rules << QStringLiteral("<b>%1</b>").arg(html(r));
     }
@@ -302,7 +308,18 @@ MissionsPanel::MissionsPanel(MissionsController& missions, QWidget* parent)
     start_ = new QPushButton(tr("Start Mission"));
     start_->setObjectName(QStringLiteral("StartMission"));
     start_->setEnabled(false);
-    start_->setToolTip(tr("Flying missions arrives in the next step of milestone M5."));
+    start_->setToolTip(tr("Open the briefing of the selected mission"));
+    connect(start_, &QPushButton::clicked, this, [this] {
+        if (const std::string key = selectedMission(); !key.empty() && start_->isEnabled()) {
+            emit startRequested(key);
+        }
+    });
+    connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        const std::string key = item->data(kTitle, kKeyRole).toString().toStdString();
+        if (!key.empty() && key == selectedMission() && start_->isEnabled()) {
+            emit startRequested(key);
+        }
+    });
     layout->addWidget(start_);
 
     connect(missions_, &MissionsController::missionsChanged, this, &MissionsPanel::rebuild);
@@ -389,8 +406,23 @@ void MissionsPanel::rebuild() {
     showDetails();
 }
 
-void MissionsPanel::showDetails() {
+void MissionsPanel::setMissionActive(bool active) {
+    missionActive_ = active;
+    updateStart();
+}
+
+void MissionsPanel::updateStart() {
     const MissionRow* row = missions_->find(selectedMission());
+    start_->setEnabled(!missionActive_ && row != nullptr &&
+                       row->status == MissionStatus::Available);
+}
+
+void MissionsPanel::showDetails() {
+    updateStart();
+    const MissionRow* row = missions_->find(selectedMission());
+    if (row != nullptr) {
+        emit missionSelected(row->key);
+    }
     if (row == nullptr) {
         details_->setHtml(
             QStringLiteral("<p>%1</p>")
