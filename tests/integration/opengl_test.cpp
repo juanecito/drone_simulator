@@ -23,6 +23,7 @@
 #include <memory>
 #include <utility>
 
+#include "ds/app/items_controller.hpp"
 #include "ds/app/main_window.hpp"
 #include "ds/app/opengl_check.hpp"
 #include "ds/app/scene_controller.hpp"
@@ -301,6 +302,45 @@ QImage settledFrame(ds::app::Viewport& viewport, int timeoutMs) {
 // context and rebuild them in the new one. Regression: the old objects were deleted with the
 // new context current, deleting the new renderer's objects that had the same names; the next
 // indexed draw then ran with no element buffer and crashed inside libnvidia-glcore.
+TEST(Viewport, ObstacleFiguresAreDrawn) {
+    DS_REQUIRE_OPENGL_45();
+
+    ds::app::MainWindow window;
+    QSignalSpy ready(window.viewport(), &ds::app::Viewport::glReady);
+    ds::app::EnvironmentConfig env = window.scene()->environment();
+    env.time = *ds::astro::parseUtc("2026-06-21T10:00:00Z");
+    env.animate = false;
+    window.scene()->setEnvironment(env);
+    window.simulation()->setCameraMode(ds::graphics::CameraMode::Chase);
+    window.resize(960, 600);
+    window.show();
+    ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
+    if (ready.isEmpty()) {
+        ASSERT_TRUE(ready.wait(5000)) << "viewport did not initialise";
+    }
+    QTest::qWait(500);
+    (void)settledFrame(*window.viewport(), 20000);
+    const int freeObjects = window.viewport()->frameStats().objectsDrawn;
+
+    // In front of the chase camera (looking north, −z): a man, a cow side on, a tree and a
+    // house with its front (door) towards the camera.
+    const glm::dvec3 drone = window.simulation()->snapshot().body.position;
+    ds::app::ItemsController& items = *window.items();
+    const auto add = [&](const char* shape, double east, double north, double heading) {
+        const ds::app::ItemTemplate t{ds::items::ItemType::Obstacle, shape, shape};
+        ASSERT_TRUE(items.add(t, drone.x + east, drone.z - north, heading).has_value()) << shape;
+    };
+    add("man", -1.5, 7.0, 180.0);
+    add("cow", 2.5, 9.0, 90.0);
+    add("tree", -7.0, 16.0, 0.0);
+    add("house", 7.0, 24.0, 160.0);
+    const QImage image = settledFrame(*window.viewport(), 20000);
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        image.save(QString::fromUtf8(dir) + QStringLiteral("/obstacle_figures.png"));
+    }
+    EXPECT_GE(window.viewport()->frameStats().objectsDrawn, freeObjects + 4);
+}
+
 TEST(Viewport, SurvivesTheContextBeingRecreated) {
     DS_REQUIRE_OPENGL_45();
 

@@ -454,11 +454,23 @@ void AerialVehicle::resolveObstacles(const ObstacleProbe& probe) {
     body_.position += n * deepest->depthM;
     const double normalSpeed = glm::dot(body_.velocity, n);
     if (normalSpeed < 0.0) {
-        constexpr double kRestitution = 0.2;
-        body_.velocity -= (1.0 + kRestitution) * normalSpeed * n;
+        // Impulse against an obstacle that stays put: a light one (a person) takes its share
+        // of the momentum, M / (m + M).
+        const double m = mass_.massKg;
+        const double obstacleMass = deepest->massKg;
+        const double share = std::isfinite(obstacleMass) ? obstacleMass / (m + obstacleMass) : 1.0;
+        const double restitution = std::clamp(deepest->restitution, 0.0, 1.0);
+        const double dvNormal = -(1.0 + restitution) * normalSpeed * share;
+        body_.velocity += dvNormal * n;
+        // Coulomb friction: the sliding speed drops by at most μ times the normal change.
+        const Vec3 tangential = body_.velocity - glm::dot(body_.velocity, n) * n;
+        const double slide = glm::length(tangential);
+        if (slide > 1e-9 && deepest->friction > 0.0) {
+            body_.velocity -= tangential * (std::min(slide, deepest->friction * dvNormal) / slide);
+        }
         const double impact = -normalSpeed;
-        const double meanOmega = std::accumulate(omega_.begin(), omega_.end(), 0.0) /
-                                 static_cast<double>(omega_.size());
+        const double meanOmega =
+            std::accumulate(omega_.begin(), omega_.end(), 0.0) / static_cast<double>(omega_.size());
         const bool spinning = meanOmega > kPropStrikeSpeedFraction * maxOmega_;
         if (impact > kCollisionEventSpeed) {
             pushEvent(VehicleEvent::Kind::Collision, impact);

@@ -8,7 +8,9 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <numbers>
+#include <optional>
 
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/physics/aerial_vehicle.hpp"
@@ -369,6 +371,45 @@ TEST(AerialVehicle, PayloadChangesMassAndHoverPower) {
     EXPECT_NEAR(world.vehicle().mass().massKg, empty, 1e-9);
     run(world, c, 2.0);
     EXPECT_FALSE(world.vehicle().telemetry().crashed);  // Climbs briefly, then holds.
+}
+
+TEST(AerialVehicle, ObstacleBounceFollowsMaterialAndMass) {
+    // Into a wall facing +x at 1 m/s, sliding along it at 0.5 m/s (disarmed: no crash).
+    const auto bounce = [](double restitution, double friction, double obstacleMassKg,
+                           double* vehicleMassKg = nullptr) {
+        TestStand stand(loadProfile("survey-1500g"));
+        RigidBodyState s = stand.vehicle.bodyState();
+        s.position.y = 5.0;
+        s.velocity = Vec3(-1.0, 0.0, 0.5);
+        stand.vehicle.setBodyState(s);
+        stand.vehicle.resolveObstacles([&](const Vec3&) {
+            return std::optional(ObstacleContact{.normal = Vec3(1.0, 0.0, 0.0),
+                                                 .depthM = 0.01,
+                                                 .name = "Wall",
+                                                 .restitution = restitution,
+                                                 .friction = friction,
+                                                 .massKg = obstacleMassKg});
+        });
+        if (vehicleMassKg != nullptr) {
+            *vehicleMassKg = stand.vehicle.mass().massKg;
+        }
+        return stand.vehicle.bodyState().velocity;
+    };
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    Vec3 v = bounce(0.2, 0.0, kInf);  // Frictionless: only the normal speed changes.
+    EXPECT_NEAR(v.x, 0.2, 1e-9);
+    EXPECT_NEAR(v.z, 0.5, 1e-9);
+    v = bounce(0.05, 0.0, kInf);  // Foliage barely bounces.
+    EXPECT_NEAR(v.x, 0.05, 1e-9);
+    v = bounce(0.2, 0.2, kInf);  // Friction takes μ · 1.2 m/s of the sliding speed.
+    EXPECT_NEAR(v.z, 0.5 - 0.24, 1e-9);
+    v = bounce(0.2, 0.9, kInf);  // ...but never reverses it.
+    EXPECT_NEAR(v.z, 0.0, 1e-9);
+    // An obstacle as heavy as the drone takes half of the impulse.
+    double m = 0.0;
+    (void)bounce(0.0, 0.0, kInf, &m);
+    v = bounce(0.0, 0.0, m);
+    EXPECT_NEAR(v.x, -0.5, 1e-9);
 }
 
 TEST(AerialVehicle, SimulationIsDeterministic) {

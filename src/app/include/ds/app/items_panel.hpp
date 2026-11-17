@@ -59,6 +59,7 @@ private:
     void buildUi();
     void loadEditor();
     void updateFieldVisibility();
+    void shapeChosen();
     void updateButtons();
     void latLonEdited();
     void eastNorthEdited();
@@ -68,6 +69,7 @@ private:
     SimulationController* simulation_;
     SceneController* scene_;
     bool loading_ = false;
+    double loadedMassKg_ = 0.0;       // Mass shown when the item was loaded (typical or set).
     std::vector<items::Item> shown_;  // Rows of the list (mission or free items).
 
     QLabel* note_ = nullptr;
@@ -92,6 +94,7 @@ private:
     QDoubleSpinBox* width_ = nullptr;
     QDoubleSpinBox* length_ = nullptr;
     QDoubleSpinBox* height_ = nullptr;
+    QDoubleSpinBox* mass_ = nullptr;
     QCheckBox* enabled_ = nullptr;
     QPushButton* apply_ = nullptr;
     QGroupBox* gates_ = nullptr;

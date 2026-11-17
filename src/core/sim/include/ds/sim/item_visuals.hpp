@@ -14,8 +14,9 @@
 /// @file
 /// @brief How world items look (FR-ITM-02, FR-GFX-12): simple procedural meshes per item type
 /// — landing pads with an "H", gate frames, translucent waypoint spheres and zone volumes,
-/// obstacles (boxes, cylinders, trees, buildings, power lines, wind turbines), payloads,
-/// inspection targets and the pilot. GPU-independent: produces graphics::DrawItem lists.
+/// obstacles (boxes, cylinders, buildings, power lines, wind turbines; houses, trees, cows and
+/// people drawn from their solid parts), payloads, inspection targets and the pilot.
+/// GPU-independent: produces graphics::DrawItem lists.
 /// @ingroup sim
 
 namespace ds::sim {

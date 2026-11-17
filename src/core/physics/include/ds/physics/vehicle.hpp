@@ -5,6 +5,7 @@
 
 #include <array>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,6 +55,11 @@ struct ObstacleContact {
     Vec3 normal{0.0, 1.0, 0.0};  ///< Unit world direction out of the obstacle.
     double depthM = 0.0;         ///< Penetration along @ref normal.
     std::string name;            ///< Obstacle name, for the crash reason.
+    double restitution = 0.2;    ///< Fraction of the normal speed kept when bouncing off.
+    double friction = 0.0;       ///< Coulomb friction coefficient along the surface.
+    /// @brief Mass of the obstacle, kg. It does not move; a light obstacle takes part of the
+    /// impact (the bounce is scaled by `M / (m + M)`).
+    double massKg = std::numeric_limits<double>::infinity();
 };
 
 /// @brief The contact of a world point with the obstacles around it, or nullopt.

@@ -17,11 +17,31 @@ namespace {
 
 using items::ItemType;
 
-// Default properties of a new item.
+// Height of a new item above the ground (gates and waypoints fly; the rest stands).
+double defaultAltitude(ItemType type) {
+    switch (type) {
+        case ItemType::Gate: return 3.0;
+        case ItemType::Waypoint: return 10.0;
+        case ItemType::InspectionTarget: return 2.0;
+        default: return 0.0;
+    }
+}
+
+}  // namespace
+
 common::Json defaultProperties(const ItemTemplate& t) {
     using common::Json;
     switch (t.type) {
         case ItemType::Obstacle:
+            if (t.shape == "house") {
+                return {{"shape", "house"}, {"sizeM", Json::array({8.0, 7.0, 10.0})}};
+            }
+            if (t.shape == "cow") {
+                return {{"shape", "cow"}, {"sizeM", Json::array({0.8, 1.5, 2.4})}};
+            }
+            if (t.shape == "man") {
+                return {{"shape", "man"}, {"heightM", 1.75}};
+            }
             if (t.shape == "tree") {
                 return {{"shape", "tree"}, {"heightM", 9.0}, {"radiusM", 2.5}};
             }
@@ -44,18 +64,6 @@ common::Json defaultProperties(const ItemTemplate& t) {
     }
 }
 
-// Height of a new item above the ground (gates and waypoints fly; the rest stands).
-double defaultAltitude(ItemType type) {
-    switch (type) {
-        case ItemType::Gate: return 3.0;
-        case ItemType::Waypoint: return 10.0;
-        case ItemType::InspectionTarget: return 2.0;
-        default: return 0.0;
-    }
-}
-
-}  // namespace
-
 const std::vector<ItemTemplate>& itemPalette() {
     static const std::vector<ItemTemplate> palette{
         {ItemType::Gate, "", "Gate"},
@@ -65,6 +73,9 @@ const std::vector<ItemTemplate>& itemPalette() {
         {ItemType::Obstacle, "cylinder", "Pole"},
         {ItemType::Obstacle, "tree", "Tree"},
         {ItemType::Obstacle, "building", "Building"},
+        {ItemType::Obstacle, "house", "House"},
+        {ItemType::Obstacle, "cow", "Cow"},
+        {ItemType::Obstacle, "man", "Man"},
         {ItemType::InspectionTarget, "", "Inspection target"},
         {ItemType::PickupZone, "", "Pickup zone"},
         {ItemType::DropZone, "", "Drop zone"},

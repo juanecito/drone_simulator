@@ -90,6 +90,50 @@ enum class AltitudeRef {
     Amsl,  ///< Above mean sea level: fixed.
 };
 
+/// @brief What a solid part is made of: decides how a vehicle bounces off it and slides along
+/// it, and how it is drawn.
+enum class Material {
+    Concrete,   ///< Plain obstacles, masts, gate frames.
+    Masonry,    ///< House walls and chimneys.
+    RoofTiles,  ///< House roofs.
+    Wood,       ///< Tree trunks.
+    Foliage,    ///< Tree crowns: branches and leaves.
+    Hide,       ///< Animals.
+    Skin,       ///< A person's head and hands.
+    Clothing,   ///< A person's body.
+};
+
+/// @brief Collision behaviour of a material.
+struct SurfaceProperties {
+    double restitution = 0.2;  ///< Fraction of the normal speed kept when bouncing off (0–1).
+    double friction = 0.5;     ///< Coulomb friction coefficient against the vehicle.
+};
+
+/// @brief Collision behaviour of @p material (concrete 0.2/0.5, foliage 0.05/0.9, …).
+[[nodiscard]] SurfaceProperties surfaceOf(Material material) noexcept;
+
+/// @brief One solid primitive of a compound obstacle (house, tree, cow, person), in the item's
+/// local frame. Several parts may overlap.
+struct SolidPart {
+    /// @brief Kinds of primitive.
+    enum class Kind {
+        Box,       ///< `halfExtentsM` around `centreM`.
+        Cylinder,  ///< Vertical: `radiusM`, from `centreM` (bottom centre) up `heightM`.
+        Sphere,    ///< `radiusM` around `centreM`.
+        Gable,     ///< Gable roof: base `2·halfExtentsM.x` × `2·halfExtentsM.z` centred on
+                   ///< `centreM`, rising `heightM` to a ridge along the local z axis.
+    };
+    Kind kind = Kind::Box;                   ///< Kind.
+    Vec3 centreM{0.0};                       ///< See @ref Kind.
+    Vec3 halfExtentsM{0.0};                  ///< Box half sizes; gable half width and length.
+    double radiusM = 0.0;                    ///< Cylinder / sphere radius.
+    double heightM = 0.0;                    ///< Cylinder height; gable rise.
+    Material material = Material::Concrete;  ///< What it is made of.
+
+    /// @brief Volume in m³.
+    [[nodiscard]] double volumeM3() const noexcept;
+};
+
 /// @brief Collision / containment shape, in the item's local frame (scaled by the transform).
 struct Shape {
     /// @brief Kinds of shape.
@@ -108,6 +152,15 @@ struct Shape {
     double bottomM = 0.0;         ///< Cylinder / prism bottom (−∞ allowed).
     double topM = 0.0;            ///< Cylinder / prism top (+∞ allowed).
     std::vector<Vec2> polygon;    ///< Prism outline (x, z), at least 3 vertices.
+    /// @brief Solid parts of a compound obstacle. When not empty they, not the shape, stop
+    /// vehicles; the shape is then their bounding volume.
+    std::vector<SolidPart> parts;
+    /// @brief Material of a plain (not compound) obstacle.
+    Material material = Material::Concrete;
+    /// @brief `restitution` item property: replaces the materials' value, if set.
+    std::optional<double> restitution;
+    /// @brief `friction` item property: replaces the materials' value, if set.
+    std::optional<double> friction;
 
     /// @brief Point.
     [[nodiscard]] static Shape point() { return {}; }
@@ -178,10 +231,12 @@ struct Item {
     void worldBounds(Vec3& lo, Vec3& hi) const noexcept;
 };
 
-/// @brief A point inside an obstacle: the way out and how deep it is.
+/// @brief A point inside an obstacle: the way out, how deep it is, and what was hit.
 struct SurfaceContact {
-    Vec3 normal{0.0, 1.0, 0.0};  ///< Unit world direction out of the obstacle.
-    double depthM = 0.0;         ///< Distance to the surface along @ref normal.
+    Vec3 normal{0.0, 1.0, 0.0};              ///< Unit world direction out of the obstacle.
+    double depthM = 0.0;                     ///< Distance to the surface along @ref normal.
+    Material material = Material::Concrete;  ///< Material of the part hit.
+    SurfaceProperties surface;               ///< Its bounce and friction.
 };
 
 /// @brief Thickness of a gate's frame bars for a gate of half width @p halfWidthM and half
@@ -191,19 +246,39 @@ struct SurfaceContact {
 /// @brief True if @p item stops the vehicle: solid items and gate frames.
 [[nodiscard]] bool blocksVehicle(const Item& item) noexcept;
 
-/// @brief Contact of the world point @p p with @p item's solid volume (boxes, cylinders —
-/// trees, masts, buildings — and gate frames with their posts down to the ground), or nullopt
-/// if @p p is outside it or the item does not block vehicles.
+/// @brief Contact of the world point @p p with @p item's solid volume (boxes, cylinders, the
+/// parts of compound obstacles — houses, trees, cows, people — and gate frames with their posts
+/// down to the ground), or nullopt if @p p is outside it or the item does not block vehicles.
+/// @details Inside overlapping parts, the deepest contact wins.
 [[nodiscard]] std::optional<SurfaceContact> obstacleContact(const Item& item, const Vec3& p);
 
 /// @brief Default shape for an item of @p type built from its JSON @p properties (`radiusM`,
-/// `sizeM`, `widthM`, `heightM`, `polygon`, `bottomM`/`topM`, `shape`, …).
+/// `sizeM`, `widthM`, `heightM`, `polygon`, `bottomM`/`topM`, `shape`, `restitution`,
+/// `friction`, …).
 /// @details Missing values get defaults: waypoint radius 2 m, landing pad radius 1 m, zones
-/// radius 3 m and 10 m high, gates 2 × 2 m, parking zones 2 × 3 m. Polygon vertices are
-/// offsets from the item position. Invalid properties are ignored (the mission validator
-/// reports them).
+/// radius 3 m and 10 m high, gates 2 × 2 m, parking zones 2 × 3 m. Obstacle figures (with
+/// their origin on the ground, facing local −z):
+/// - `house`: `sizeM` 8 × 7 × 10 m (width × height × length); masonry walls up to 62 % of
+///   the height, a tiled gable roof with 0.3 m eaves along the length, and a chimney;
+/// - `tree`: `radiusM` 2 m crown, `heightM` 8 m; wooden trunk and two foliage spheres;
+/// - `cow`: `sizeM` 0.8 × 1.5 × 2.4 m; body, head and four legs;
+/// - `man`: `heightM` 1.75 m (the rest scales with it); legs, torso, arms, neck and head.
+///
+/// Polygon vertices are offsets from the item position. Invalid properties are ignored (the
+/// mission validator reports them).
 [[nodiscard]] Shape defaultShape(ItemType type, const common::Json& properties);
 /// @brief True for types that block movement and sight by default (obstacles, ramps, bridges).
 [[nodiscard]] bool isSolidType(ItemType type) noexcept;
+
+/// @brief Typical mass of an obstacle figure (`shape`) of the size given by @p shape, kg:
+/// its volume times the bulk density of the figure (house 250 kg/m³ of its bounding box, a
+/// 1.75 m man 75 kg, a 0.8 × 1.5 × 2.4 m cow 650 kg, …). Infinite for items that are not
+/// obstacles.
+[[nodiscard]] double typicalMassKg(ItemType type, const common::Json& properties,
+                                   const Shape& shape);
+/// @brief Mass of @p item, kg: its `massKg` property, or typicalMassKg(). Obstacles stay where
+/// they are; the mass decides how much of a vehicle's momentum they take in a collision (a
+/// heavy drone bounces less off a person than off a wall).
+[[nodiscard]] double massKg(const Item& item);
 
 }  // namespace ds::items

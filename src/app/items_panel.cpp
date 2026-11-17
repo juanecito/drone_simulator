@@ -141,13 +141,17 @@ void ItemsPanel::buildUi() {
     heading_->setWrapping(true);
     shape_ = new QComboBox;
     shape_->setObjectName(QStringLiteral("ItemShape"));
-    for (const char* s : {"box", "building", "cylinder", "tree"}) {
+    for (const char* s : {"box", "building", "cylinder", "tree", "house", "cow", "man"}) {
         shape_->addItem(QLatin1String(s));
     }
     radius_ = spin("ItemRadius", 0.1, 5000.0, 1, " m");
     width_ = spin("ItemWidth", 0.1, 1000.0, 1, " m");
     length_ = spin("ItemLength", 0.1, 1000.0, 1, " m");
     height_ = spin("ItemHeight", 0.1, 1000.0, 1, " m");
+    mass_ = spin("ItemMass", 0.1, 1e9, 1, " kg");
+    mass_->setToolTip(
+        tr("Obstacles stay in place; a light one (a person, a cow) takes part of "
+           "the impact when a heavy drone hits it."));
     enabled_ = new QCheckBox(tr("Enabled"));
     enabled_->setObjectName(QStringLiteral("ItemEnabled"));
     apply_ = button("ApplyItem", tr("Apply"));
@@ -167,6 +171,7 @@ void ItemsPanel::buildUi() {
     form->addRow(tr("Width"), width_);
     form->addRow(tr("Length"), length_);
     form->addRow(tr("Height"), height_);
+    form->addRow(tr("Mass"), mass_);
     form->addRow(QString(), enabled_);
     form->addRow(QString(), apply_);
 
@@ -224,7 +229,7 @@ void ItemsPanel::buildUi() {
     connect(undo_, &QPushButton::clicked, items_, &ItemsController::undo);
     connect(redo_, &QPushButton::clicked, items_, &ItemsController::redo);
     connect(apply_, &QPushButton::clicked, this, &ItemsPanel::applyEdits);
-    connect(shape_, &QComboBox::currentIndexChanged, this, &ItemsPanel::updateFieldVisibility);
+    connect(shape_, &QComboBox::currentIndexChanged, this, &ItemsPanel::shapeChosen);
     connect(latitude_, &QDoubleSpinBox::editingFinished, this, &ItemsPanel::latLonEdited);
     connect(longitude_, &QDoubleSpinBox::editingFinished, this, &ItemsPanel::latLonEdited);
     connect(east_, &QDoubleSpinBox::editingFinished, this, &ItemsPanel::eastNorthEdited);
@@ -357,6 +362,9 @@ void ItemsPanel::loadEditor() {
     } else {
         height_->setValue(number(p, "heightM", 8.0));
     }
+    loadedMassKg_ = items::massKg(item);
+    mass_->setValue(std::isfinite(loadedMassKg_) ? loadedMassKg_ : 0.0);
+    loadedMassKg_ = mass_->value();  // As rounded by the spin box.
     enabled_->setChecked(item.enabled);
     loading_ = false;
     eastNorthEdited();
@@ -381,7 +389,8 @@ void ItemsPanel::updateFieldVisibility() {
     const bool obstacle = type == ItemType::Obstacle;
     const bool round =
         obstacle && (shape == QLatin1String("cylinder") || shape == QLatin1String("tree"));
-    const bool boxy = obstacle && !round;
+    const bool person = obstacle && shape == QLatin1String("man");  // Sized by height only.
+    const bool boxy = obstacle && !round && !person;
     const bool hasRadius = round || type == ItemType::Waypoint || type == ItemType::LandingPad ||
                            type == ItemType::PickupZone || type == ItemType::DropZone ||
                            type == ItemType::NoFlyZone || type == ItemType::Geofence ||
@@ -393,6 +402,29 @@ void ItemsPanel::updateFieldVisibility() {
     form->setRowVisible(length_, boxy);
     form->setRowVisible(height_, obstacle || type == ItemType::Gate ||
                                      type == ItemType::PickupZone || type == ItemType::DropZone);
+    form->setRowVisible(mass_, obstacle);
+}
+
+void ItemsPanel::shapeChosen() {
+    if (!loading_) {
+        // A new figure starts at its typical size and mass.
+        const common::Json p =
+            defaultProperties({ItemType::Obstacle, shape_->currentText().toStdString(), ""});
+        if (p.contains("radiusM")) {
+            radius_->setValue(p["radiusM"].get<double>());
+        }
+        if (p.contains("sizeM") && p["sizeM"].size() == 3) {
+            width_->setValue(p["sizeM"][0].get<double>());
+            height_->setValue(p["sizeM"][1].get<double>());
+            length_->setValue(p["sizeM"][2].get<double>());
+        } else if (p.contains("heightM")) {
+            height_->setValue(p["heightM"].get<double>());
+        }
+        const items::Shape shape = items::defaultShape(ItemType::Obstacle, p);
+        mass_->setValue(items::typicalMassKg(ItemType::Obstacle, p, shape));
+        loadedMassKg_ = mass_->value();
+    }
+    updateFieldVisibility();
 }
 
 void ItemsPanel::eastNorthEdited() {
@@ -452,6 +484,14 @@ void ItemsPanel::applyEdits() {
     } else if (form->isRowVisible(height_)) {
         p["heightM"] = height_->value();
         p.erase("sizeM");
+    }
+    // The mass is stored only once set by hand; otherwise it follows the size and shape.
+    if (form->isRowVisible(mass_)) {
+        if (mass_->value() != loadedMassKg_) {
+            p["massKg"] = mass_->value();
+        } else if (shapeOf(item) != shapeOf(*current)) {
+            p.erase("massKg");
+        }
     }
     if (auto updated = items_->update(std::move(item)); !updated) {
         QMessageBox::warning(this, tr("Items"), QString::fromStdString(updated.error().message));

@@ -372,16 +372,19 @@ TEST(MissionFlight, FreeFlightItemsAreSolidToo) {
     tree.properties = common::Json{{"shape", "tree"}, {"radiusM", 2.0}, {"heightM", 12.0}};
     tree.shape = items::defaultShape(tree.type, tree.properties);
     tree.solid = true;
-    tree.transform.position = {0.0, 0.0, -30.0};
-    w.setFreeItems({tree});
     std::string crash;
     w.events().subscribe<sim::CrashEvent>([&](const sim::CrashEvent& e) { crash = e.reason; });
     const Autopilot pilot(w);
     ASSERT_TRUE(fly(
-        w, [&] { return pilot.controls({0.0, 0.0, 0.0}, 5.0, 0.0); },
-        [&] { return w.vehicle().bodyState().position.y > 4.5; }, 20.0));
+        w, [&] { return pilot.controls({0.0, 0.0, 0.0}, 7.5, 0.0); },
+        [&] { return w.vehicle().bodyState().position.y > 7.0; }, 20.0));
+    // On the drone's track, 30 m north; it flies through the crown (centre 7.4 m up, 2 m
+    // radius). Under the crown the air is free.
+    const double x = w.vehicle().bodyState().position.x;
+    tree.transform.position = {x, 0.0, -30.0};
+    w.setFreeItems({tree});
     fly(
-        w, [&] { return pilot.controls({0.0, 5.0, -60.0}, 5.0, 7.0); },
+        w, [&] { return pilot.controls({x, 7.5, -60.0}, 7.5, 7.0); },
         [&] { return !crash.empty(); }, 20.0);
     EXPECT_NE(crash.find("Oak"), std::string::npos) << crash;
     EXPECT_GT(w.vehicle().bodyState().position.z, -30.0);

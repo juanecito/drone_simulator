@@ -804,7 +804,7 @@ query, select, transform and serialise them.
 | ID | Requirement | Pri |
 |----|-------------|-----|
 | FR-ITM-01 | Entity registry with stable unique IDs (64-bit, generational to detect stale handles). | M |
-| FR-ITM-02 | Built-in item types: **Drone** (aerial or ground), **Home point / Spawn**, **Obstacle** (box, cylinder, tree, building, power line, wind turbine), **Gate**, **Waypoint**, **Landing pad**, **Payload**, **Pickup / Drop zone**, **Inspection target**, **Survey area** (polygon), **No-fly zone / Geofence** (polygon prism or cylinder), **Pilot position** (LOS camera and line-of-sight checks; defaults to the spawn/home point). | M |
+| FR-ITM-02 | Built-in item types: **Drone** (aerial or ground), **Home point / Spawn**, **Obstacle** (box, cylinder, tree, building, house, cow, man, power line, wind turbine), **Gate**, **Waypoint**, **Landing pad**, **Payload**, **Pickup / Drop zone**, **Inspection target**, **Survey area** (polygon), **No-fly zone / Geofence** (polygon prism or cylinder), **Pilot position** (LOS camera and line-of-sight checks; defaults to the spawn/home point). | M |
 | FR-ITM-03 | Each item: id, type, name, transform (position, rotation quaternion, scale), optional geo position (lat/lon/alt with altitude reference AGL/AMSL), collision shape, render mesh, enabled/visible flags, type-specific properties. | M |
 | FR-ITM-04 | CRUD: add, remove, duplicate, rename, transform, enable/disable. | M |
 | FR-ITM-05 | Spatial queries: radius / AABB / ray / point-in-zone; uniform grid or BVH. | M |
@@ -1714,7 +1714,8 @@ so Markdown pages appear in the generated site.
   false. Rule warnings (height, distance, line of sight, no-fly zones, …) appear with the
   other warnings, in missions and in free flight.
 - **Item rendering:** pads, gates (frame, posts down to the ground, direction arrow),
-  obstacles (box, building, cylinder, tree, power line, wind turbine), payloads, inspection
+  obstacles (box, building, cylinder, power line, wind turbine; house, tree, cow and man
+  drawn from the solid parts they collide with), payloads, inspection
   targets, the pilot, and translucent no-fly zones, geofences, pickup/drop zones and survey
   areas; the current targets glow.
 - **Free-mode flight rules (FR-MIS-06d):** *Settings › Flight rules › End the flight when a

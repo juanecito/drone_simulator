@@ -121,9 +121,37 @@ Headings are degrees clockwise from true north.
 | `surveyArea` | prism from `polygon`, or a cylinder | |
 | `noFlyZone` | keep-out prism (`polygon`) or cylinder (`radiusM`), `bottomM`/`topM` optional | Entering it fails the mission. |
 | `geofence` | keep-in prism or cylinder | Leaving every geofence fails the mission. |
-| `obstacle` | `shape`: `box` (`sizeM` [w, h, l]), `cylinder`, `tree`, `building`, `powerLine`, `windTurbine` | Solid: blocks flight and the pilot's line of sight. |
+| `obstacle` | `shape`: `box` (`sizeM` [w, h, l]), `cylinder`, `tree`, `building`, `powerLine`, `windTurbine`, `house`, `cow`, `man` (see below) | Solid: blocks flight and the pilot's line of sight. |
 | `ramp`, `bridge` | box `sizeM` | Ground drones (M6). |
 | `payload` | small box | |
+
+### Obstacle figures
+
+Houses, trees, cows and people are made of several solid parts, and the drone collides with
+the parts, not with a box around them. You can fly under the eaves of a house or the crown of
+a tree, or between a cow's legs. Each part has a material that sets how the drone bounces off it
+(`restitution`) and slides along it (`friction`). Each figure also has a typical mass that
+scales with its size. Obstacles never move, but a light one takes part of the impact: a 25 kg
+drone bounces off a person less than off a wall.
+
+| `shape` | Size (defaults) | Parts and materials | Typical mass |
+|---------|-----------------|---------------------|--------------|
+| `house` | `sizeM` [8, 7, 10] (width, height, length) | masonry walls (62 % of the height), tiled gable roof along the length with 0.3 m eaves, chimney | 250 kg/m³ of the box: 140 t |
+| `tree` | `radiusM` 2 (crown), `heightM` 8 | wooden trunk, two foliage spheres | wood 700 kg/m³, crown 10 kg/m³: 1 t |
+| `cow` | `sizeM` [0.8, 1.5, 2.4] | hide: body, head (towards −z, the heading), four legs | 650 kg |
+| `man` | `heightM` 1.75 (the rest scales) | clothing: legs, torso, arms; skin: neck, head | 75 kg × (h / 1.75)³ |
+
+| Material | Restitution | Friction |
+|----------|:-----------:|:--------:|
+| concrete (boxes, masts, gate frames) | 0.2 | 0.5 |
+| masonry (walls, buildings) | 0.2 | 0.6 |
+| roof tiles | 0.25 | 0.5 |
+| wood (trunks) | 0.25 | 0.6 |
+| foliage (crowns) | 0.05 | 0.9 |
+| hide, skin | 0.1 | 0.6 |
+| clothing | 0.1 | 0.7 |
+
+`massKg`, `restitution` and `friction` on an obstacle replace these values for the whole item.
 
 ## Objectives
 
@@ -195,8 +223,8 @@ starts a clean attempt from PreFlight.
    timer, objectives with the distance to each target) and markers on the current targets.
 3. Rule warnings (height limit, distance, line of sight, no-fly zones, lights, …) appear in
    red; a rule still broken after the grace time (`rules.graceS`, 3 s by default) fails the
-   mission. Trees, masts, buildings and gate frames are **solid**: touching one with spinning
-   propellers, or hitting it hard, is a crash.
+   mission. Trees, masts, buildings, houses, animals, people and gate frames are **solid**:
+   touching one with spinning propellers, or hitting it hard, is a crash.
 4. When the attempt ends — success, failure, or *Missions › Abort Mission* — it is saved at
    once with your progress. The **debrief** follows: stars, score breakdown, the path you
    flew, and your personal best. Choose **Retry**, **Next mission** or **Back to free flight**
@@ -500,7 +528,7 @@ Seeded weather generator settings (§4.2.3).
 | `id` | id | yes | pattern `^[a-z0-9][a-z0-9._-]{0,63}$` | Identifier: lower-case letters, digits, '.', '_' and '-', at most 64 characters. |
 | `name` | string |  | min length 1, max length 200 |  |
 | `headingDeg` | number |  | ≥ 0, ≤ 360 | Heading in degrees, clockwise from true north. |
-| `shape` | "box" \| "cylinder" \| "tree" \| "building" \| "powerLine" \| "windTurbine" |  |  |  |
+| `shape` | "box" \| "cylinder" \| "tree" \| "building" \| "powerLine" \| "windTurbine" \| "house" \| "cow" \| "man" |  |  | Obstacle figure: house, tree, cow and man collide part by part (walls and roof, trunk and crown, body and legs). |
 | `radiusM` | number |  | > 0 |  |
 | `widthM` | number |  | > 0 |  |
 | `heightM` | number |  | > 0 |  |
@@ -508,7 +536,9 @@ Seeded weather generator settings (§4.2.3).
 | `polygon` | array of array[2] |  | min items 3, max items 256 | Outline as [x, z] offsets in metres from the item position (engine frame: x east, z south). |
 | `bottomM` | number |  |  |  |
 | `topM` | number |  |  |  |
-| `massKg` | number |  | > 0 |  |
+| `massKg` | number |  | > 0 | Payload mass; for obstacles, replaces the typical mass of the figure (a light obstacle takes part of a heavy drone's impact). |
+| `restitution` | number |  | ≥ 0, ≤ 1 | Obstacles: fraction of the normal speed a drone keeps when it bounces off (default from the material: concrete 0.2, foliage 0.05, …). |
+| `friction` | number |  | ≥ 0, ≤ 2 | Obstacles: Coulomb friction coefficient against the drone (default from the material: concrete 0.5, foliage 0.9, …). |
 | `order` | integer |  | ≥ 0 |  |
 
 #### utm

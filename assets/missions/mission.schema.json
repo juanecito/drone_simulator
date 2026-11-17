@@ -1144,8 +1144,12 @@
             "tree",
             "building",
             "powerLine",
-            "windTurbine"
-          ]
+            "windTurbine",
+            "house",
+            "cow",
+            "man"
+          ],
+          "description": "Obstacle figure: house, tree, cow and man collide part by part (walls and roof, trunk and crown, body and legs)."
         },
         "radiusM": {
           "type": "number",
@@ -1180,7 +1184,20 @@
         },
         "massKg": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "exclusiveMinimum": 0,
+          "description": "Payload mass; for obstacles, replaces the typical mass of the figure (a light obstacle takes part of a heavy drone's impact)."
+        },
+        "restitution": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Obstacles: fraction of the normal speed a drone keeps when it bounces off (default from the material: concrete 0.2, foliage 0.05, …)."
+        },
+        "friction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Obstacles: Coulomb friction coefficient against the drone (default from the material: concrete 0.5, foliage 0.9, …)."
         },
         "order": {
           "type": "integer",

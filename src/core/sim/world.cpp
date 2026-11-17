@@ -324,11 +324,15 @@ void World::resolveObstacles() {
     // Items near the vehicle that stop it; gate posts reach a few metres below the opening.
     constexpr double kQueryRadiusM = 4.0;
     physics::AerialVehicle& v = *vehicle_;
-    std::vector<const items::Item*> near;
+    struct Near {
+        const items::Item* item;
+        double massKg;
+    };
+    std::vector<Near> near;
     for (const items::ItemId id : registry.queryRadius(v.bodyState().position, kQueryRadiusM)) {
         const items::Item* item = registry.get(id);
         if (item != nullptr && items::blocksVehicle(*item)) {
-            near.push_back(item);
+            near.push_back({item, items::massKg(*item)});
         }
     }
     if (near.empty()) {
@@ -336,14 +340,18 @@ void World::resolveObstacles() {
     }
     v.resolveObstacles([&near](const physics::Vec3& p) -> std::optional<physics::ObstacleContact> {
         std::optional<physics::ObstacleContact> best;
-        for (const items::Item* item : near) {
+        for (const auto& [item, mass] : near) {
             const auto c = items::obstacleContact(*item, p);
             if (c && (!best || c->depthM > best->depthM)) {
                 best = physics::ObstacleContact{
-                    c->normal, c->depthM,
-                    !item->name.empty() ? item->name
-                    : !item->key.empty() ? item->key
-                                         : std::string(items::itemTypeName(item->type))};
+                    .normal = c->normal,
+                    .depthM = c->depthM,
+                    .name = !item->name.empty()  ? item->name
+                            : !item->key.empty() ? item->key
+                                                 : std::string(items::itemTypeName(item->type)),
+                    .restitution = c->surface.restitution,
+                    .friction = c->surface.friction,
+                    .massKg = mass};
             }
         }
         return best;

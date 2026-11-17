@@ -451,15 +451,18 @@ private:
         using enum ItemType;
         static const std::map<std::string_view, std::vector<ItemType>> kAllowed{
             {"shape", {Obstacle}},
-            {"radiusM", {Obstacle, Waypoint, LandingPad, PickupZone, DropZone, InspectionTarget,
-                         SurveyArea, NoFlyZone, Geofence}},
+            {"radiusM",
+             {Obstacle, Waypoint, LandingPad, PickupZone, DropZone, InspectionTarget, SurveyArea,
+              NoFlyZone, Geofence}},
             {"widthM", {Gate}},
             {"heightM", {Obstacle, Gate, PickupZone, DropZone, ParkingZone, Ramp, Bridge}},
             {"sizeM", {Obstacle, PickupZone, DropZone, ParkingZone, Ramp, Bridge, Payload}},
             {"polygon", {SurveyArea, NoFlyZone, Geofence}},
             {"bottomM", {NoFlyZone, Geofence, SurveyArea}},
             {"topM", {NoFlyZone, Geofence, SurveyArea}},
-            {"massKg", {Payload}},
+            {"massKg", {Payload, Obstacle}},
+            {"restitution", {Obstacle}},
+            {"friction", {Obstacle}},
             {"order", {Gate, Waypoint}},
         };
         const auto it = kAllowed.find(key);

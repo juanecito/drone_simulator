@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <numbers>
 
 namespace ds::sim {
@@ -42,6 +43,15 @@ constexpr glm::vec3 kTargetColor{0.85F, 0.35F, 0.05F};
 constexpr glm::vec3 kPilotColor{0.08F, 0.15F, 0.45F};
 constexpr glm::vec3 kSkin{0.6F, 0.42F, 0.3F};
 constexpr glm::vec3 kCable{0.02F};
+constexpr glm::vec3 kGlass{0.04F, 0.06F, 0.09F};
+constexpr glm::vec3 kDoor{0.2F, 0.1F, 0.05F};
+constexpr glm::vec3 kHide{0.72F, 0.7F, 0.66F};
+constexpr glm::vec3 kPatch{0.03F};
+constexpr glm::vec3 kPink{0.7F, 0.4F, 0.38F};
+constexpr glm::vec3 kHorn{0.6F, 0.55F, 0.42F};
+constexpr glm::vec3 kShirt{0.45F, 0.07F, 0.05F};
+constexpr glm::vec3 kTrousers{0.05F, 0.07F, 0.18F};
+constexpr glm::vec3 kHair{0.06F, 0.04F, 0.02F};
 
 std::string propertyString(const common::Json& p, const char* key, const char* fallback) {
     if (p.is_object() && p.contains(key) && p[key].is_string()) {
@@ -59,6 +69,34 @@ void addQuad(Mesh& m, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c
         m.vertices.push_back(MeshVertex{p, n, color, mat.emissive});
     }
     m.indices.insert(m.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+}
+
+void addTriangle(Mesh& m, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                 const MeshMaterial& mat) {
+    const glm::vec3 n = glm::normalize(glm::cross(b - a, c - a));
+    const auto base = static_cast<std::uint32_t>(m.vertices.size());
+    const glm::vec4 color(mat.albedo, mat.opacity);
+    for (const glm::vec3& p : {a, b, c}) {
+        m.vertices.push_back(MeshVertex{p, n, color, mat.emissive});
+    }
+    m.indices.insert(m.indices.end(), {base, base + 1, base + 2});
+}
+
+// Gable roof on the base centred on @p base (half sizes @p hx × @p hz), ridge along z at
+// @p rise; tiled slopes and gable ends in @p endMat.
+void appendGable(Mesh& m, const glm::vec3& base, float hx, float rise, float hz,
+                 const MeshMaterial& slopeMat, const MeshMaterial& endMat) {
+    const glm::vec3 wf = base + glm::vec3(-hx, 0.0F, -hz);  // West, front (−z).
+    const glm::vec3 wb = base + glm::vec3(-hx, 0.0F, hz);
+    const glm::vec3 ef = base + glm::vec3(hx, 0.0F, -hz);
+    const glm::vec3 eb = base + glm::vec3(hx, 0.0F, hz);
+    const glm::vec3 rf = base + glm::vec3(0.0F, rise, -hz);  // Ridge.
+    const glm::vec3 rb = base + glm::vec3(0.0F, rise, hz);
+    addQuad(m, wf, wb, rb, rf, slopeMat);  // West slope, facing up and west.
+    addQuad(m, eb, ef, rf, rb, slopeMat);  // East slope.
+    addTriangle(m, ef, wf, rf, endMat);    // Front gable, facing −z.
+    addTriangle(m, wb, eb, rb, endMat);    // Back gable.
+    addQuad(m, wf, ef, eb, wb, slopeMat);  // Underside (eaves seen from below).
 }
 
 // Vertical walls along a closed outline (x, z) from @p bottom to @p top, facing both ways.
@@ -188,20 +226,142 @@ std::shared_ptr<Mesh> gate(const items::Item& item) {
     return m;
 }
 
+glm::vec3 colourOf(items::Material material) {
+    using items::Material;
+    switch (material) {
+        case Material::Concrete: return kConcrete;
+        case Material::Masonry: return kWall;
+        case Material::RoofTiles: return kRoof;
+        case Material::Wood: return kBark;
+        case Material::Foliage: return kLeaves;
+        case Material::Hide: return kHide;
+        case Material::Skin: return kSkin;
+        case Material::Clothing: return kShirt;
+    }
+    return kConcrete;
+}
+
+// The solid parts of a compound obstacle, as they collide.
+void appendParts(Mesh& m, const std::vector<items::SolidPart>& parts,
+                 const std::function<glm::vec3(const items::SolidPart&)>& colour) {
+    using Kind = items::SolidPart::Kind;
+    for (const items::SolidPart& part : parts) {
+        const glm::vec3 c(part.centreM);
+        const MeshMaterial mat{colour(part)};
+        const auto r = static_cast<float>(part.radiusM);
+        const auto h = static_cast<float>(part.heightM);
+        switch (part.kind) {
+            case Kind::Box: graphics::appendBox(m, c, glm::vec3(part.halfExtentsM), mat); break;
+            case Kind::Cylinder:
+                graphics::appendCylinder(m, c, c + glm::vec3(0.0F, h, 0.0F), r, 12, mat);
+                break;
+            case Kind::Sphere: graphics::appendSphere(m, c, r, 12, mat); break;
+            case Kind::Gable:
+                appendGable(m, c, static_cast<float>(part.halfExtentsM.x), h,
+                            static_cast<float>(part.halfExtentsM.z), mat, {kWall});
+                break;
+        }
+    }
+}
+
+// House (parts: walls, roof, chimney) with a door and windows.
+void appendHouseDetails(Mesh& m, const std::vector<items::SolidPart>& parts) {
+    const glm::vec3 half(parts[0].halfExtentsM);
+    const float top = 2.0F * half.y;
+    const float doorH = std::min(2.1F, 0.8F * top);
+    const float doorW = std::min(0.5F, 0.15F * half.x);
+    const MeshMaterial door{kDoor};
+    const MeshMaterial glass{kGlass};
+    graphics::appendBox(m, glm::vec3(0.0F, 0.5F * doorH, -half.z - 0.02F),
+                        glm::vec3(doorW, 0.5F * doorH, 0.03F), door);
+    const float winY = 0.6F * top;
+    const glm::vec3 win(std::min(0.6F, 0.12F * half.x), std::min(0.6F, 0.15F * top), 0.03F);
+    for (const float x : {-0.55F * half.x, 0.55F * half.x}) {
+        for (const float z : {-half.z - 0.02F, half.z + 0.02F}) {
+            graphics::appendBox(m, glm::vec3(x, winY, z), win, glass);
+        }
+    }
+    const glm::vec3 sideWin(0.03F, win.y, std::min(0.6F, 0.12F * half.z));
+    for (const float x : {-half.x - 0.02F, half.x + 0.02F}) {
+        for (const float z : {-0.5F * half.z, 0.5F * half.z}) {
+            graphics::appendBox(m, glm::vec3(x, winY, z), sideWin, glass);
+        }
+    }
+}
+
+// Cow (parts: body, head, four legs): black patches, muzzle, horns, udder and tail.
+void appendCowDetails(Mesh& m, const std::vector<items::SolidPart>& parts) {
+    const glm::vec3 body(parts[0].centreM);
+    const glm::vec3 bh(parts[0].halfExtentsM);
+    const glm::vec3 head(parts[1].centreM);
+    const glm::vec3 hh(parts[1].halfExtentsM);
+    const MeshMaterial patch{kPatch};
+    for (const float side : {-1.0F, 1.0F}) {
+        graphics::appendBox(m, body + glm::vec3(side * (bh.x + 0.005F), 0.2F * bh.y, -0.35F * bh.z),
+                            glm::vec3(0.01F, 0.45F * bh.y, 0.25F * bh.z), patch);
+        graphics::appendBox(m, body + glm::vec3(side * (bh.x + 0.005F), -0.1F * bh.y, 0.5F * bh.z),
+                            glm::vec3(0.01F, 0.5F * bh.y, 0.2F * bh.z), patch);
+        // Horns.
+        const glm::vec3 base = head + glm::vec3(side * 0.6F * hh.x, hh.y, 0.3F * hh.z);
+        graphics::appendCylinder(m, base, base + glm::vec3(side * 0.5F * hh.x, 0.5F * hh.y, 0.0F),
+                                 0.12F * hh.x, 6, {kHorn});
+    }
+    graphics::appendBox(m, body + glm::vec3(0.0F, bh.y + 0.005F, 0.1F * bh.z),
+                        glm::vec3(0.6F * bh.x, 0.01F, 0.3F * bh.z), patch);
+    graphics::appendBox(m, head + glm::vec3(0.0F, -0.35F * hh.y, -hh.z - 0.04F),
+                        glm::vec3(0.8F * hh.x, 0.5F * hh.y, 0.06F), {kPink});
+    graphics::appendBox(m, body + glm::vec3(0.0F, -bh.y - 0.06F, 0.55F * bh.z),
+                        glm::vec3(0.3F * bh.x, 0.07F, 0.12F * bh.z), {kPink});
+    const glm::vec3 rump = body + glm::vec3(0.0F, 0.8F * bh.y, bh.z);
+    graphics::appendCylinder(m, rump, rump + glm::vec3(0.0F, -1.3F * bh.y, 0.06F), 0.025F, 6,
+                             {kHide});
+}
+
+// Man (parts: two legs, torso, two arms, neck, head): shoes, hands and hair.
+void appendManDetails(Mesh& m, const std::vector<items::SolidPart>& parts) {
+    const float h = static_cast<float>(parts.back().centreM.y / 0.937);
+    for (std::size_t i : {0U, 1U}) {
+        const glm::vec3 leg(parts[i].centreM);
+        graphics::appendBox(m, glm::vec3(leg.x, 0.02F * h, -0.02F * h),
+                            glm::vec3(0.045F * h, 0.02F * h, 0.07F * h), {kHair});
+    }
+    for (std::size_t i : {3U, 4U}) {
+        const glm::vec3 arm(parts[i].centreM);
+        const glm::vec3 half(parts[i].halfExtentsM);
+        graphics::appendSphere(m, arm - glm::vec3(0.0F, half.y + 0.02F * h, 0.0F), 0.033F * h, 8,
+                               {kSkin});
+    }
+    const glm::vec3 head(parts.back().centreM);
+    const auto r = static_cast<float>(parts.back().radiusM);
+    graphics::appendSphere(m, head + glm::vec3(0.0F, 0.25F * r, 0.12F * r), 0.92F * r, 10, {kHair});
+}
+
 std::shared_ptr<Mesh> obstacle(const items::Item& item) {
     auto m = std::make_shared<Mesh>();
     const Shape& s = item.shape;
     const std::string kind = propertyString(item.properties, "shape", "box");
+    if (!s.parts.empty()) {
+        // Legs of a person below half its height: trousers.
+        const double half = s.offsetM.y;
+        appendParts(*m, s.parts, [&](const items::SolidPart& part) {
+            return part.material == items::Material::Clothing && part.centreM.y < half
+                       ? kTrousers
+                       : colourOf(part.material);
+        });
+        if (kind == "house" && s.parts.size() == 3) {
+            appendHouseDetails(*m, s.parts);
+        } else if (kind == "cow" && s.parts.size() == 6) {
+            appendCowDetails(*m, s.parts);
+        } else if (kind == "man" && s.parts.size() == 7) {
+            appendManDetails(*m, s.parts);
+        }
+        return m;
+    }
     if (s.kind == Shape::Kind::Cylinder) {
         const auto r = static_cast<float>(s.radiusM);
         const auto top = static_cast<float>(s.topM);
         const auto bottom = static_cast<float>(s.bottomM);
-        if (kind == "tree") {
-            graphics::appendCylinder(*m, glm::vec3(0.0F, bottom, 0.0F),
-                                     glm::vec3(0.0F, 0.45F * top, 0.0F), 0.12F * r, 10, {kBark});
-            graphics::appendSphere(*m, glm::vec3(0.0F, 0.62F * top, 0.0F), r, 12, {kLeaves});
-            graphics::appendSphere(*m, glm::vec3(0.0F, 0.86F * top, 0.0F), 0.6F * r, 10, {kLeaves});
-        } else if (kind == "windTurbine") {
+        if (kind == "windTurbine") {
             graphics::appendCylinder(*m, glm::vec3(0.0F, bottom, 0.0F),
                                      glm::vec3(0.0F, 0.75F * top, 0.0F), 0.04F * top, 16, {kWhite});
             const glm::vec3 hub(0.0F, 0.75F * top, -0.05F * top);

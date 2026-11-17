@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
@@ -21,11 +22,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "ds/app/asset_paths.hpp"
@@ -197,6 +201,17 @@ TEST_F(MissionFlowTest, RetryFromTheMenuKeepsTheMissionWhileTheDebriefIsOpen) {
     EXPECT_TRUE(sim.missionActive());  // Closing the debrief is not "Back to free flight".
 }
 
+// Radius of a tree's crown (its largest foliage sphere).
+double crownRadius(const items::Item& tree) {
+    double r = 0.0;
+    for (const items::SolidPart& part : tree.shape.parts) {
+        if (part.material == items::Material::Foliage) {
+            r = std::max(r, part.radiusM);
+        }
+    }
+    return r;
+}
+
 TEST_F(MissionFlowTest, ItemsTabAddsEditsAndSavesSceneItems) {
     auto* panel = window_->findChild<ItemsPanel*>(QStringLiteral("ItemsPanel"));
     ASSERT_NE(panel, nullptr);
@@ -240,7 +255,7 @@ TEST_F(MissionFlowTest, ItemsTabAddsEditsAndSavesSceneItems) {
     panel->applyEdits();
     treeItem = items.registry().get(*selected);
     EXPECT_EQ(treeItem->name, "Big oak");
-    EXPECT_DOUBLE_EQ(treeItem->shape.radiusM, 4.0);
+    EXPECT_DOUBLE_EQ(crownRadius(*treeItem), 4.0);
     EXPECT_NEAR(treeItem->transform.position.x, drone.x + 10.0, 0.5);
     ASSERT_TRUE(items.undo());
     EXPECT_EQ(items.registry().get(*selected)->name, "Tree 1");
@@ -268,7 +283,54 @@ TEST_F(MissionFlowTest, ItemsTabAddsEditsAndSavesSceneItems) {
     EXPECT_EQ(reloaded.registry().size(), 3U);
     ASSERT_NE(reloaded.registry().find(treeItem->key), nullptr);
     EXPECT_EQ(reloaded.registry().find(treeItem->key)->name, "Big oak");
-    EXPECT_DOUBLE_EQ(reloaded.registry().find(treeItem->key)->shape.radiusM, 4.0);
+    EXPECT_DOUBLE_EQ(crownRadius(*reloaded.registry().find(treeItem->key)), 4.0);
+}
+
+TEST_F(MissionFlowTest, ItemsTabAddsHousesAnimalsAndPeopleWithAMass) {
+    auto* panel = window_->findChild<ItemsPanel*>(QStringLiteral("ItemsPanel"));
+    ASSERT_NE(panel, nullptr);
+    ItemsController& items = *window_->items();
+    const auto add = [&](const std::string& label) -> const items::Item* {
+        const auto& palette = itemPalette();
+        const auto it = std::ranges::find(palette, label, &ItemTemplate::label);
+        EXPECT_NE(it, palette.end()) << label;
+        panel->addFromPalette(static_cast<int>(it - palette.begin()));
+        const auto id = panel->selectedItem();
+        return id ? items.registry().get(*id) : nullptr;
+    };
+    auto* mass = panel->findChild<QDoubleSpinBox*>(QStringLiteral("ItemMass"));
+    auto* shape = panel->findChild<QComboBox*>(QStringLiteral("ItemShape"));
+    auto* height = panel->findChild<QDoubleSpinBox*>(QStringLiteral("ItemHeight"));
+    ASSERT_NE(mass, nullptr);
+    for (const auto& [label, kind, kg] :
+         {std::tuple{"House", "house", 140000.0}, std::tuple{"Cow", "cow", 650.0},
+          std::tuple{"Man", "man", 75.0}}) {
+        const items::Item* added = add(label);
+        ASSERT_NE(added, nullptr) << label;
+        EXPECT_TRUE(added->solid);
+        EXPECT_EQ(added->properties.value("shape", ""), kind);
+        EXPECT_FALSE(added->shape.parts.empty()) << label;
+        EXPECT_NEAR(mass->value(), kg, 0.05) << label;
+        EXPECT_FALSE(mass->isHidden());
+    }
+
+    // The man (selected): taller, and heavier by hand.
+    height->setValue(1.9);
+    mass->setValue(95.0);
+    panel->applyEdits();
+    const auto man = panel->selectedItem();
+    ASSERT_TRUE(man.has_value());
+    EXPECT_DOUBLE_EQ(items.registry().get(*man)->properties.value("heightM", 0.0), 1.9);
+    EXPECT_DOUBLE_EQ(items::massKg(*items.registry().get(*man)), 95.0);
+    // Another figure: its typical size and mass; the hand-set mass is dropped.
+    shape->setCurrentText(QStringLiteral("cow"));
+    EXPECT_NEAR(mass->value(), 650.0, 0.05);
+    EXPECT_DOUBLE_EQ(height->value(), 1.5);
+    panel->applyEdits();
+    const items::Item* cow = items.registry().get(*man);
+    EXPECT_EQ(cow->properties.value("shape", ""), "cow");
+    EXPECT_FALSE(cow->properties.contains("massKg"));
+    EXPECT_NEAR(items::massKg(*cow), 650.0, 1e-6);
 }
 
 TEST_F(MissionFlowTest, ItemsTabShowsTheMissionsItemsReadOnly) {

@@ -35,6 +35,9 @@ struct ItemTemplate {
 
 /// @brief The add-item palette, in menu order.
 [[nodiscard]] const std::vector<ItemTemplate>& itemPalette();
+/// @brief Properties of a new item made from @p tmpl (shape and typical size: an 8 × 7 × 10 m
+/// house, a 9 m tree, a 0.8 × 1.5 × 2.4 m cow, a 1.75 m man, …).
+[[nodiscard]] common::Json defaultProperties(const ItemTemplate& tmpl);
 
 /// @brief Scene item as JSON (`type`, `key`, `name`, `local` [x, altitude, z], `altRef`,
 /// `headingDeg`, `enabled`, `properties`).
