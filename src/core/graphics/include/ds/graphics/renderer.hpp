@@ -147,6 +147,10 @@ public:
     Renderer& operator=(Renderer&&) = delete;
 
     /// @brief Loads OpenGL entry points and checks the context (4.5 core or newer).
+    /// @details Called again for a new context (the UI may replace the context, e.g. after the
+    /// graphics device was lost): resources still held from the previous context are abandoned
+    /// without deleting their objects, as they died with that context. Call releaseResources()
+    /// while the old context is still current to free them properly.
     /// @param loader Function resolving GL symbols for the current context; must not be null.
     /// @param user   Opaque pointer passed back to @p loader.
     /// @return Context information, or an error with a user-readable message if loading fails,
@@ -157,11 +161,17 @@ public:
     [[nodiscard]] bool isInitialized() const noexcept { return initialized_; }
 
     /// @brief Compiles the shaders and creates the GPU resources for scene rendering.
+    /// @details Resources loaded earlier (in the same context) are released first.
     /// @return An error naming the file and line of a shader that does not compile.
     [[nodiscard]] common::Result<void> loadResources(const RendererResources& resources);
 
     /// @brief True after a successful loadResources().
     [[nodiscard]] bool hasResources() const noexcept;
+
+    /// @brief Deletes the GPU resources; the context they were created in must be current.
+    /// @details For a context that is about to be destroyed: afterwards the renderer needs
+    /// initialize() and loadResources() in a new context before it draws the scene again.
+    void releaseResources() noexcept;
 
     /// @brief Rebuilds shader programs whose files changed (hot reload, FR-GFX-04).
     /// @return True if a program was rebuilt; an error (old program kept) if one failed.

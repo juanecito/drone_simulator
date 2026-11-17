@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include <QColor>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEvent>
 #include <QImage>
 #include <QLabel>
 #include <QOffscreenSurface>
@@ -14,6 +17,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <memory>
 #include <utility>
@@ -234,6 +239,113 @@ TEST(Viewport, MissionItemsAndPanelAreDrawn) {
     EXPECT_TRUE(window.simulation()->missionStatus().active);
     window.endMission();
     EXPECT_FALSE(window.simulation()->missionActive());
+}
+
+// Mean absolute grey-level difference of two images of the same size, 0–255.
+double meanDifference(const QImage& a, const QImage& b) {
+    double sum = 0.0;
+    int n = 0;
+    for (int y = 0; y < a.height(); y += 4) {
+        for (int x = 0; x < a.width(); x += 4) {
+            sum += std::abs(qGray(a.pixel(x, y)) - qGray(b.pixel(x, y)));
+            ++n;
+        }
+    }
+    return sum / std::max(n, 1);
+}
+
+// Pearson correlation of the grey levels of two images of the same size: 1 for the same
+// picture, independent of overall brightness and contrast (exposure adaptation).
+double correlation(const QImage& a, const QImage& b) {
+    double sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0;
+    int n = 0;
+    for (int y = 0; y < a.height(); y += 4) {
+        for (int x = 0; x < a.width(); x += 4) {
+            const double va = qGray(a.pixel(x, y));
+            const double vb = qGray(b.pixel(x, y));
+            sa += va;
+            sb += vb;
+            saa += va * va;
+            sbb += vb * vb;
+            sab += va * vb;
+            ++n;
+        }
+    }
+    const double cov = sab - sa * sb / n;
+    const double var = (saa - sa * sa / n) * (sbb - sb * sb / n);
+    return var > 0.0 ? cov / std::sqrt(var) : 0.0;
+}
+
+// The viewport's image once the view is steady (terrain streamed, exposure adapted): two grabs
+// in a row nearly equal. Slow builds (ASan, Valgrind) need many more frames to get there.
+QImage settledFrame(ds::app::Viewport& viewport, int timeoutMs) {
+    QImage previous = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < timeoutMs) {
+        QTest::qWait(250);
+        QImage next = viewport.grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+        const bool steady = meanDifference(next, previous) < 1.0;
+        previous = std::move(next);
+        if (steady) {
+            break;
+        }
+    }
+    return previous;
+}
+
+// Qt replaces the viewport's OpenGL context when the window's graphics device is lost (for
+// example after suspend/resume with the NVIDIA driver) or the widget moves to another window:
+// it sends WindowAboutToChangeInternal and WindowChangeInternal, destroys the context and calls
+// initializeGL() again in a new one. The renderer must drop its old objects with the old
+// context and rebuild them in the new one. Regression: the old objects were deleted with the
+// new context current, deleting the new renderer's objects that had the same names; the next
+// indexed draw then ran with no element buffer and crashed inside libnvidia-glcore.
+TEST(Viewport, SurvivesTheContextBeingRecreated) {
+    DS_REQUIRE_OPENGL_45();
+
+    ds::app::MainWindow window;
+    QSignalSpy ready(window.viewport(), &ds::app::Viewport::glReady);
+    ds::app::EnvironmentConfig env = window.scene()->environment();
+    env.time = *ds::astro::parseUtc("2026-06-21T10:00:00Z");
+    env.animate = false;
+    window.scene()->setEnvironment(env);
+    window.simulation()->setCameraMode(ds::graphics::CameraMode::Chase);
+    window.resize(960, 600);
+    window.show();
+    ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
+    if (ready.isEmpty()) {
+        ASSERT_TRUE(ready.wait(5000)) << "viewport did not initialise";
+    }
+    QTest::qWait(500);
+    const QImage first = settledFrame(*window.viewport(), 20000);
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        first.save(QString::fromUtf8(dir) + QStringLiteral("/recreated_0.png"));
+    }
+    const int objects = window.viewport()->frameStats().objectsDrawn;
+    ASSERT_GT(objects, 5);
+
+    for (int round = 1; round <= 2; ++round) {
+        const auto initialisations = ready.count();
+        QEvent aboutToChange(QEvent::WindowAboutToChangeInternal);
+        QCoreApplication::sendEvent(window.viewport(), &aboutToChange);
+        QEvent changed(QEvent::WindowChangeInternal);
+        QCoreApplication::sendEvent(window.viewport(), &changed);
+        if (ready.count() == initialisations) {
+            ASSERT_TRUE(ready.wait(5000)) << "viewport was not initialised again";
+        }
+        // The new context starts from scratch (GPU caches, exposure): wait for a steady view.
+        QTest::qWait(500);
+        const QImage image = settledFrame(*window.viewport(), 20000);
+        if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+            image.save(QString::fromUtf8(dir) + QStringLiteral("/recreated_%1.png").arg(round));
+        }
+        EXPECT_EQ(window.viewport()->frameStats().objectsDrawn, objects) << "round " << round;
+        ASSERT_EQ(image.size(), first.size());
+        // Same view: terrain, drone and sky drawn again. With the bug only the sky and the HUD
+        // were left (correlation about 0.76). Brightness may differ while exposure adapts.
+        EXPECT_GT(correlation(image, first), 0.95) << "round " << round;
+    }
 }
 
 }  // namespace
