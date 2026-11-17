@@ -25,6 +25,7 @@ struct Loaded {
     std::optional<std::vector<std::uint8_t>> state;
     std::optional<std::string> units;
     std::optional<std::string> coordinates;
+    std::optional<std::string> enforceRules;
 };
 
 template <typename T>
@@ -69,6 +70,7 @@ void SettingsController::load() {
                     .state = valueOrLog(store.bytes(kWindowState), kWindowState),
                     .units = valueOrLog(store.string(kUnits), kUnits),
                     .coordinates = valueOrLog(store.string(kCoordinates), kCoordinates),
+                    .enforceRules = valueOrLog(store.string(kEnforceFreeRules), kEnforceFreeRules),
                 };
             })
             .get();
@@ -81,6 +83,7 @@ void SettingsController::load() {
             log::warn("Ignoring unknown unit system '{}'", *loaded.units);
         }
     }
+    enforceFreeRules_ = loaded.enforceRules && *loaded.enforceRules == "true";
     if (loaded.coordinates) {
         if (*loaded.coordinates == kUtmLatLon) {
             coordinates_ = CoordinateDisplay::UtmAndLatLon;
@@ -123,6 +126,15 @@ void SettingsController::setCoordinateDisplay(CoordinateDisplay display) {
     writeString(settings_keys::kCoordinates,
                 display == CoordinateDisplay::UtmAndLatLon ? kUtmLatLon : kUtm);
     emit coordinateDisplayChanged(display);
+}
+
+void SettingsController::setEnforceFreeFlightRules(bool enforce) {
+    if (enforce == enforceFreeRules_) {
+        return;
+    }
+    enforceFreeRules_ = enforce;
+    writeString(settings_keys::kEnforceFreeRules, enforce ? "true" : "false");
+    emit enforceFreeFlightRulesChanged(enforce);
 }
 
 void SettingsController::writeString(const char* key, const char* value) {

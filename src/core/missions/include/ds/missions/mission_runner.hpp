@@ -52,6 +52,11 @@ struct ObjectiveStatus {
     std::optional<double> errorM;          ///< Position error, for precision objectives.
     std::optional<double> maxErrorM;       ///< The error that scores zero precision.
     std::string detail;                    ///< e.g. "gate 3 of 8", "hard landing: 1.4 m/s".
+    /// Where to go next (the next gate, the pickup then the drop zone, home…), if anywhere:
+    /// for guidance markers.
+    std::optional<items::Vec3> targetPosition;
+    std::string targetKey;   ///< Item id of the target ("" for a position or home).
+    std::string targetName;  ///< Display name of the target ("Home" for returnHome).
 };
 
 /// @brief Vehicle state of one tick (ground truth from the simulation).
@@ -144,6 +149,8 @@ struct MissionResult {
 class MissionRunner {
 public:
     /// @brief Places the mission (items, spawn, pilot) and prepares the objectives.
+    /// @param mission The validated mission.
+    /// @param placement Terrain origin and ground heights for the items.
     /// @param terrainLineOfSight Terrain visibility test for VLOS (empty ⇒ terrain never hides).
     [[nodiscard]] static common::Result<std::unique_ptr<MissionRunner>> create(
         MissionDefinition mission, const MissionPlacement& placement,

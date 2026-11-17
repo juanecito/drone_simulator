@@ -8,6 +8,7 @@
 
 #include <optional>
 
+#include "ds/graphics/camera.hpp"
 #include "ds/sim/hud.hpp"
 
 class QPainter;
@@ -24,6 +25,8 @@ struct HudPaintOptions {
     bool horizon = false;  ///< Artificial horizon and pitch ladder (FPV view).
     bool blinkOn = true;   ///< Phase of flashing warnings.
     double scale = 1.0;    ///< Text scale (device-independent pixels per point).
+    /// Camera of the frame, to place the guidance markers (none drawn if null).
+    const graphics::Camera* camera = nullptr;
 };
 
 /// @brief Paints @p hud into @p area with @p painter (antialiased text with a dark outline so
@@ -43,6 +46,11 @@ void paintHud(QPainter& painter, const QRect& area, const sim::HudModel& hud,
 /// @param viewHeadingDeg Camera heading from true north, or empty.
 void paintCompass(QPainter& painter, QPointF centre, double radius, const sim::HudCompass& compass,
                   std::optional<double> viewHeadingDeg = std::nullopt);
+
+/// @brief Screen position of the world point @p world seen by @p camera in @p area, or nullopt
+/// if it is behind the camera.
+[[nodiscard]] std::optional<QPointF> projectToScreen(const graphics::Camera& camera,
+                                                     const QRectF& area, const glm::dvec3& world);
 
 /// @brief Radius of the compass ring for a HUD text @p scale.
 [[nodiscard]] constexpr double compassRadius(double scale) noexcept { return 52.0 * scale; }

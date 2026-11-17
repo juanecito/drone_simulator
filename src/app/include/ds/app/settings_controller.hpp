@@ -40,6 +40,12 @@ inline constexpr const char* kUnits = "display.units";                    ///< "
 inline constexpr const char* kCoordinates = "display.coordinates";        ///< "utm"/"utm+latlon".
 inline constexpr const char* kSceneTerrain = "scene.terrain";  ///< Object (scene_config.hpp).
 inline constexpr const char* kSceneEnvironment = "scene.environment";  ///< Object.
+/// "true"/"false": free mode ends the flight when a flight rule is broken (FR-MIS-06d).
+inline constexpr const char* kEnforceFreeRules = "rules.enforceInFreeMode";
+/// Mission id selected last in the Missions tab (FR-UI-03).
+inline constexpr const char* kLastMission = "missions.lastSelected";
+/// Items of the free-flight scene (Items tab): array of items_controller.hpp objects.
+inline constexpr const char* kSceneItems = "scene.items";
 }  // namespace settings_keys
 
 /// @brief GUI-side access to user settings, backed by the storage thread.
@@ -80,6 +86,12 @@ public:
     /// @brief Changes and persists the coordinate display.
     void setCoordinateDisplay(CoordinateDisplay display);
 
+    /// @brief True if free mode ends the flight when a flight rule is broken (default false:
+    /// warnings only, FR-MIS-06d).
+    [[nodiscard]] bool enforceFreeFlightRules() const noexcept { return enforceFreeRules_; }
+    /// @brief Changes and persists the free-mode rule enforcement.
+    void setEnforceFreeFlightRules(bool enforce);
+
     /// @brief Facts about the open database (file, schema version, in-memory flag).
     [[nodiscard]] const storage::StorageInfo& storageInfo() const noexcept;
 
@@ -98,6 +110,8 @@ signals:
     void unitsChanged(ds::app::UnitSystem units);
     /// @brief The coordinate display changed.
     void coordinateDisplayChanged(ds::app::CoordinateDisplay display);
+    /// @brief The free-mode rule enforcement changed.
+    void enforceFreeFlightRulesChanged(bool enforce);
 
 private:
     void load();
@@ -108,6 +122,7 @@ private:
     std::optional<QByteArray> windowState_;
     UnitSystem units_ = UnitSystem::Metric;
     CoordinateDisplay coordinates_ = CoordinateDisplay::Utm;
+    bool enforceFreeRules_ = false;
 };
 
 }  // namespace ds::app

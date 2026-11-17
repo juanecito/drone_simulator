@@ -18,7 +18,11 @@ add_library(ds_app_ui STATIC
     terrain_panel.cpp
     opengl_check.cpp
     main_window.cpp
+    mission_dialogs.cpp
     mission_library.cpp
+    items_controller.cpp
+    items_panel.cpp
+    mission_setup.cpp
     mission_validation.cpp
     missions_controller.cpp
     missions_panel.cpp
@@ -37,8 +41,12 @@ add_library(ds_app_ui STATIC
     include/ds/app/scene_config.hpp
     include/ds/app/scene_controller.hpp
     include/ds/app/terrain_panel.hpp
+    include/ds/app/items_controller.hpp
+    include/ds/app/items_panel.hpp
     include/ds/app/main_window.hpp
+    include/ds/app/mission_dialogs.hpp
     include/ds/app/mission_library.hpp
+    include/ds/app/mission_setup.hpp
     include/ds/app/mission_validation.hpp
     include/ds/app/missions_controller.hpp
     include/ds/app/missions_panel.hpp

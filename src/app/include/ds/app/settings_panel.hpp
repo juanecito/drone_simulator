@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QPushButton;
@@ -32,6 +33,8 @@ public:
     [[nodiscard]] QComboBox* unitsCombo() const noexcept { return units_; }
     /// @brief Coordinate display selector (object name `CoordinatesCombo`).
     [[nodiscard]] QComboBox* coordinatesCombo() const noexcept { return coordinates_; }
+    /// @brief Free-mode rule enforcement (object name `EnforceRulesCheck`).
+    [[nodiscard]] QCheckBox* enforceRulesCheck() const noexcept { return enforceRules_; }
     /// @brief Text shown for the database file (object name `DatabaseLabel`).
     [[nodiscard]] QLabel* databaseLabel() const noexcept { return database_; }
 
@@ -41,6 +44,7 @@ private:
     SettingsController* settings_;
     QComboBox* units_ = nullptr;
     QComboBox* coordinates_ = nullptr;
+    QCheckBox* enforceRules_ = nullptr;
     QLabel* database_ = nullptr;
     QPushButton* openFolder_ = nullptr;
 };

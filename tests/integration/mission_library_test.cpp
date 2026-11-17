@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "test_assets.hpp"
 #include "ds/app/mission_library.hpp"
 #include "ds/common/json.hpp"
 #include "ds/storage/mission_store.hpp"
@@ -38,7 +39,9 @@ TEST(MissionLibrary, DefaultMissionIsInstalledAndListedAtStart) {
     const fs::path data = fs::path(home.path().toStdString()) / ".drone_simulation";
     auto service = ds::storage::StorageService::start({.databaseFile = std::nullopt});
     ASSERT_TRUE(service) << service.error().message;
-    const MissionFolders folders{.assetDir = DS_TEST_ASSETS_DIR,
+    // The assets without the built-in pack: only the user's folder is listed.
+    const fs::path assets = ds::test::assetsWithoutMissionPack(home.path().toStdString());
+    const MissionFolders folders{.assetDir = assets,
                                  .userDir = data / "missions",
                                  .libraryDir = data / "library"};
 
@@ -86,9 +89,9 @@ TEST(MissionLibrary, DefaultMissionIsInstalledAndListedAtStart) {
     EXPECT_EQ(rows[2].mission.title, "My hover");
     EXPECT_EQ(rows[2].mission.status, "valid");
 
-    // Without a user folder only the built-in missions are listed (none yet), and the user's
+    // Without a user folder only the built-in missions are listed (none here), and the user's
     // rows are kept as missing.
-    library = loadMissionLibrary({.assetDir = DS_TEST_ASSETS_DIR, .userDir = {}, .libraryDir = {}},
+    library = loadMissionLibrary({.assetDir = assets, .userDir = {}, .libraryDir = {}},
                                  service->get());
     ASSERT_TRUE(library);
     EXPECT_TRUE(library->entries.empty());
@@ -96,6 +99,28 @@ TEST(MissionLibrary, DefaultMissionIsInstalledAndListedAtStart) {
     ASSERT_EQ(rows.size(), 3U);
     EXPECT_EQ(rows[1].mission.status, "missing");
     EXPECT_EQ(rows[2].mission.status, "missing");
+}
+
+TEST(MissionLibrary, BuiltInPackIsListedNextToTheUserMissions) {
+    const QTemporaryDir home;
+    ASSERT_TRUE(home.isValid());
+    const fs::path data = fs::path(home.path().toStdString()) / ".drone_simulation";
+    auto service = ds::storage::StorageService::start({.databaseFile = std::nullopt});
+    ASSERT_TRUE(service) << service.error().message;
+    auto library = loadMissionLibrary(
+        {.assetDir = DS_TEST_ASSETS_DIR, .userDir = data / "missions", .libraryDir = {}},
+        service->get());
+    ASSERT_TRUE(library) << library.error().message;
+    const auto builtIn = std::ranges::count(library->entries, ds::missions::MissionOrigin::BuiltIn,
+                                            &ds::missions::CatalogEntry::origin);
+    EXPECT_GE(builtIn, 10);
+    for (const auto& entry : library->entries) {
+        EXPECT_TRUE(entry.load.valid()) << entry.load.report();
+    }
+    const auto hover = std::ranges::find(library->entries, "basics-01-hover",
+                                         &ds::missions::CatalogEntry::key);
+    ASSERT_NE(hover, library->entries.end());
+    EXPECT_EQ(index(**service).size(), library->entries.size());
 }
 
 TEST(MissionLibrary, MissingSchemaIsAnError) {

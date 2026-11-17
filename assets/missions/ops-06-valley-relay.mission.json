@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "ops-06-valley-relay",
+  "title": "Valley relay",
+  "briefing": "Carry the radio relay up the valley: pass the saddle beacon and land on the relay pad high on the slope. Ridges can hide the drone from you — do not stay hidden for more than five seconds. The visual-line-of-sight limit is raised to 700 m for this flight.",
+  "difficulty": 4,
+  "chapter": "operations",
+  "order": 6,
+  "terrain": {
+    "source": "procedural",
+    "seed": 1212,
+    "preset": "alpine",
+    "origin": {
+      "geo": [46.55, 8.0, 1400],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 4000,
+      "lengthM": 4000
+    },
+    "params": {
+      "flatZones": [
+        {
+          "x": 0,
+          "z": 0,
+          "radiusM": 40,
+          "blendM": 40
+        },
+        {
+          "x": 300,
+          "z": -500,
+          "radiusM": 15,
+          "blendM": 30
+        }
+      ]
+    }
+  },
+  "environment": {
+    "utc": "2026-08-10T07:30:00Z",
+    "timeZone": "Europe/Zurich",
+    "weather": {
+      "seed": 1,
+      "preset": "few-clouds",
+      "temperatureC": 8,
+      "wind": {
+        "level": 3,
+        "fromDeg": 300
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 420,
+    "vlos": {
+      "maxDistanceM": 700
+    }
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Valley pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "landingPad",
+      "id": "relay",
+      "name": "Relay pad",
+      "local": [300, 0, -500],
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "saddle",
+      "name": "Saddle beacon",
+      "local": [150, 40, -250],
+      "radiusM": 8
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "saddle",
+      "type": "reachWaypoint",
+      "target": "saddle"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "title": "Land on the relay pad",
+      "target": "relay",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 240
+      },
+      {
+        "maxTimeS": 170
+      }
+    ]
+  }
+}

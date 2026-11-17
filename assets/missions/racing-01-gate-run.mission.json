@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "id": "racing-01-gate-run",
+  "title": "Gate run",
+  "briefing": "Five gates around the field, one lap, in order. Fly through each gate in the direction of its arrow. The racing quad is fast and has no altitude hold in Acro: switch to Angle or Alt hold if you prefer.",
+  "difficulty": 2,
+  "chapter": "racing",
+  "order": 1,
+  "terrain": {
+    "source": "procedural",
+    "seed": 505,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [45.4642, 9.19, 120],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-07-12T16:00:00Z",
+    "timeZone": "Europe/Rome",
+    "weather": {
+      "seed": 1,
+      "preset": "clear",
+      "temperatureC": 27,
+      "wind": {
+        "level": 1,
+        "fromDeg": 180
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "fpv-5in-racer",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 20],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "maxAltitudeAglM": 50
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 20],
+      "radiusM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "g1",
+      "name": "Gate 1",
+      "local": [0.0, 3, -5.0],
+      "headingDeg": 0.0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "g2",
+      "name": "Gate 2",
+      "local": [27.6, 3, -43.0],
+      "headingDeg": 72.0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "g3",
+      "name": "Gate 3",
+      "local": [72.4, 3, -28.5],
+      "headingDeg": 144.0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "g4",
+      "name": "Gate 4",
+      "local": [72.4, 3, 18.5],
+      "headingDeg": 216.0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "g5",
+      "name": "Gate 5",
+      "local": [27.6, 3, 33.0],
+      "headingDeg": 288.0,
+      "widthM": 3,
+      "heightM": 2.5
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "course",
+      "type": "gateCourse",
+      "title": "Fly the gate course",
+      "gates": [
+        "g1",
+        "g2",
+        "g3",
+        "g4",
+        "g5"
+      ],
+      "laps": 1
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 2
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 60
+      },
+      {
+        "maxTimeS": 35
+      }
+    ]
+  }
+}

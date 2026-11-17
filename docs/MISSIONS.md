@@ -182,7 +182,48 @@ injected failures arrive in M7.
 `Briefing → PreFlight → InProgress → Succeeded / Failed / Aborted → Debrief`. In PreFlight the
 vehicle must be on the ground at the spawn point with a full battery; the mission starts (and
 its clock with it) when the vehicle is armed — or, for a ground drone, starts moving. *Retry*
-returns to the briefing with a clean state.
+starts a clean attempt from PreFlight.
+
+## Flying a mission
+
+1. Select a mission in the **Missions** tab and press **Start** (or double-click it, or
+   *Missions › Start Mission…*). The **briefing** shows a map of the area (items, take-off
+   point, where you stand), the objectives, rules, weather and the day/night situation. If
+   the mission allows it, choose the vehicle profile there. Press **Fly**.
+2. The panel hides and the drone waits on the take-off point. **Arm** it (Space, or the arm
+   switch of your transmitter): the clock starts. The HUD shows the mission panel (state,
+   timer, objectives with the distance to each target) and markers on the current targets.
+3. Rule warnings (height limit, distance, line of sight, no-fly zones, lights, …) appear in
+   red; a rule still broken after the grace time (`rules.graceS`, 3 s by default) fails the
+   mission. Trees, masts, buildings and gate frames are **solid**: touching one with spinning
+   propellers, or hitting it hard, is a crash.
+4. When the attempt ends — success, failure, or *Missions › Abort Mission* — it is saved at
+   once with your progress. The **debrief** follows: stars, score breakdown, the path you
+   flew, and your personal best. Choose **Retry**, **Next mission** or **Back to free flight**
+   (your free-flight scene, vehicle and camera come back as they were).
+
+*Missions › Import Mission…* (a file) and *Import Mission Folder…* (a folder with one mission
+file and its data) copy a mission into your folder and select it.
+
+## Built-in missions
+
+| Chapter | Mission | What it trains |
+|---------|---------|----------------|
+| Basics | Hold steady | hover over a pad for 10 s, land |
+| Basics | Square circuit | waypoints in order, return home, land |
+| Basics | Precision landing | landing within 0.5 m on a hillside pad, gently |
+| Basics | Crosswind transit | waypoints in a moderate crosswind, battery reserve |
+| Racing | Gate run | five gates, one lap, racing quad |
+| Racing | Forest slalom | eight gates between solid trees, strict order |
+| Operations | Parcel delivery | pick up 0.5 kg, deliver to a farm, return, land |
+| Operations | Mast inspection | keep an antenna in view for 8 s next to a solid mast |
+| Operations | Field survey | 80 % coverage of a field between 25 and 45 m |
+| Operations | Restricted airspace | fly around a no-fly zone |
+| Operations | Dusk patrol | after sunset, lights on, visual line of sight |
+| Operations | Valley relay | alpine terrain, ridges hiding the drone |
+| Real terrain | Montserrat ridge | online terrain (needs the online elevation source, M4) |
+
+The first mission of each chapter is open; each further one needs a star on the one before.
 
 ## Scoring and stars
 
@@ -211,8 +252,9 @@ stored per user in the database; it survives when a mission file disappears.
 
 ## Examples
 
-The two examples of SPECIFICATION §4.9.1 are kept as test fixtures and pass validation, and
-the default mission is the simplest complete mission:
+The two examples of SPECIFICATION §4.9.1 are kept as test fixtures and pass validation, the
+default mission is the simplest complete mission, and the built-in missions in
+[`assets/missions/`](../assets/missions/) show every aerial objective type:
 
 - [`assets/default-missions/first-flight.mission.json`](../assets/default-missions/first-flight.mission.json)
   — aerial, procedural terrain, take-off, waypoint and landing in sequence.

@@ -39,10 +39,21 @@ public:
     [[nodiscard]] std::string selectedMission() const;
     /// @brief Selects the mission with id @p key; returns false if it is not listed.
     bool selectMission(const std::string& key);
+    /// @brief While a mission is flown no other mission can be started.
+    void setMissionActive(bool active);
+    /// @brief The *Start Mission* button (object name `StartMission`).
+    [[nodiscard]] QPushButton* startButton() const noexcept { return start_; }
+
+signals:
+    /// @brief *Start Mission* (or a double click) on the available mission @p key.
+    void startRequested(const std::string& key);
+    /// @brief The selection changed to mission @p key.
+    void missionSelected(const std::string& key);
 
 private:
     void rebuild();
     void showDetails();
+    void updateStart();
 
     MissionsController* missions_;
     QLabel* summary_ = nullptr;
@@ -51,6 +62,7 @@ private:
     QPushButton* reload_ = nullptr;
     QPushButton* openFolder_ = nullptr;
     QPushButton* start_ = nullptr;
+    bool missionActive_ = false;
 };
 
 /// @brief Rich-text description of a mission for the details pane: briefing, objectives,

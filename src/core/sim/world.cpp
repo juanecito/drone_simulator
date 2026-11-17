@@ -8,6 +8,7 @@
 #include <format>
 #include <utility>
 
+#include "ds/astro/sun_moon.hpp"
 #include "ds/common/random.hpp"
 #include "ds/physics/atmosphere.hpp"
 
@@ -15,6 +16,25 @@ namespace ds::sim {
 
 GroundFunction flatGround(double heightM) {
     return [heightM](double, double) { return physics::GroundSample{.heightM = heightM}; };
+}
+
+missions::LineOfSightFunction terrainLineOfSight(GroundFunction ground) {
+    if (!ground) {
+        return {};
+    }
+    return [ground = std::move(ground)](const items::Vec3& from, const items::Vec3& to) {
+        const double d = glm::length(glm::dvec2(to.x - from.x, to.z - from.z));
+        const int n = std::clamp(static_cast<int>(std::ceil(d / 5.0)), 1, 400);
+        // The end points themselves are on or above the ground: test the inside only.
+        for (int i = 1; i < n; ++i) {
+            const double t = static_cast<double>(i) / static_cast<double>(n);
+            const items::Vec3 p = from + (to - from) * t;
+            if (ground(p.x, p.z).heightM > p.y) {
+                return false;
+            }
+        }
+        return true;
+    };
 }
 
 physics::FlightMode toFlightMode(int index) noexcept {
@@ -70,9 +90,14 @@ std::string describe(const Event& event) {
             } else if constexpr (std::is_same_v<T, PayloadReleasedEvent>) {
                 return "Payload released";
             } else if constexpr (std::is_same_v<T, ObjectiveCompletedEvent>) {
-                return "Objective completed: " + e.objectiveId;
+                return "Objective completed: " + (e.title.empty() ? e.objectiveId : e.title);
             } else if constexpr (std::is_same_v<T, ObjectiveFailedEvent>) {
-                return "Objective failed: " + e.objectiveId;
+                return "Objective failed: " + (e.title.empty() ? e.objectiveId : e.title) +
+                       (e.reason.empty() ? std::string() : " (" + e.reason + ")");
+            } else if constexpr (std::is_same_v<T, MissionMessageEvent>) {
+                return e.text;
+            } else if constexpr (std::is_same_v<T, FlightRuleBrokenEvent>) {
+                return "Flight ended — rule broken: " + e.message;
             } else if constexpr (std::is_same_v<T, MissionSucceededEvent>) {
                 return "Mission succeeded";
             } else if constexpr (std::is_same_v<T, MissionFailedEvent>) {
@@ -101,6 +126,60 @@ World::World(WorldConfig config) : config_(std::move(config)) {
     clockBase_ = config_.startUtc;
     clockBaseTime_ = 0.0;
     reset();
+    updateSun();
+}
+
+World::~World() = default;
+
+void World::setGeoOrigin(const geo::Geodetic& origin) noexcept {
+    config_.geoOrigin = origin;
+    sunUpdatedAtS_ = -1e9;
+    updateSun();
+}
+
+void World::updateSun() {
+    if (time_ - sunUpdatedAtS_ < 1.0 && time_ >= sunUpdatedAtS_) {
+        return;
+    }
+    sunUpdatedAtS_ = time_;
+    sunElevationDeg_ = astro::sunPosition(utc(), config_.geoOrigin).apparent.elevationDeg;
+}
+
+void World::setMission(std::unique_ptr<MissionSession> session) {
+    mission_ = std::move(session);
+    if (freeMonitor_) {
+        freeMonitor_->reset();
+    }
+}
+
+void World::setFreeFlightRules(std::optional<FreeFlightRules> rules) {
+    freeRules_ = rules;
+    freeMonitor_.reset();
+    if (rules) {
+        freeMonitor_ = std::make_unique<missions::FlightRulesMonitor>(
+            missions::RulesSpec{}, physics::VehicleType::Aerial, rules->pilotPosition, nullptr,
+            terrainLineOfSight(config_.ground));
+    }
+}
+
+void World::checkFreeRules() {
+    if (!freeMonitor_ || mission_) {
+        return;
+    }
+    const physics::AerialVehicle& v = *vehicle_;
+    const physics::RigidBodyState& body = v.bodyState();
+    missions::FlightRuleSample r;
+    r.timeS = time_;
+    r.position = body.position;
+    r.aglM = body.position.y - env_.ground.heightM - v.restHeightM();
+    r.armed = v.controller().armed() && !v.telemetry().crashed;
+    r.lightsOn = controls_.lights;
+    r.sunElevationDeg = sunElevationDeg_;
+    r.visibilityM = config_.visibilityM;
+    if (const auto broken = freeMonitor_->update(r); broken && freeRules_->enforce) {
+        events_.publish(FlightRuleBrokenEvent{broken->message});
+        freeMonitor_->reset();
+    }
 }
 
 astro::UtcTime World::utc() const noexcept {
@@ -111,6 +190,7 @@ astro::UtcTime World::utc() const noexcept {
 void World::setUtc(astro::UtcTime utc) noexcept {
     clockBase_ = utc;
     clockBaseTime_ = time_;
+    sunUpdatedAtS_ = -1e9;
 }
 
 physics::EnvironmentSample World::sampleEnvironment(const physics::Vec3& position) const {
@@ -145,6 +225,9 @@ void World::reset() {
     stats_ = {};
     controls_ = {};
     stats_.startedAt = utc();
+    if (freeMonitor_) {
+        freeMonitor_->reset();
+    }
     events_.publish(SimResetEvent{});
 }
 
@@ -159,6 +242,9 @@ void World::setGround(GroundFunction ground, std::optional<double> waterLevelM,
     config_.ground = ground ? std::move(ground) : flatGround();
     config_.waterLevelM = waterLevelM;
     config_.originAltitudeM = originAltitudeM;
+    if (freeRules_) {
+        setFreeFlightRules(freeRules_);  // Its line-of-sight test uses the terrain.
+    }
     // Lift the vehicle onto the new surface if it is now underground.
     physics::RigidBodyState body = vehicle_->bodyState();
     const physics::GroundSample g = config_.ground(body.position.x, body.position.z);
@@ -185,9 +271,13 @@ void World::publishVehicleEvents() {
     using Kind = physics::VehicleEvent::Kind;
     for (const physics::VehicleEvent& e : vehicle_->takeEvents()) {
         switch (e.kind) {
-            case Kind::Collision: events_.publish(CollisionEvent{e.value}); break;
+            case Kind::Collision:
+                incidents_.push_back({missions::VehicleIncident::Kind::Collision, e.value, {}});
+                events_.publish(CollisionEvent{e.value});
+                break;
             case Kind::Crash:
                 ++stats_.crashes;
+                incidents_.push_back({missions::VehicleIncident::Kind::Crash, e.value, e.text});
                 events_.publish(CrashEvent{e.text, e.value});
                 break;
             case Kind::BatteryLow:
@@ -199,15 +289,65 @@ void World::publishVehicleEvents() {
             case Kind::BatteryDepleted:
                 events_.publish(BatteryWarningEvent{BatteryWarningEvent::Level::Depleted});
                 break;
-            case Kind::WaterEntered: events_.publish(WaterEnteredEvent{}); break;
+            case Kind::WaterEntered:
+                incidents_.push_back({missions::VehicleIncident::Kind::WaterEntered, 0.0, {}});
+                events_.publish(WaterEnteredEvent{});
+                break;
             case Kind::Armed: events_.publish(ArmingEvent{true}); break;
             case Kind::Disarmed: events_.publish(ArmingEvent{false}); break;
             case Kind::ArmRefused: events_.publish(ArmRefusedEvent{e.text}); break;
             case Kind::FailsafeOn: events_.publish(FailsafeEvent{true}); break;
             case Kind::FailsafeOff: events_.publish(FailsafeEvent{false}); break;
-            case Kind::NumericalReset: events_.publish(NumericalResetEvent{}); break;
+            case Kind::NumericalReset:
+                // A mission attempt with invalid numbers counts as failed (NFR-REL-02).
+                incidents_.push_back(
+                    {missions::VehicleIncident::Kind::Crash, 0.0, "numerical error"});
+                events_.publish(NumericalResetEvent{});
+                break;
         }
     }
+}
+
+void World::setFreeItems(const std::vector<items::Item>& freeItems) {
+    freeItems_.clear();
+    for (const items::Item& item : freeItems) {
+        (void)freeItems_.add(item);  // Keys are unique: the scene's items were checked.
+    }
+    freeItems_.clearHistory();
+}
+
+void World::resolveObstacles() {
+    const items::ItemRegistry& registry = mission_ ? mission_->runner().items() : freeItems_;
+    if (registry.size() == 0) {
+        return;
+    }
+    // Items near the vehicle that stop it; gate posts reach a few metres below the opening.
+    constexpr double kQueryRadiusM = 4.0;
+    physics::AerialVehicle& v = *vehicle_;
+    std::vector<const items::Item*> near;
+    for (const items::ItemId id : registry.queryRadius(v.bodyState().position, kQueryRadiusM)) {
+        const items::Item* item = registry.get(id);
+        if (item != nullptr && items::blocksVehicle(*item)) {
+            near.push_back(item);
+        }
+    }
+    if (near.empty()) {
+        return;
+    }
+    v.resolveObstacles([&near](const physics::Vec3& p) -> std::optional<physics::ObstacleContact> {
+        std::optional<physics::ObstacleContact> best;
+        for (const items::Item* item : near) {
+            const auto c = items::obstacleContact(*item, p);
+            if (c && (!best || c->depthM > best->depthM)) {
+                best = physics::ObstacleContact{
+                    c->normal, c->depthM,
+                    !item->name.empty() ? item->name
+                    : !item->key.empty() ? item->key
+                                         : std::string(items::itemTypeName(item->type))};
+            }
+        }
+        return best;
+    });
 }
 
 void World::tick(const input::ControlInputs& controls, double dt) {
@@ -219,15 +359,23 @@ void World::tick(const input::ControlInputs& controls, double dt) {
     wind_.update(dt, std::max(0.0, body.position.y - g.heightM), body.velocity);
     env_ = sampleEnvironment(body.position);
 
-    // FR-LOOP-05: sensors → controller → physics → collisions → (items, missions: M5).
+    // FR-LOOP-05: sensors → controller → physics → collisions → items and missions.
+    incidents_.clear();
     v.updateSensors(env_, dt);
     v.updateController(toPilotCommand(controls), dt);
     v.integrate(env_, dt);
     v.resolveCollisions(env_, dt);
+    resolveObstacles();
     publishVehicleEvents();
 
     time_ += dt;
     ++ticks_;
+    updateSun();
+    if (mission_) {
+        mission_->tick(*this, incidents_);
+    } else {
+        checkFreeRules();
+    }
 
     // Statistics.
     const physics::RigidBodyState& after = v.bodyState();
@@ -268,6 +416,21 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.windGustMs = level.gustPeakMs;
     s.stats = stats_;
     s.resetCount = resets_;
+    s.sunElevationDeg = sunElevationDeg_;
+    if (mission_) {
+        mission_->fill(s.mission);
+        s.ruleWarnings = mission_->runner().warnings();
+    } else {
+        s.mission.active = false;
+        s.mission.objectives.clear();
+        s.mission.path.clear();
+        s.mission.result.reset();
+        if (freeMonitor_) {
+            s.ruleWarnings = freeMonitor_->warnings();
+        } else {
+            s.ruleWarnings.clear();
+        }
+    }
 }
 
 }  // namespace ds::sim

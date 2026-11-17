@@ -30,6 +30,12 @@ public:
     void updateController(const PilotCommand& command, double dt) override;
     void integrate(const EnvironmentSample& env, double dt) override;
     void resolveCollisions(const EnvironmentSample& env, double dt) override;
+    /// @brief Contacts with obstacles (trees, masts, buildings, gate frames): every collision
+    /// point inside one is pushed out along the contact normal and its velocity into the
+    /// obstacle removed. A hard hit is a Collision event, and above half the frame's crash
+    /// speed (or with spinning propellers) a crash "collision with <name>". Call after
+    /// resolveCollisions().
+    void resolveObstacles(const ObstacleProbe& probe);
     [[nodiscard]] std::vector<VehicleEvent> takeEvents() override;
     [[nodiscard]] const RigidBodyState& bodyState() const noexcept override { return body_; }
     [[nodiscard]] VehicleTelemetry telemetry() const override;

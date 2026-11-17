@@ -11,6 +11,7 @@
 #include <tuple>
 #include <utility>
 
+#include "ds/app/mission_setup.hpp"
 #include "ds/common/log.hpp"
 #include "ds/storage/mission_store.hpp"
 #include "ds/storage/storage_service.hpp"
@@ -105,6 +106,9 @@ void MissionsController::reload() {
             if (!e.load.unavailable.empty()) {
                 row.status = MissionStatus::Unavailable;
                 row.statusDetail = e.load.unavailable.front();
+            } else if (auto reason = unplayableReason(*d)) {
+                row.status = MissionStatus::Unavailable;
+                row.statusDetail = std::move(*reason);
             }
             bestStars[row.key] = row.bestStars;
             campaign.push_back({d->id, d->chapter, d->order, d->unlock});
@@ -147,6 +151,81 @@ void MissionsController::reload() {
         previous = &row;
     }
     emit missionsChanged();
+}
+
+const MissionRow* MissionsController::nextMission(std::string_view key) const noexcept {
+    const auto it = std::ranges::find(rows_, key, &MissionRow::key);
+    if (it == rows_.end()) {
+        return nullptr;
+    }
+    const auto next = std::find_if(std::next(it), rows_.end(), [](const MissionRow& r) {
+        return r.status == MissionStatus::Available;
+    });
+    return next != rows_.end() ? &*next : nullptr;
+}
+
+common::Result<std::int64_t> MissionsController::recordAttempt(
+    const std::string& key, const missions::MissionResult& result, astro::UtcTime startedAt) {
+    if (storage_ == nullptr) {
+        return common::makeError("results cannot be saved without a database");
+    }
+    storage::MissionAttemptRecord r;
+    r.missionKey = key;
+    r.startedAt = astro::formatUtc(startedAt);
+    r.outcome = std::string(missions::missionStateName(result.outcome));
+    r.failureReason = result.failureReason;
+    r.score = result.score.total;
+    r.stars = result.stars;
+    r.durationS = result.durationS;
+    r.resultsJson = result.toJson().dump();
+    auto id = storage_->submit([r](storage::DbConnection& c) {
+                         return storage::MissionStore(c).recordAttempt(r);
+                     }).get();
+    if (!id) {
+        log::warn("Cannot save the attempt of {}: {}", key, id.error().message);
+        return common::makeError(id.error().message);
+    }
+    reload();  // Progress, best stars and unlocks changed.
+    return *id;
+}
+
+std::optional<storage::MissionAttemptRecord> MissionsController::bestAttempt(
+    const std::string& key, std::optional<std::int64_t> excluding) const {
+    if (storage_ == nullptr) {
+        return std::nullopt;
+    }
+    auto attempts = storage_->submit([key](storage::DbConnection& c) {
+                               return storage::MissionStore(c).attempts(key, 1000);
+                           }).get();
+    if (!attempts) {
+        log::warn("Cannot read the attempts of {}: {}", key, attempts.error().message);
+        return std::nullopt;
+    }
+    // Same order as MissionStore::bestAttempt(): most stars, then highest score.
+    std::optional<storage::MissionAttemptRecord> best;
+    for (const storage::MissionAttemptRecord& a : *attempts) {
+        if (excluding && a.id == excluding) {
+            continue;
+        }
+        if (!best || a.stars > best->stars || (a.stars == best->stars && a.score > best->score)) {
+            best = a;
+        }
+    }
+    return best;
+}
+
+common::Result<std::filesystem::path> MissionsController::importMission(
+    const std::filesystem::path& source, bool overwrite) {
+    if (folders_.userDir.empty()) {
+        return common::makeError("there is no user mission folder");
+    }
+    auto imported = missions::importMission(source, folders_.userDir, overwrite);
+    if (!imported) {
+        return std::unexpected(imported.error());
+    }
+    log::info("Imported mission {}", imported->string());
+    reload();
+    return imported;
 }
 
 }  // namespace ds::app

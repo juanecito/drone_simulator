@@ -9,7 +9,9 @@
 
 #include "ds/astro/time.hpp"
 #include "ds/input/control.hpp"
+#include "ds/missions/flight_rules.hpp"
 #include "ds/physics/vehicle.hpp"
+#include "ds/sim/mission_session.hpp"
 
 /// @file
 /// @brief Immutable state published after every tick (FR-LOOP-06).
@@ -57,6 +59,10 @@ struct WorldSnapshot {
     double windMeanSpeedMs = 0.0;         ///< Level's mean speed at 10 m.
     double windGustMs = 0.0;              ///< Level's gust peak.
     SessionStats stats;                   ///< Flight statistics.
+    double sunElevationDeg = 45.0;        ///< Apparent sun elevation at the origin.
+    /// Flight-rule warnings (the mission's, or free mode's, FR-MIS-06b/06d).
+    std::vector<missions::RuleWarning> ruleWarnings;
+    MissionStatus mission;                ///< Mission being flown (mission.active).
     /// Wall-clock time of publication (the renderer extrapolates from it).
     std::chrono::steady_clock::time_point publishedAt{};
     std::uint64_t resetCount = 0;  ///< Incremented on every reset.

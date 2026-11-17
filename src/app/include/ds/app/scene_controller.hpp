@@ -67,6 +67,16 @@ public:
     /// @brief Applies and saves @p config.
     void setEnvironment(const EnvironmentConfig& config);
 
+    /// @brief Shows a mission's terrain and environment (FR-MIS-02) without saving them: the
+    /// free-mode scene is kept and restored by leaveMission(). Emits terrainChanged() and
+    /// environmentChanged().
+    common::Result<void> enterMission(const TerrainConfig& terrain,
+                                      const EnvironmentConfig& environment);
+    /// @brief Restores the free-mode scene after a mission.
+    void leaveMission();
+    /// @brief True between enterMission() and leaveMission().
+    [[nodiscard]] bool inMission() const noexcept { return missionScene_; }
+
     /// @brief Built-in presets followed by the user's presets (sorted by name).
     [[nodiscard]] const QList<PresetInfo>& presets() const noexcept { return presets_; }
     /// @brief Configuration of the preset @p key.
@@ -146,6 +156,10 @@ private:
     std::uint64_t terrainVersion_ = 0;
     bool exposureReset_ = true;
     bool externalClock_ = false;
+    bool missionScene_ = false;
+    TerrainConfig freeTerrain_;
+    EnvironmentConfig freeEnvironment_;
+    graphics::Camera freeCamera_;
 };
 
 }  // namespace ds::app

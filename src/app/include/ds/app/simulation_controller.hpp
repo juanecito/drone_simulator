@@ -21,8 +21,10 @@
 #include "ds/graphics/drone_model.hpp"
 #include "ds/input/input_selector.hpp"
 #include "ds/input/joystick_service.hpp"
+#include "ds/missions/mission.hpp"
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/sim/hud.hpp"
+#include "ds/sim/item_visuals.hpp"
 #include "ds/sim/simulation_loop.hpp"
 #include "ds/weather/wind_levels.hpp"
 
@@ -119,6 +121,35 @@ public:
     /// @brief Changes the time scale (0.1–4).
     common::Result<void> setTimeScale(double scale);
 
+    // --- Missions (FR-MIS-08, FR-MIS-09) -------------------------------------------------
+
+    /// @brief Flies @p mission with @p profile: shows the mission's terrain and environment,
+    /// places the vehicle at the spawn point and enters PreFlight (the mission starts when the
+    /// vehicle is armed). Mission rules apply until endMission(): time scale 1×, no free
+    /// camera, no resets, the profile locked, the keyboard only if `allowKeyboard`.
+    common::Result<void> startMission(const missions::MissionDefinition& mission,
+                                      const physics::AerialProfile& profile);
+    /// @brief Starts the attempt again from a clean state (vehicle back at the spawn point).
+    void retryMission();
+    /// @brief Ends the running attempt as Aborted.
+    void abortMission();
+    /// @brief Leaves the mission: the free-mode scene, vehicle and take-off point come back.
+    void endMission();
+    /// @brief Items of the free-flight scene (Items tab): drawn and solid outside missions.
+    void setFreeItems(const std::vector<items::Item>& freeItems);
+    /// @brief True between startMission() and endMission().
+    [[nodiscard]] bool missionActive() const noexcept { return mission_.has_value(); }
+    /// @brief The mission being flown (valid while missionActive()).
+    [[nodiscard]] const missions::MissionDefinition* mission() const noexcept {
+        return mission_ ? &*mission_ : nullptr;
+    }
+    /// @brief Mission part of the latest snapshot.
+    [[nodiscard]] const sim::MissionStatus& missionStatus() const noexcept {
+        return loop_->snapshot().mission;
+    }
+    /// @brief True if the keyboard may fly (free mode, or a mission with `allowKeyboard`).
+    [[nodiscard]] bool keyboardAllowed() const noexcept;
+
     // --- Cameras --------------------------------------------------------------------------
 
     /// @brief Current camera mode.
@@ -182,6 +213,13 @@ signals:
     void simulationEvent(const QString& text);
     /// @brief About four times a second, for telemetry read-outs.
     void telemetryUpdated();
+    /// @brief A mission was started or ended (missionActive() changed).
+    void missionActiveChanged();
+    /// @brief The mission's state changed (PreFlight → InProgress, …).
+    void missionStateChanged();
+    /// @brief The current attempt ended (succeeded, failed or aborted); missionStatus().result
+    /// holds the result. Emitted once per attempt.
+    void missionFinished();
 
 private:
     void loadWindTable(const std::filesystem::path& assets);
@@ -196,6 +234,8 @@ private:
     void handleEvents();
     void recordSession(const sim::SessionStats& stats, const std::string& profileKey);
     void updatePilotEye();
+    void applyFreeFlightRules();
+    void refuseInMission(const QString& what);
     [[nodiscard]] sim::GroundFunction groundFunction() const;
     [[nodiscard]] graphics::FpvCameraParams fpvParams() const;
 
@@ -226,6 +266,21 @@ private:
     std::vector<graphics::DrawItem> items_;
     sim::HudModel hud_;
     double telemetryClock_ = 0.0;
+
+    // Mission.
+    std::optional<missions::MissionDefinition> mission_;
+    std::unique_ptr<sim::ItemVisuals> itemVisuals_;
+    std::unique_ptr<sim::ItemVisuals> freeVisuals_;
+    std::vector<std::string> highlighted_;
+    glm::dvec3 missionSpawn_{0.0};
+    double missionHeadingRad_ = 0.0;
+    glm::dvec3 missionPilot_{0.0};
+    physics::AerialProfile freeProfile_;
+    bool freeProfileModified_ = false;
+    glm::dvec3 freeHome_{0.0};
+    double freeHeadingRad_ = 0.0;
+    std::optional<missions::MissionState> lastMissionState_;
+    std::uint64_t reportedAttempt_ = ~std::uint64_t{0};
 
     sim::SessionStats lastStats_;
     std::string lastProfileKey_;

@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "ops-02-mast-inspection",
+  "title": "Mast inspection",
+  "briefing": "The antenna on top of the 30 m mast 100 m north of you needs a look. Keep it in the camera view, within 15 m, for eight seconds — then land. The mast is solid, and it can hide the drone from you: do not stay behind it for long.",
+  "difficulty": 3,
+  "chapter": "operations",
+  "order": 2,
+  "terrain": {
+    "source": "procedural",
+    "seed": 808,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [48.8566, 2.3522, 40],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-03-20T11:00:00Z",
+    "timeZone": "Europe/Paris",
+    "weather": {
+      "seed": 1,
+      "preset": "overcast",
+      "temperatureC": 9,
+      "wind": {
+        "level": 2,
+        "fromDeg": 300
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 300
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "obstacle",
+      "id": "mast",
+      "name": "Mast",
+      "shape": "cylinder",
+      "local": [0, 0, -100],
+      "radiusM": 0.6,
+      "heightM": 30
+    },
+    {
+      "type": "inspectionTarget",
+      "id": "antenna",
+      "name": "Antenna",
+      "local": [0, 31, -100],
+      "radiusM": 0.6
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "inspect",
+      "type": "inspect",
+      "title": "Inspect the antenna for 8 s",
+      "target": "antenna",
+      "maxDistanceM": 15,
+      "maxAngleDeg": 25,
+      "durationS": 8
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 120
+      },
+      {
+        "maxTimeS": 75
+      }
+    ]
+  }
+}

@@ -9,14 +9,19 @@ astronomically correct day/night sky.
 - **Platform:** Debian 13 (amd64), distributed as a `.deb` package installed in `/opt/drone_simulator`
 - **Licence:** MIT — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-> **Status: milestone M3 (realistic flight).** Fly a quadcopter over endless or bounded
+> **Status: milestone M5 (items and missions).** Fly a quadcopter over endless or bounded
 > procedural terrain under a physically based day/night sky. The flight model covers motors,
 > propellers and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence,
 > noisy sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight
 > controller. Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or
 > with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD, a UTM position
-> panel and a compass showing true and magnetic north (World Magnetic Model WMM2025). There are three reference profiles and an editable Vehicle tab. Missions, real
-> terrain, the ground drone and weather arrive in milestones M4–M8 (see the specification).
+> panel and a compass showing true and magnetic north (World Magnetic Model WMM2025). There
+> are three reference profiles and an editable Vehicle tab. **Missions** are JSON files: a
+> campaign of 12 built-in aerial missions (basics, racing, operations) plus your own, each
+> with a briefing, objectives on the HUD, flight rules, scoring with stars, a debrief and your
+> progress saved per user. The **Items** tab places gates, obstacles, pads and zones in the
+> free-flight scene. Real terrain, the ground drone and weather arrive in milestones M4 and
+> M6–M8 (see the specification).
 
 ## Quick start
 
@@ -109,8 +114,9 @@ settings, including the window layout, the terrain and the environment, which ar
 the next start; the user's terrain presets, vehicle profiles and controller mappings; and a
 record of each flight. Your own missions go in `$HOME/.drone_simulation/missions/`: every valid
 mission file there (`.json`) is added to the list of missions in the **Missions** tab at
-start-up (*Reload* rescans the folder), and the default
-mission *First flight* is put there if it is missing. If the folder
+start-up (*Reload* rescans the folder; *Missions › Import Mission…* copies one in), and the
+default mission *First flight* is put there if it is missing. Every mission attempt is saved
+with your progress; the items of the free-flight scene are saved with the settings. If the folder
 cannot be created, the program warns and runs with a temporary in-memory database. `--db <path>`
 uses another database file (for testing). Uninstalling the package never touches user data.
 

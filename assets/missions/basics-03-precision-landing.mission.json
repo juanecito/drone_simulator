@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "basics-03-precision-landing",
+  "title": "Precision landing",
+  "briefing": "A small pad waits on the hillside 190 m to the north-east, with a light breeze from the south-west. Land on it within half a metre of the centre, and gently: no more than 0.8 m/s at touchdown.",
+  "difficulty": 2,
+  "chapter": "basics",
+  "order": 3,
+  "terrain": {
+    "source": "procedural",
+    "seed": 303,
+    "preset": "rolling-hills",
+    "origin": {
+      "geo": [43.263, -2.935, 40],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    },
+    "params": {
+      "flatZones": [
+        {
+          "x": 0,
+          "z": 0,
+          "radiusM": 30,
+          "blendM": 30
+        },
+        {
+          "x": 150,
+          "z": -120,
+          "radiusM": 12,
+          "blendM": 25
+        }
+      ]
+    }
+  },
+  "environment": {
+    "utc": "2026-04-18T09:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 1,
+      "preset": "scattered-clouds",
+      "temperatureC": 14,
+      "wind": {
+        "level": 2,
+        "fromDeg": 225
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 240
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "start",
+      "name": "Start pad",
+      "local": [0, 0, 0],
+      "radiusM": 1.5
+    },
+    {
+      "type": "landingPad",
+      "id": "hill-pad",
+      "name": "Hill pad",
+      "local": [150, 0, -120],
+      "radiusM": 1.0
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "land",
+      "type": "land",
+      "title": "Land on the hill pad",
+      "target": "hill-pad",
+      "maxErrorM": 0.5,
+      "maxTouchdownSpeedMs": 0.8
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 120
+      },
+      {
+        "maxTimeS": 80,
+        "maxErrorM": 0.25
+      }
+    ]
+  }
+}

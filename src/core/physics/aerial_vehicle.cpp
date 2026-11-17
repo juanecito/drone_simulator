@@ -432,6 +432,51 @@ void AerialVehicle::resolveCollisions(const EnvironmentSample& env, double /*dt*
     }
 }
 
+void AerialVehicle::resolveObstacles(const ObstacleProbe& probe) {
+    if (!probe) {
+        return;
+    }
+    // The deepest contact of the collision points, resolved for the whole body.
+    const Vec3 c = mass_.centreOfMassOffset;
+    std::optional<ObstacleContact> deepest;
+    bool gear = false;
+    for (const CollisionPoint& point : points_) {
+        const Vec3 p = body_.position + body_.orientation * (point.body - c);
+        if (auto contact = probe(p); contact && (!deepest || contact->depthM > deepest->depthM)) {
+            deepest = std::move(contact);
+            gear = point.gear;
+        }
+    }
+    if (!deepest) {
+        return;
+    }
+    const Vec3& n = deepest->normal;
+    body_.position += n * deepest->depthM;
+    const double normalSpeed = glm::dot(body_.velocity, n);
+    if (normalSpeed < 0.0) {
+        constexpr double kRestitution = 0.2;
+        body_.velocity -= (1.0 + kRestitution) * normalSpeed * n;
+        const double impact = -normalSpeed;
+        const double meanOmega = std::accumulate(omega_.begin(), omega_.end(), 0.0) /
+                                 static_cast<double>(omega_.size());
+        const bool spinning = meanOmega > kPropStrikeSpeedFraction * maxOmega_;
+        if (impact > kCollisionEventSpeed) {
+            pushEvent(VehicleEvent::Kind::Collision, impact);
+        }
+        if (!crashed_) {
+            if (impact > (gear ? 1.0 : 0.5) * profile_.frame.crashSpeedMs) {
+                crash(impact, "collision with " + deepest->name);
+            } else if (!gear && spinning && impact > kCollisionEventSpeed) {
+                crash(impact, "propeller strike on " + deepest->name);
+            }
+        }
+    }
+    // Standing on top of something (a roof) counts as being on the ground.
+    if (gear && n.y > 0.7) {
+        onGround_ = true;
+    }
+}
+
 VehicleTelemetry AerialVehicle::telemetry() const {
     VehicleTelemetry t;
     t.type = VehicleType::Aerial;

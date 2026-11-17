@@ -7,12 +7,17 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "ds/astro/time.hpp"
+#include "ds/geo/coordinates.hpp"
 #include "ds/input/control.hpp"
+#include "ds/items/registry.hpp"
+#include "ds/missions/flight_rules.hpp"
 #include "ds/physics/aerial_vehicle.hpp"
 #include "ds/physics/wind.hpp"
 #include "ds/sim/events.hpp"
+#include "ds/sim/mission_session.hpp"
 #include "ds/sim/world_snapshot.hpp"
 #include "ds/weather/wind_levels.hpp"
 
@@ -30,6 +35,10 @@ using GroundFunction = std::function<physics::GroundSample(double x, double z)>;
 /// @brief Flat ground at height 0 (tests).
 [[nodiscard]] GroundFunction flatGround(double heightM = 0.0);
 
+/// @brief Line of sight over the terrain @p ground: true unless the terrain rises above the
+/// straight line between the two points (sampled every ≤ 5 m, at most 400 samples).
+[[nodiscard]] missions::LineOfSightFunction terrainLineOfSight(GroundFunction ground);
+
 /// @brief Configuration of a world.
 struct WorldConfig {
     physics::AerialProfile profile;     ///< Vehicle.
@@ -44,6 +53,17 @@ struct WorldConfig {
     physics::Vec3 startPosition{0.0};  ///< Take-off point (x, z; placed on the ground).
     double startHeadingRad = 0.0;      ///< Initial heading.
     astro::UtcTime startUtc{};         ///< Simulation clock at the start.
+    /// Geographic position of world (0, 0, 0) (sun position for the flight rules).
+    geo::Geodetic geoOrigin{};
+    double visibilityM = 60'000.0;     ///< Meteorological visibility (VLOS limit).
+};
+
+/// @brief Flight rules in free mode (FR-MIS-06d): the default rules, checked from the pilot's
+/// position, shown as warnings; with @ref enforce a rule broken for longer than allowed ends
+/// the flight (FlightRuleBrokenEvent).
+struct FreeFlightRules {
+    physics::Vec3 pilotPosition{0.0};  ///< Pilot on the ground (the eye is 1.7 m above).
+    bool enforce = false;              ///< End the flight when a rule is broken.
 };
 
 /// @brief Maps a transmitter flight-mode index to the vehicle's mode.
@@ -57,6 +77,11 @@ class World {
 public:
     /// @brief Builds the world and places the vehicle at the start position.
     explicit World(WorldConfig config);
+    ~World();
+    World(const World&) = delete;
+    World& operator=(const World&) = delete;
+    World(World&&) = delete;
+    World& operator=(World&&) = delete;
 
     /// @brief Puts the vehicle back at the start, refills the battery, restarts the wind and
     /// the statistics, and publishes SimResetEvent.
@@ -77,6 +102,25 @@ public:
     void setUtc(astro::UtcTime utc) noexcept;
     /// @brief Replaces the vehicle (new profile) and resets.
     void setProfile(const physics::AerialProfile& profile);
+    /// @brief Changes the visibility (VLOS limit).
+    void setVisibility(double visibilityM) noexcept { config_.visibilityM = visibilityM; }
+    /// @brief Changes the geographic origin (sun position).
+    void setGeoOrigin(const geo::Geodetic& origin) noexcept;
+
+    /// @brief Flies @p session (null ends the mission). Free-mode rules are not checked while
+    /// a mission runs: the mission checks its own.
+    void setMission(std::unique_ptr<MissionSession> session);
+    /// @brief The mission being flown, or null.
+    [[nodiscard]] MissionSession* mission() noexcept { return mission_.get(); }
+    /// @brief Free-mode flight rules; nullopt switches them off.
+    void setFreeFlightRules(std::optional<FreeFlightRules> rules);
+    /// @brief Items of the free-flight scene (Items tab): obstacles outside missions. During a
+    /// mission the mission's own items are the obstacles.
+    void setFreeItems(const std::vector<items::Item>& freeItems);
+    /// @brief The free-flight scene's items.
+    [[nodiscard]] const items::ItemRegistry& freeItems() const noexcept { return freeItems_; }
+    /// @brief Apparent sun elevation at the origin, degrees (updated every simulated second).
+    [[nodiscard]] double sunElevationDeg() const noexcept { return sunElevationDeg_; }
 
     /// @brief Fills @p snapshot (allocation-free for a reused snapshot).
     void fillSnapshot(WorldSnapshot& snapshot) const;
@@ -100,11 +144,16 @@ public:
     [[nodiscard]] astro::UtcTime utc() const noexcept;
     /// @brief Flight statistics.
     [[nodiscard]] const SessionStats& stats() const noexcept { return stats_; }
+    /// @brief Pilot controls of the last tick.
+    [[nodiscard]] const input::ControlInputs& controls() const noexcept { return controls_; }
 
 private:
     physics::EnvironmentSample sampleEnvironment(const physics::Vec3& position) const;
     void restartWind();
     void publishVehicleEvents();
+    void resolveObstacles();
+    void updateSun();
+    void checkFreeRules();
 
     WorldConfig config_;
     std::unique_ptr<physics::AerialVehicle> vehicle_;
@@ -120,6 +169,13 @@ private:
     SessionStats stats_;
     physics::Vec3 lastPosition_{0.0};
     input::ControlInputs controls_;
+    std::unique_ptr<MissionSession> mission_;
+    items::ItemRegistry freeItems_;
+    std::vector<missions::VehicleIncident> incidents_;
+    std::optional<FreeFlightRules> freeRules_;
+    std::unique_ptr<missions::FlightRulesMonitor> freeMonitor_;
+    double sunElevationDeg_ = 45.0;
+    double sunUpdatedAtS_ = -1e9;
 };
 
 }  // namespace ds::sim

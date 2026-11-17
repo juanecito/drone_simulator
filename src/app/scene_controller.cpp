@@ -133,6 +133,49 @@ common::Result<void> SceneController::setTerrain(const TerrainConfig& config) {
     return {};
 }
 
+common::Result<void> SceneController::enterMission(const TerrainConfig& terrain,
+                                                  const EnvironmentConfig& environment) {
+    if (auto valid = terrain::validate(terrain.params); !valid) {
+        return valid;
+    }
+    if (terrain.extent) {
+        if (auto valid = terrain::validate(*terrain.extent); !valid) {
+            return valid;
+        }
+    }
+    if (!missionScene_) {
+        freeTerrain_ = terrain_;
+        freeEnvironment_ = environment_;
+        freeCamera_ = camera_;
+    }
+    missionScene_ = true;
+    terrain_ = terrain;
+    rebuildTerrain();
+    environment_ = environment;
+    environment_.visibilityM =
+        std::clamp(environment.visibilityM, kMinVisibilityM, kMaxVisibilityM);
+    exposureReset_ = true;
+    updateSky();
+    emit terrainChanged();
+    emit environmentChanged();
+    return {};
+}
+
+void SceneController::leaveMission() {
+    if (!missionScene_) {
+        return;
+    }
+    missionScene_ = false;
+    terrain_ = freeTerrain_;
+    environment_ = freeEnvironment_;
+    camera_ = freeCamera_;
+    rebuildTerrain();
+    exposureReset_ = true;
+    updateSky();
+    emit terrainChanged();
+    emit environmentChanged();
+}
+
 void SceneController::setEnvironment(const EnvironmentConfig& config) {
     using namespace std::chrono;
     if (abs(config.time - environment_.time) > minutes(30)) {
@@ -175,14 +218,14 @@ geo::Geodetic SceneController::toGeodetic(const glm::dvec3& world) const {
 }
 
 void SceneController::saveTerrain() {
-    if (settings_ != nullptr) {
+    if (settings_ != nullptr && !missionScene_) {
         settings_->writeJson(settings_keys::kSceneTerrain,
                              QJsonDocument(terrainToJson(terrain_)).toJson(QJsonDocument::Compact));
     }
 }
 
 void SceneController::saveEnvironment() {
-    if (settings_ != nullptr) {
+    if (settings_ != nullptr && !missionScene_) {
         settings_->writeJson(
             settings_keys::kSceneEnvironment,
             QJsonDocument(environmentToJson(environment_)).toJson(QJsonDocument::Compact));

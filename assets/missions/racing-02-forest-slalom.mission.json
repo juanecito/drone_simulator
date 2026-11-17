@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "id": "racing-02-forest-slalom",
+  "title": "Forest slalom",
+  "briefing": "Weave through the trees: four gates out to the north, four gates back to the south. Strict order — a gate taken out of turn fails the run. The trees are solid.",
+  "difficulty": 3,
+  "chapter": "racing",
+  "order": 2,
+  "terrain": {
+    "source": "procedural",
+    "seed": 606,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [46.6247, 14.3053, 450],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    }
+  },
+  "environment": {
+    "utc": "2026-08-22T08:30:00Z",
+    "timeZone": "Europe/Vienna",
+    "weather": {
+      "seed": 1,
+      "preset": "scattered-clouds",
+      "temperatureC": 21,
+      "wind": {
+        "level": 2,
+        "fromDeg": 330
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "fpv-5in-racer",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "maxAltitudeAglM": 50,
+    "timeLimitS": 180
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Pad",
+      "local": [0, 0, 0],
+      "radiusM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "out1",
+      "name": "Out 1",
+      "local": [12, 3, -40],
+      "headingDeg": 0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "out2",
+      "name": "Out 2",
+      "local": [-12, 3, -80],
+      "headingDeg": 0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "out3",
+      "name": "Out 3",
+      "local": [12, 3, -120],
+      "headingDeg": 0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "out4",
+      "name": "Out 4",
+      "local": [-12, 3, -160],
+      "headingDeg": 0,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "back1",
+      "name": "Back 1",
+      "local": [36, 3, -160],
+      "headingDeg": 180,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "back2",
+      "name": "Back 2",
+      "local": [60, 3, -120],
+      "headingDeg": 180,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "back3",
+      "name": "Back 3",
+      "local": [36, 3, -80],
+      "headingDeg": 180,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "gate",
+      "id": "back4",
+      "name": "Back 4",
+      "local": [60, 3, -40],
+      "headingDeg": 180,
+      "widthM": 3,
+      "heightM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree1",
+      "name": "Tree 1",
+      "shape": "tree",
+      "local": [0, 0, -60],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree2",
+      "name": "Tree 2",
+      "shape": "tree",
+      "local": [0, 0, -100],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree3",
+      "name": "Tree 3",
+      "shape": "tree",
+      "local": [0, 0, -140],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree4",
+      "name": "Tree 4",
+      "shape": "tree",
+      "local": [0, 0, -180],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree5",
+      "name": "Tree 5",
+      "shape": "tree",
+      "local": [48, 0, -140],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree6",
+      "name": "Tree 6",
+      "shape": "tree",
+      "local": [48, 0, -100],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree7",
+      "name": "Tree 7",
+      "shape": "tree",
+      "local": [48, 0, -60],
+      "heightM": 9,
+      "radiusM": 2.5
+    },
+    {
+      "type": "obstacle",
+      "id": "tree8",
+      "name": "Tree 8",
+      "shape": "tree",
+      "local": [48, 0, -20],
+      "heightM": 9,
+      "radiusM": 2.5
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "slalom",
+      "type": "gateCourse",
+      "title": "Fly the slalom",
+      "gates": [
+        "out1",
+        "out2",
+        "out3",
+        "out4",
+        "back1",
+        "back2",
+        "back3",
+        "back4"
+      ],
+      "laps": 1,
+      "strictOrder": true
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 2
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 90
+      },
+      {
+        "maxTimeS": 60
+      }
+    ]
+  }
+}

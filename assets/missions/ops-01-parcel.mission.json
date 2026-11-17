@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "ops-01-parcel",
+  "title": "Parcel delivery",
+  "briefing": "A farm on the hill needs a spare part. Pick up the 0.5 kg parcel at the depot (hover low and slow in the green zone for a second), drop it in the farm yard 280 m away, then come home and land.",
+  "difficulty": 2,
+  "chapter": "operations",
+  "order": 1,
+  "terrain": {
+    "source": "procedural",
+    "seed": 707,
+    "preset": "rolling-hills",
+    "origin": {
+      "geo": [47.3769, 8.5417, 420],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 3000,
+      "lengthM": 3000
+    },
+    "params": {
+      "flatZones": [
+        {
+          "x": 0,
+          "z": 0,
+          "radiusM": 40,
+          "blendM": 30
+        },
+        {
+          "x": 180,
+          "z": -220,
+          "radiusM": 25,
+          "blendM": 30
+        }
+      ]
+    }
+  },
+  "environment": {
+    "utc": "2026-06-02T07:00:00Z",
+    "timeZone": "Europe/Zurich",
+    "weather": {
+      "seed": 1,
+      "preset": "few-clouds",
+      "temperatureC": 16,
+      "wind": {
+        "level": 2,
+        "fromDeg": 250
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "survey-1500g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 420
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "pad",
+      "name": "Home pad",
+      "local": [0, 0, 0],
+      "radiusM": 2.0
+    },
+    {
+      "type": "pickupZone",
+      "id": "depot",
+      "name": "Depot",
+      "local": [12, 0, -12],
+      "radiusM": 3
+    },
+    {
+      "type": "dropZone",
+      "id": "farm",
+      "name": "Farm yard",
+      "local": [180, 0, -220],
+      "radiusM": 4
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "deliver",
+      "type": "deliver",
+      "title": "Deliver the parcel to the farm",
+      "pickup": "depot",
+      "drop": "farm",
+      "cargoKg": 0.5,
+      "maxDropSpeedMs": 1.0
+    },
+    {
+      "id": "home",
+      "type": "returnHome",
+      "radiusM": 5
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "pad",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 240
+      },
+      {
+        "maxTimeS": 160
+      }
+    ]
+  }
+}

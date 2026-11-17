@@ -13,9 +13,12 @@
 #include <cmath>
 #include <random>
 
+#include "ds/app/mission_setup.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/common/log.hpp"
+#include "ds/common/math.hpp"
+#include "ds/missions/mission_runner.hpp"
 #include "ds/storage/input_profile_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/storage_service.hpp"
@@ -105,6 +108,11 @@ SimulationController::SimulationController(SceneController& scene, SettingsContr
             &SimulationController::onTerrainChanged);
     connect(&scene, &SceneController::environmentChanged, this,
             &SimulationController::onEnvironmentChanged);
+    if (settings_ != nullptr) {
+        connect(settings_, &SettingsController::enforceFreeFlightRulesChanged, this,
+                &SimulationController::applyFreeFlightRules);
+    }
+    applyFreeFlightRules();
 }
 
 SimulationController::~SimulationController() {
@@ -290,6 +298,8 @@ void SimulationController::createLoop() {
     c.startPosition = home_;
     c.startHeadingRad = homeHeadingRad_;
     c.startUtc = lastEnvironment_.time;
+    c.geoOrigin = scene_->terrain().origin;
+    c.visibilityM = lastEnvironment_.visibilityM;
     input::InputSelector* selector = selector_.get();
     loop_ =
         std::make_unique<sim::SimulationLoop>(std::make_unique<sim::World>(std::move(c)),
@@ -303,9 +313,35 @@ void SimulationController::createLoop() {
 }
 
 void SimulationController::updatePilotEye() {
+    if (mission_) {
+        // The mission's pilot position (its pilot item, or the spawn point).
+        const double ground = scene_->query().height(missionPilot_.x, missionPilot_.z);
+        rig_.setPilotEye({missionPilot_.x, ground + kPilotEyeHeightM, missionPilot_.z});
+        return;
+    }
     const glm::dvec3 behind = home_ - kPilotBehindHomeM * headingVector(homeHeadingRad_);
     const double ground = scene_->query().height(behind.x, behind.z);
     rig_.setPilotEye({behind.x, ground + kPilotEyeHeightM, behind.z});
+    applyFreeFlightRules();
+}
+
+void SimulationController::applyFreeFlightRules() {
+    // Free mode checks the default rules from the pilot's position behind the take-off point
+    // (FR-MIS-06d); while a mission runs the world checks the mission's rules instead.
+    const glm::dvec3 behind = home_ - kPilotBehindHomeM * headingVector(homeHeadingRad_);
+    const double ground = scene_->query().height(behind.x, behind.z);
+    const sim::FreeFlightRules rules{
+        .pilotPosition = {behind.x, ground, behind.z},
+        .enforce = settings_ != nullptr && settings_->enforceFreeFlightRules()};
+    loop_->post([rules](sim::World& w) { w.setFreeFlightRules(rules); });
+}
+
+void SimulationController::refuseInMission(const QString& what) {
+    emit simulationEvent(tr("%1 is not allowed during a mission").arg(what));
+}
+
+bool SimulationController::keyboardAllowed() const noexcept {
+    return !mission_ || mission_->rules.allowKeyboard;
 }
 
 // --- Profiles -------------------------------------------------------------------------------
@@ -354,6 +390,9 @@ void SimulationController::setFlownProfile(const physics::AerialProfile& profile
 }
 
 common::Result<void> SimulationController::selectProfile(const QString& key) {
+    if (mission_) {
+        return common::makeError("The vehicle profile is locked during a mission.");
+    }
     auto profile = profileFor(key);
     if (!profile) {
         return common::makeError(profile.error().message);
@@ -369,6 +408,9 @@ common::Result<void> SimulationController::selectProfile(const QString& key) {
 }
 
 common::Result<void> SimulationController::applyProfile(const physics::AerialProfile& profile) {
+    if (mission_) {
+        return common::makeError("The vehicle profile is locked during a mission.");
+    }
     auto checked = validated(profile);
     if (!checked) {
         return common::makeError(checked.error().message);
@@ -476,11 +518,19 @@ void SimulationController::step() {
 }
 
 void SimulationController::reset() {
+    if (mission_) {
+        refuseInMission(tr("Reset (use Missions › Retry)"));
+        return;
+    }
     selector_->keyboardAction(input::KeyboardAction::Reset);
     loop_->post([](sim::World& w) { w.reset(); });
 }
 
 void SimulationController::moveHomeToCamera() {
+    if (mission_) {
+        refuseInMission(tr("Moving the take-off point"));
+        return;
+    }
     const graphics::Camera& free = scene_->camera();
     home_ = glm::dvec3(free.position.x, 0.0, free.position.z);
     homeHeadingRad_ = free.yawRad;
@@ -494,10 +544,171 @@ common::Result<void> SimulationController::setTimeScale(double scale) {
     return loop_->setTimeScale(scale);
 }
 
+// --- Missions -------------------------------------------------------------------------------
+
+common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
+                                                        const physics::AerialProfile& profile) {
+    if (auto reason = unplayableReason(m)) {
+        return common::makeError(*reason);
+    }
+    auto checked = validated(profile);
+    if (!checked) {
+        return common::makeError("vehicle profile: " + checked.error().message);
+    }
+    checked->key = profile.key;
+    auto scene = missionScene(m, scene_->environment());
+    if (!scene) {
+        return common::makeError(scene.error().message);
+    }
+    if (!mission_) {
+        freeProfile_ = profile_;
+        freeProfileModified_ = modified_;
+        freeHome_ = home_;
+        freeHeadingRad_ = homeHeadingRad_;
+    }
+    // The mission's terrain and environment first: the world receives the new ground before
+    // the vehicle is placed on it.
+    if (auto entered = scene_->enterMission(scene->terrain, scene->environment); !entered) {
+        return common::makeError(entered.error().message);
+    }
+    missions::MissionPlacement placement;
+    placement.origin = geo::LatLon{scene_->terrain().origin.latitudeDeg,
+                                   scene_->terrain().origin.longitudeDeg};
+    auto query = std::make_shared<const terrain::TerrainQuery>(
+        scene_->source(), scene_->layout(), scene_->terrain().origin.heightM);
+    placement.ground = [query](double x, double z) { return query->height(x, z); };
+    placement.originAltitudeM = scene_->terrain().origin.heightM;
+    auto runner =
+        missions::MissionRunner::create(m, placement, sim::terrainLineOfSight(groundFunction()));
+    if (!runner) {
+        if (!mission_) {
+            scene_->leaveMission();
+        }
+        return common::makeError(runner.error().message);
+    }
+    itemVisuals_ = std::make_unique<sim::ItemVisuals>((*runner)->items(), m.rules.showMarkers);
+    highlighted_.clear();
+    missionSpawn_ = (*runner)->spawnPosition();
+    missionHeadingRad_ = common::degToRad((*runner)->spawnHeadingDeg());
+    missionPilot_ = (*runner)->pilotPosition();
+    mission_ = m;
+    profile_ = *checked;
+    modified_ = false;
+    model_.reset();
+    home_ = missionSpawn_;
+    homeHeadingRad_ = missionHeadingRad_;
+    updatePilotEye();
+
+    // Mission rules (FR-MIS-09).
+    loop_->setMissionActive(true);
+    selector_->setKeyboardAllowed(m.rules.allowKeyboard);
+    selector_->keyboardAction(input::KeyboardAction::Reset);
+    auto session = std::make_shared<std::unique_ptr<sim::MissionSession>>(
+        std::make_unique<sim::MissionSession>(std::move(*runner)));
+    loop_->post([profile = profile_, home = home_, heading = homeHeadingRad_, session,
+                 utc = m.environment.utc](sim::World& w) {
+        w.setProfile(profile);
+        w.setUtc(utc);
+        w.resetAt(home, heading);
+        w.setMission(std::move(*session));
+    });
+    started_ = true;  // The simulated clock drives the sky from the mission's start time.
+    lastMissionState_.reset();
+    reportedAttempt_ = ~std::uint64_t{0};
+    if (cameraMode_ == graphics::CameraMode::Free) {
+        setCameraMode(graphics::CameraMode::Chase);
+    }
+    rig_.reset({.position = home_, .orientation = glm::dquat(1.0, 0.0, 0.0, 0.0)});
+    if (loop_->state() == sim::RunState::Paused) {
+        loop_->resume();
+    } else {
+        loop_->start();
+    }
+    log::info("Mission {} started with {}", m.id, profile_.key);
+    emit profileChanged();
+    emit missionActiveChanged();
+    return {};
+}
+
+void SimulationController::retryMission() {
+    if (!mission_) {
+        return;
+    }
+    selector_->keyboardAction(input::KeyboardAction::Reset);
+    loop_->post([home = home_, heading = homeHeadingRad_,
+                 utc = mission_->environment.utc](sim::World& w) {
+        w.setUtc(utc);
+        w.resetAt(home, heading);
+        if (sim::MissionSession* m = w.mission()) {
+            m->retry(w);
+        }
+    });
+    lastMissionState_.reset();
+    if (loop_->state() == sim::RunState::Paused) {
+        loop_->resume();
+    } else {
+        loop_->start();
+    }
+}
+
+void SimulationController::abortMission() {
+    if (!mission_) {
+        return;
+    }
+    loop_->post([](sim::World& w) {
+        if (sim::MissionSession* m = w.mission()) {
+            m->abort(w);
+        }
+    });
+}
+
+void SimulationController::setFreeItems(const std::vector<items::Item>& freeItems) {
+    items::ItemRegistry registry;
+    for (const items::Item& item : freeItems) {
+        (void)registry.add(item);
+    }
+    freeVisuals_ = registry.size() > 0 ? std::make_unique<sim::ItemVisuals>(registry, true)
+                                       : nullptr;
+    loop_->post([freeItems](sim::World& w) { w.setFreeItems(freeItems); });
+}
+
+void SimulationController::endMission() {
+    if (!mission_) {
+        return;
+    }
+    loop_->post([](sim::World& w) { w.setMission(nullptr); });
+    mission_.reset();
+    itemVisuals_.reset();
+    highlighted_.clear();
+    lastMissionState_.reset();
+    loop_->setMissionActive(false);
+    selector_->setKeyboardAllowed(true);
+    selector_->keyboardAction(input::KeyboardAction::Reset);
+    profile_ = freeProfile_;
+    modified_ = freeProfileModified_;
+    model_.reset();
+    home_ = freeHome_;
+    homeHeadingRad_ = freeHeadingRad_;
+    // The free-mode terrain first, then the vehicle back at its take-off point on it.
+    scene_->leaveMission();
+    loop_->post([profile = profile_, home = home_, heading = homeHeadingRad_](sim::World& w) {
+        w.setProfile(profile);
+        w.resetAt(home, heading);
+    });
+    updatePilotEye();
+    log::info("Mission ended");
+    emit profileChanged();
+    emit missionActiveChanged();
+}
+
 // --- Cameras and input ---------------------------------------------------------------------
 
 void SimulationController::setCameraMode(graphics::CameraMode mode) {
     if (mode == cameraMode_) {
+        return;
+    }
+    if (mission_ && mode == graphics::CameraMode::Free) {
+        refuseInMission(tr("The free camera"));
         return;
     }
     if (cameraMode_ == graphics::CameraMode::Free) {
@@ -512,7 +723,11 @@ void SimulationController::setCameraMode(graphics::CameraMode mode) {
 }
 
 void SimulationController::cycleCameraMode() {
-    setCameraMode(graphics::nextCameraMode(cameraMode_));
+    graphics::CameraMode next = graphics::nextCameraMode(cameraMode_);
+    if (mission_ && next == graphics::CameraMode::Free) {
+        next = graphics::nextCameraMode(next);  // No free camera in missions (FR-MIS-09).
+    }
+    setCameraMode(next);
 }
 
 void SimulationController::setFlightKeys(std::uint32_t keys) { selector_->setKeys(keys); }
@@ -543,8 +758,9 @@ input::InputSource SimulationController::activeInputSource() const noexcept {
 
 void SimulationController::onTerrainChanged() {
     loop_->post([ground = groundFunction(), water = scene_->source()->waterLevel(),
-                 origin = scene_->terrain().origin.heightM](sim::World& w) {
-        w.setGround(ground, water, origin);
+                 origin = scene_->terrain().origin](sim::World& w) {
+        w.setGround(ground, water, origin.heightM);
+        w.setGeoOrigin(origin);
     });
     updatePilotEye();
 }
@@ -556,6 +772,9 @@ void SimulationController::onEnvironmentChanged() {
     }
     if (env.air != lastEnvironment_.air) {
         loop_->post([air = env.air](sim::World& w) { w.setAir(air); });
+    }
+    if (env.visibilityM != lastEnvironment_.visibilityM) {
+        loop_->post([v = env.visibilityM](sim::World& w) { w.setVisibility(v); });
     }
     // A time edited in the Environment tab moves the simulated clock; before the start the
     // clock simply follows the scene.
@@ -583,6 +802,9 @@ void SimulationController::handleEvents() {
     for (const sim::TimedEvent& e : loop_->takeEvents()) {
         if (std::holds_alternative<sim::SimResetEvent>(e.event)) {
             continue;  // Handled through the snapshot's reset counter.
+        }
+        if (std::holds_alternative<sim::FlightRuleBrokenEvent>(e.event) && !mission_) {
+            loop_->pause();  // Enforced free-mode rules end the flight (FR-MIS-06d).
         }
         emit simulationEvent(QString::fromStdString(sim::describe(e.event)));
     }
@@ -632,6 +854,22 @@ void SimulationController::updateFrame(double dt, double aspect) {
         state_ = s.state;
         emit stateChanged();
     }
+    if (mission_ && s.mission.active) {
+        if (lastMissionState_ != s.mission.state) {
+            lastMissionState_ = s.mission.state;
+            emit missionStateChanged();
+        }
+        if (s.mission.result && s.mission.attempt != reportedAttempt_) {
+            reportedAttempt_ = s.mission.attempt;
+            emit missionFinished();
+        }
+        highlighted_.clear();
+        for (const missions::ObjectiveStatus& o : s.mission.objectives) {
+            if (o.state == missions::ObjectiveState::Active && !o.targetKey.empty()) {
+                highlighted_.push_back(o.targetKey);
+            }
+        }
+    }
     if (started_) {
         scene_->followSimulationTime(s.utc);
     }
@@ -668,6 +906,11 @@ void SimulationController::updateFrame(double dt, double aspect) {
     }
 
     items_.clear();
+    if (itemVisuals_) {
+        itemVisuals_->appendDrawItems(s.simTimeS, highlighted_, items_);
+    } else if (freeVisuals_ && !mission_) {
+        freeVisuals_->appendDrawItems(s.simTimeS, {}, items_);
+    }
     if (cameraMode_ != graphics::CameraMode::Fpv) {
         graphics::DroneVisualState v;
         v.position = pose_.position;
@@ -694,9 +937,11 @@ void SimulationController::updateFrame(double dt, double aspect) {
         options.showLatLon = settings_->coordinateDisplay() == CoordinateDisplay::UtmAndLatLon;
     }
     options.timeZone = scene_->environment().timeZone;
-    if (cameraMode_ == graphics::CameraMode::LineOfSight) {
+    if (cameraMode_ == graphics::CameraMode::LineOfSight || !s.ruleWarnings.empty() ||
+        mission_) {
         options.pilotPosition = rig_.pilotEye();
     }
+    options.showMarkers = !mission_ || mission_->rules.showMarkers;
     sim::WorldSnapshot shown = s;
     shown.body.position = pose_.position;
     if (!started_) {

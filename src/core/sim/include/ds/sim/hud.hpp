@@ -18,7 +18,13 @@
 namespace ds::sim {
 
 /// @brief Colour class of an OSD value.
-enum class HudLevel { Normal, Caution, Warning };
+enum class HudLevel {
+    Normal,   ///< White.
+    Caution,  ///< Amber.
+    Warning,  ///< Red.
+    Good,     ///< Green (objective completed, mission succeeded).
+    Muted,    ///< Grey (objective not available yet).
+};
 
 /// @brief One OSD value.
 struct HudItem {
@@ -34,6 +40,7 @@ struct HudOptions {
     std::string timeZone = "UTC";  ///< Zone of the local clock.
     /// Pilot position for line-of-sight flying (distance to pilot), if known.
     std::optional<physics::Vec3> pilotPosition;
+    bool showMarkers = true;       ///< Guidance markers for the mission's targets.
 };
 
 /// @brief Compass rose (FR-GFX-14b): true and magnetic north and the vehicle's heading.
@@ -45,6 +52,22 @@ struct HudCompass {
     /// "DECL 2.1°W"; caution outside the WMM validity period or in a weak horizontal field,
     /// warning ("MAG UNRELIABLE") near the magnetic poles.
     HudItem declination;
+};
+
+/// @brief Mission panel (FR-GFX-14, FR-MIS-04): title, state, timer and objectives.
+struct HudMission {
+    std::string title;                ///< Mission title.
+    HudItem state;                    ///< "PRE-FLIGHT — ARM TO START", "SUCCEEDED", …
+    HudItem timer;                    ///< "T 1:23.4 / 5:00".
+    std::vector<HudItem> objectives;  ///< One line per objective ("✓ Climb to 10 m").
+    std::vector<HudItem> notes;       ///< Pre-flight problems, cargo carried.
+};
+
+/// @brief A guidance marker at a world position (the current objective's target), drawn
+/// where it projects on screen (`rules.showMarkers`).
+struct HudMarker {
+    std::string label;         ///< "Beacon 45 m".
+    glm::dvec3 position{0.0};  ///< World position.
 };
 
 /// @brief Everything drawn over the 3D view.
@@ -75,6 +98,8 @@ struct HudModel {
     HudCompass compass;             ///< Compass rose.
     /// Direction the wind blows towards, relative to the drone's nose (radians, clockwise).
     std::optional<double> windArrowRad;
+    std::optional<HudMission> mission;  ///< Mission panel, while a mission is flown.
+    std::vector<HudMarker> markers;     ///< Guidance markers.
 };
 
 /// @brief AGL thresholds of the flight-rule indicator (FR-GFX-14).
@@ -87,6 +112,14 @@ inline constexpr double kAglWarningM = 120.0;
 /// the snapshot's UTC (FR-GEO-05).
 [[nodiscard]] HudModel buildHud(const WorldSnapshot& snapshot, const geo::LocalFrame& frame,
                                 const HudOptions& options);
+
+/// @brief Mission panel and guidance markers for @p mission, seen from @p vehiclePosition.
+/// Leaves @p hud.mission empty when no mission is active.
+void buildMissionHud(const MissionStatus& mission, const physics::Vec3& vehiclePosition,
+                     const HudOptions& options, HudModel& hud);
+
+/// @brief "1:23.4" (minutes, seconds and tenths).
+[[nodiscard]] std::string missionClock(double seconds);
 
 /// @brief Position panel lines only (also used by the status bar, FR-UI-08a):
 /// UTM, elevation/AGL, lat/lon. @p aglM is omitted for ground vehicles (empty optional).

@@ -213,10 +213,13 @@ void Shape::localBounds(Vec3& lo, Vec3& hi) const noexcept {
             lo = offsetM - halfExtentsM;
             hi = offsetM + halfExtentsM;
             return;
-        case Kind::Gate:
-            lo = -halfExtentsM;
-            hi = halfExtentsM;
+        case Kind::Gate: {
+            // The frame around the opening.
+            const double t = gateFrameThicknessM(halfExtentsM.x, halfExtentsM.y);
+            lo = -halfExtentsM - Vec3(t);
+            hi = halfExtentsM + Vec3(t);
             return;
+        }
         case Kind::Cylinder:
             lo = Vec3(-radiusM, clampY(bottomM), -radiusM);
             hi = Vec3(radiusM, clampY(topM), radiusM);
@@ -354,6 +357,103 @@ Shape defaultShape(ItemType type, const common::Json& p) {
         }
     }
     return Shape::point();
+}
+
+// --- Obstacle contacts ------------------------------------------------------------------------
+
+namespace {
+
+// Contact of a local point inside the box centred on @p centre with half sizes @p half: the
+// face with the least penetration.
+std::optional<SurfaceContact> boxContact(const Vec3& q, const Vec3& centre, const Vec3& half) {
+    const Vec3 d = q - centre;
+    double best = kBig;
+    SurfaceContact c;
+    for (int axis = 0; axis < 3; ++axis) {
+        const double depth = half[axis] - std::abs(d[axis]);
+        if (depth < 0.0) {
+            return std::nullopt;
+        }
+        if (depth < best) {
+            best = depth;
+            c.normal = Vec3(0.0);
+            c.normal[axis] = d[axis] >= 0.0 ? 1.0 : -1.0;
+            c.depthM = depth;
+        }
+    }
+    return c;
+}
+
+}  // namespace
+
+double gateFrameThicknessM(double halfWidthM, double halfHeightM) noexcept {
+    return std::clamp(0.06 * (halfWidthM + halfHeightM), 0.05, 0.3);
+}
+
+bool blocksVehicle(const Item& item) noexcept {
+    return item.enabled && (item.solid || item.type == ItemType::Gate);
+}
+
+std::optional<SurfaceContact> obstacleContact(const Item& item, const Vec3& p) {
+    if (!blocksVehicle(item)) {
+        return std::nullopt;
+    }
+    const Vec3 q = item.transform.toLocal(p);
+    const Shape& s = item.shape;
+    std::optional<SurfaceContact> local;
+    switch (s.kind) {
+        case Shape::Kind::Box: local = boxContact(q, s.offsetM, s.halfExtentsM); break;
+        case Shape::Kind::Cylinder: {
+            const double rho = std::hypot(q.x, q.z);
+            if (q.y < s.bottomM || q.y > s.topM || rho > s.radiusM) {
+                break;
+            }
+            SurfaceContact c;
+            c.depthM = s.radiusM - rho;
+            c.normal = rho > 1e-9 ? Vec3(q.x / rho, 0.0, q.z / rho) : Vec3(1.0, 0.0, 0.0);
+            if (s.topM - q.y < c.depthM) {
+                c = {Vec3(0.0, 1.0, 0.0), s.topM - q.y};
+            }
+            if (q.y - s.bottomM < c.depthM) {
+                c = {Vec3(0.0, -1.0, 0.0), q.y - s.bottomM};
+            }
+            local = c;
+            break;
+        }
+        case Shape::Kind::Gate: {
+            // Top and bottom bars, and the side posts down to the ground.
+            const double hw = s.halfExtentsM.x;
+            const double hh = s.halfExtentsM.y;
+            const double t = gateFrameThicknessM(hw, hh);
+            const double below = item.altitudeRef == AltitudeRef::Agl
+                                     ? std::max(item.altitudeM - hh - t, 0.0)
+                                     : 0.0;
+            const double postBottom = -hh - t - below;
+            for (const auto& [centre, half] :
+                 {std::pair{Vec3(0.0, hh + 0.5 * t, 0.0), Vec3(hw + t, 0.5 * t, 0.5 * t)},
+                  std::pair{Vec3(0.0, -hh - 0.5 * t, 0.0), Vec3(hw + t, 0.5 * t, 0.5 * t)},
+                  std::pair{Vec3(-hw - 0.5 * t, 0.5 * (postBottom + hh + t), 0.0),
+                            Vec3(0.5 * t, 0.5 * (hh + t - postBottom), 0.5 * t)},
+                  std::pair{Vec3(hw + 0.5 * t, 0.5 * (postBottom + hh + t), 0.0),
+                            Vec3(0.5 * t, 0.5 * (hh + t - postBottom), 0.5 * t)}}) {
+                if (auto c = boxContact(q, centre, half)) {
+                    local = c;
+                    break;
+                }
+            }
+            break;
+        }
+        case Shape::Kind::Point:
+        case Shape::Kind::Sphere:
+        case Shape::Kind::Prism: break;  // Markers and zones: not obstacles.
+    }
+    if (!local) {
+        return std::nullopt;
+    }
+    // Back to the world frame (scaled shapes: depth along the scaled normal).
+    const Vec3 n = item.transform.rotation * (local->normal * item.transform.scale);
+    const double len = glm::length(n);
+    return SurfaceContact{n / len, local->depthM * len};
 }
 
 }  // namespace ds::items
