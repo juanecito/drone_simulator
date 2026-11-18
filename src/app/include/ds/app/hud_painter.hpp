@@ -5,6 +5,8 @@
 
 #include <QPointF>
 #include <QRect>
+#include <QRectF>
+#include <QString>
 
 #include <optional>
 
@@ -27,12 +29,22 @@ struct HudPaintOptions {
     double scale = 1.0;    ///< Text scale (device-independent pixels per point).
     /// Camera of the frame, to place the guidance markers (none drawn if null).
     const graphics::Camera* camera = nullptr;
+    /// Height kept free in the bottom-left and bottom-right corners (the chase insets): the
+    /// vehicle-state columns are drawn above it.
+    double bottomReserved = 0.0;
 };
 
 /// @brief Paints @p hud into @p area with @p painter (antialiased text with a dark outline so
 /// it stays readable over sky and snow).
 void paintHud(QPainter& painter, const QRect& area, const sim::HudModel& hud,
               const HudPaintOptions& options);
+
+/// @brief Paints the frame and the @p label of a picture-in-picture inset at @p area.
+void paintInsetFrame(QPainter& painter, const QRectF& area, const QString& label, double scale);
+
+/// @brief Paints an outlined heading chevron centred at @p at (marks the vehicle on a map
+/// view such as the top inset); @p headingDeg is clockwise from the top of the image.
+void paintMapMarker(QPainter& painter, QPointF at, double headingDeg, double scale);
 
 /// @brief Paints the north-up compass rose (FR-GFX-14b) centred at @p centre.
 /// @details True (geographic) north is at the top with the cardinal points N, E, S, W; a blue

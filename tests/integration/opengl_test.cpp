@@ -201,6 +201,30 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
     EXPECT_GT(yellow, 40) << "drone heading arrow";
     EXPECT_GT(blue, 15) << "magnetic north marker";
 
+    // Chase insets in the bottom corners, framed (a light line on a dark outline).
+    const auto insets = window.viewport()->chaseInsetRects();
+    ASSERT_TRUE(insets.has_value());
+    const double ratio = static_cast<double>(image.width()) / window.viewport()->width();
+    EXPECT_LT((*insets)[0].right(), 0.5 * window.viewport()->width());
+    EXPECT_GT((*insets)[1].left(), 0.5 * window.viewport()->width());
+    for (const QRectF& r : *insets) {
+        EXPECT_NEAR(r.bottom(), window.viewport()->height() - 12.0 * s * 800.0 / 720.0, 1.0);
+        const int top = static_cast<int>(std::lround(r.top() * ratio));
+        int framed = 0;
+        const int x0 = static_cast<int>(r.left() * ratio) + 4;
+        const int x1 = static_cast<int>(r.right() * ratio) - 4;
+        for (int x = x0; x < x1; ++x) {
+            int lo = 255;
+            int hi = 0;
+            for (int y = top - 2; y <= top + 2; ++y) {
+                lo = std::min(lo, qGray(image.pixel(x, y)));
+                hi = std::max(hi, qGray(image.pixel(x, y)));
+            }
+            framed += (hi > 150 && lo < 80) ? 1 : 0;
+        }
+        EXPECT_GT(framed, 0.8 * (x1 - x0)) << "inset frame at y " << top;
+    }
+
     // The free camera keeps the compass, with the view direction (FR-GFX-14b).
     window.simulation()->setCameraMode(ds::graphics::CameraMode::Free);
     window.scene()->camera().yawRad = 1.0;
@@ -212,6 +236,7 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
     const auto [freeYellow, freeBlue] = compassPixels(free);
     EXPECT_GT(freeYellow, 40);
     EXPECT_GT(freeBlue, 15);
+    EXPECT_FALSE(window.viewport()->chaseInsetRects().has_value()) << "insets only in Chase";
 }
 
 // A mission in flight (M5): the mission's items are drawn and the HUD shows the mission panel.

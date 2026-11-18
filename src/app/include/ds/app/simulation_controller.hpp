@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QString>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -189,10 +190,17 @@ public:
     [[nodiscard]] const sim::WorldSnapshot& snapshot() const noexcept { return loop_->snapshot(); }
     /// @brief Vehicle camera of the frame (valid when vehicleView()).
     [[nodiscard]] const graphics::Camera& vehicleCamera() const noexcept { return camera_; }
+    /// @brief Cameras of the two chase insets for insets of @p aspect: the top view (north
+    /// up) and the behind view (rigidly behind the nose). Meaningful in the Chase mode.
+    [[nodiscard]] std::array<graphics::Camera, 2> chaseInsetCameras(double aspect) const {
+        return {rig_.topView(pose_, aspect), rig_.behindView(pose_, aspect)};
+    }
     /// @brief Objects to draw (the drone, except from its own FPV camera).
     [[nodiscard]] std::span<const graphics::DrawItem> drawItems() const noexcept { return items_; }
     /// @brief HUD of the frame.
     [[nodiscard]] const sim::HudModel& hud() const noexcept { return hud_; }
+    /// @brief Vehicle pose of the frame (extrapolated between ticks).
+    [[nodiscard]] const graphics::VehiclePose& vehiclePose() const noexcept { return pose_; }
     /// @brief Vehicle position of the frame (extrapolated between ticks).
     [[nodiscard]] const glm::dvec3& vehiclePosition() const noexcept { return pose_.position; }
     /// @brief Take-off point.

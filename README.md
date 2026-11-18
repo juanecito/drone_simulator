@@ -58,7 +58,7 @@ rules, prints its errors and exits (0 = valid); see [docs/MISSIONS.md](docs/MISS
 | Arrow keys | Pitch forward / back, roll left / right |
 | `1` `2` `3` `4` | Acro, Angle, Altitude hold, Position hold (= altitude hold until M7) |
 | `L` | Navigation lights |
-| `C` | Next camera: FPV → chase → line of sight → free |
+| `C` | Next camera: FPV → chase (with top and behind insets) → line of sight → free |
 | `P` | Pause / resume |
 | `R` | Reset the drone to the take-off point |
 

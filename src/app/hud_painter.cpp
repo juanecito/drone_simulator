@@ -300,6 +300,43 @@ std::optional<QPointF> projectToScreen(const graphics::Camera& camera, const QRe
                    area.top() + (0.5 - 0.5 * y) * area.height());
 }
 
+void paintInsetFrame(QPainter& p, const QRectF& area, const QString& label, double scale) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(0, 0, 0, 160), 3.0));
+    p.drawRect(area);
+    p.setPen(QPen(QColor(235, 245, 255, 200), 1.0));
+    p.drawRect(area);
+    QFont font(QStringLiteral("monospace"));
+    font.setStyleHint(QFont::Monospace);
+    font.setBold(true);
+    font.setPointSizeF(8.0 * scale);
+    p.setFont(font);
+    outlinedText(p, area.topLeft() + QPointF(5.0 * scale, 3.0 * scale), label,
+                 QColor(235, 245, 255), Qt::AlignLeft);
+    p.restore();
+}
+
+void paintMapMarker(QPainter& p, QPointF at, double headingDeg, double scale) {
+    const double r = 11.0 * scale;
+    QPainterPath arrow;
+    arrow.moveTo(polar(at, headingDeg, r));
+    arrow.lineTo(polar(at, headingDeg + 140.0, r));
+    arrow.lineTo(polar(at, headingDeg + 180.0, 0.4 * r));
+    arrow.lineTo(polar(at, headingDeg - 140.0, r));
+    arrow.closeSubpath();
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setBrush(Qt::NoBrush);  // The vehicle stays visible inside.
+    p.setPen(QPen(QColor(0, 0, 0, 200), 3.5 * scale));
+    p.drawPath(arrow);
+    p.setPen(QPen(QColor(255, 210, 60), 1.5 * scale));
+    p.drawPath(arrow);
+    p.restore();
+}
+
 void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
               const HudPaintOptions& options) {
     p.save();
@@ -387,7 +424,7 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     }
 
     // Vehicle state (bottom).
-    const double bottom = area.bottom() - margin - 3.0 * line;
+    const double bottom = area.bottom() - margin - options.bottomReserved - 3.0 * line;
     column(p, {area.left() + margin, bottom}, {&hud.battery, &hud.gps, &hud.lights}, Qt::AlignLeft);
     column(p, {area.right() - margin, bottom}, {&hud.armed, &hud.mode, &hud.throttle},
            Qt::AlignRight);

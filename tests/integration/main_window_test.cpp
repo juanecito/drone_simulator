@@ -4,6 +4,7 @@
 #include "ds/app/main_window.hpp"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDockWidget>
 #include <QKeySequence>
 #include <QLabel>
@@ -66,6 +67,45 @@ TEST(MainWindow, PanelActionTogglesDock) {
     EXPECT_FALSE(window.panelDock()->isVisibleTo(&window));
     window.panelAction()->trigger();
     EXPECT_TRUE(window.panelDock()->isVisibleTo(&window));
+}
+
+TEST(MainWindow, PanelIsDockedWhileFullScreen) {
+    // A floating panel next to a full-screen window flickers (the window manager hands the
+    // focus back and forth): full screen docks it, and it floats again afterwards.
+    ds::app::MainWindow window;
+    window.show();
+    window.panelDock()->show();
+    window.panelDock()->setFloating(true);
+    const QRect floating(100, 120, 400, 500);
+    window.panelDock()->setGeometry(floating);
+    ASSERT_TRUE(window.panelDock()->isFloating());
+
+    window.fullScreenAction()->setChecked(true);
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(window.windowState().testFlag(Qt::WindowFullScreen));
+    EXPECT_FALSE(window.panelDock()->isFloating());
+    EXPECT_FALSE(window.panelDock()->features().testFlag(QDockWidget::DockWidgetFloatable));
+    EXPECT_TRUE(window.panelDock()->isVisibleTo(&window));
+    // Toggling the panel in full screen keeps it docked.
+    window.panelAction()->trigger();
+    window.panelAction()->trigger();
+    EXPECT_TRUE(window.panelDock()->isVisibleTo(&window));
+    EXPECT_FALSE(window.panelDock()->isFloating());
+
+    window.fullScreenAction()->setChecked(false);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(window.windowState().testFlag(Qt::WindowFullScreen));
+    EXPECT_TRUE(window.panelDock()->isFloating());
+    EXPECT_TRUE(window.panelDock()->features().testFlag(QDockWidget::DockWidgetFloatable));
+    EXPECT_EQ(window.panelDock()->geometry().size(), floating.size());
+
+    // A docked panel stays docked through full screen.
+    window.panelDock()->setFloating(false);
+    window.fullScreenAction()->setChecked(true);
+    QCoreApplication::processEvents();
+    window.fullScreenAction()->setChecked(false);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(window.panelDock()->isFloating());
 }
 
 TEST(MainWindow, StatusBarShowsPositionStateAndGl) {

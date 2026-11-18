@@ -53,6 +53,14 @@ struct FrameTarget {
     int height = 0;                 ///< Height in device pixels.
 };
 
+/// @brief Rectangle of a frame target in device pixels, measured from its top-left corner.
+struct ViewRect {
+    int x = 0;       ///< Left edge.
+    int y = 0;       ///< Top edge.
+    int width = 0;   ///< Width.
+    int height = 0;  ///< Height.
+};
+
 /// @brief Linear RGBA colour.
 struct Color {
     float r = 0.0F;  ///< Red, 0–1.
@@ -195,7 +203,14 @@ public:
     /// resources.
     void renderFrame(const FrameTarget& target, const FrameInput& input);
 
-    /// @brief Counters of the last scene frame.
+    /// @brief Draws the scene from another camera into @p rect of @p target (picture in
+    /// picture), after renderFrame() drew the main view.
+    /// @details Uses the exposure of the main view (the inset is not metered) and the terrain
+    /// chunks selected for it; the camera's aspect is taken from @p rect, clipped to the
+    /// target. Its counters are added to lastStats(). Does nothing without resources.
+    void renderInset(const FrameTarget& target, const ViewRect& rect, const FrameInput& input);
+
+    /// @brief Counters of the last scene frame (main view and insets).
     [[nodiscard]] const FrameStats& lastStats() const noexcept { return stats_; }
 
     /// @brief Reads the auto-exposure state back from the GPU (synchronises; call rarely).
@@ -203,6 +218,8 @@ public:
 
 private:
     struct Impl;
+    void renderView(const FrameTarget& target, const ViewRect& rect, const FrameInput& input,
+                    bool mainView);
     std::unique_ptr<Impl> impl_;
     bool initialized_ = false;
     Color clearColor_{0.45F, 0.62F, 0.85F, 1.0F};

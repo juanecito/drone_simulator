@@ -67,6 +67,14 @@ public:
     static constexpr double kLosFovDeg = 50.0;
     /// @brief Minimum height of a camera above the ground.
     static constexpr double kClearanceM = 0.3;
+    /// @brief Top view: height above the vehicle, as a multiple of the chase distance.
+    static constexpr double kTopHeightRatio = 2.0;
+    /// @brief Top view vertical field of view.
+    static constexpr double kTopFovDeg = 60.0;
+    /// @brief Behind view: distance behind the vehicle, as a fraction of the chase distance.
+    static constexpr double kBehindDistanceRatio = 0.4;
+    /// @brief Behind view vertical field of view.
+    static constexpr double kBehindFovDeg = 45.0;
 
     /// @brief Sets the ground function.
     void setGround(GroundFunction ground) { ground_ = std::move(ground); }
@@ -89,6 +97,15 @@ public:
     /// @brief Camera for @p mode (not Free) at frame time @p dt, for a viewport of @p aspect.
     [[nodiscard]] Camera update(CameraMode mode, const VehiclePose& pose,
                                 const FpvCameraParams& fpv, double aspect, double dt);
+
+    /// @brief Top view for the chase insets: straight down from above the vehicle, north at
+    /// the top of the image and east on the right (a map of the vehicle and the terrain
+    /// around it). The height follows the chase distance (kTopHeightRatio).
+    [[nodiscard]] Camera topView(const VehiclePose& pose, double aspect) const;
+    /// @brief Behind view for the chase insets: rigidly behind the vehicle's nose (heading
+    /// only, horizon level, no smoothing), slightly above it and looking at it; kept above
+    /// the ground.
+    [[nodiscard]] Camera behindView(const VehiclePose& pose, double aspect) const;
 
 private:
     [[nodiscard]] glm::dvec3 chaseTarget(const VehiclePose& pose);

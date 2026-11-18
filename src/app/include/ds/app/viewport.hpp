@@ -7,8 +7,10 @@
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QPointer>
+#include <QRectF>
 #include <QString>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -32,6 +34,9 @@ class SimulationController;
 /// Free camera: click to capture the mouse (look around), `Esc` to release it;
 /// `W`/`S`/`A`/`D` (or arrows) move, `E`/`Q` (or Page Up/Down) climb and descend, `Shift` is
 /// 10× faster, the mouse wheel changes the speed.
+///
+/// In the Chase camera two insets in the bottom corners show the vehicle from straight above
+/// (north up) and from right behind its nose.
 ///
 /// Vehicle cameras (FR-IN-05): `W`/`S` throttle, `A`/`D` yaw, arrows pitch and roll, `Space`
 /// arms or disarms, `1`–`4` select the flight mode, `L` the lights. Always: `C` next camera,
@@ -65,6 +70,10 @@ public:
     [[nodiscard]] const graphics::ExposureReadout& exposure() const noexcept { return exposure_; }
     /// @brief The camera of the last frame (free or vehicle camera).
     [[nodiscard]] const graphics::Camera& lastCamera() const noexcept { return lastCamera_; }
+    /// @brief Rectangles of the chase insets in widget coordinates (the top view bottom left,
+    /// the behind view bottom right), or nothing when they are not shown (not the Chase
+    /// camera, or a viewport smaller than 320 × 240).
+    [[nodiscard]] std::optional<std::array<QRectF, 2>> chaseInsetRects() const;
     /// @brief Changes the quality settings.
     void setRenderSettings(const graphics::RenderSettings& settings);
 
@@ -114,12 +123,15 @@ private:
     void releaseGl();
     void renderScene(const graphics::FrameTarget& target);
     void paintHud(const SimulationController& sim);
+    void renderInsets(const SimulationController& sim, const graphics::FrameTarget& target,
+                      const graphics::FrameInput& main);
     void paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera);
 
     SceneController* scene_;
     QPointer<SimulationController> simulation_;  // Cleared if it is deleted first.
     std::uint32_t flightKeys_ = 0;
     graphics::Camera lastCamera_;
+    std::array<graphics::Camera, 2> insetCameras_;  // Of the last frame (top, behind).
     std::unique_ptr<graphics::Renderer> renderer_;
     std::optional<graphics::GlInfo> glInfo_;
     Keys keys_;

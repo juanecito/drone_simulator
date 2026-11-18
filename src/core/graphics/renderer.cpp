@@ -291,28 +291,8 @@ double estimateEv100(const SkyState& sky, double compensationEv) noexcept {
     return autoExposureEv100(luminance, compensationEv);
 }
 
-struct Renderer::Impl {
-    explicit Impl(std::filesystem::path shaderDir) : shaders(std::move(shaderDir)) {}
-
-    ShaderLibrary shaders;
-    gl::Buffer frameUbo;
-    gl::Buffer atmosphereUbo;
-    gl::Buffer exposureSsbo;
-    gl::Buffer starsSsbo;
-    GLsizei starCount = 0;
-    std::uint64_t starsVersion = ~std::uint64_t{0};
-    gl::VertexArray emptyVao;
-    gl::VertexArray terrainVao;
-    gl::Buffer chunkIndices;
-    GLsizei chunkIndexCount = 0;
-    int chunkGridSize = 0;
-
-    gl::Texture transmittance;
-    gl::Texture multiScatter;
-    gl::Texture skyView;
-    gl::Texture moonAlbedo;
-
-    // HDR targets.
+// Offscreen HDR targets of one view (multisampled scene, resolved colour).
+struct HdrTargets {
     int width = 0;
     int height = 0;
     int samples = -1;
@@ -322,34 +302,10 @@ struct Renderer::Impl {
     gl::Framebuffer sceneFbo;
     gl::Framebuffer resolveFbo;
 
-    std::optional<double> atmosphereVisibility;
-    bool exposureReset = true;
-
-    std::unordered_map<const terrain::ChunkMesh*, GpuChunk> chunks;
-    std::uint64_t frame = 0;
-
-    // Objects.
-    gl::VertexArray objectVao;
-    std::unordered_map<const Mesh*, GpuMesh> meshes;
-
-    // Shadows.
-    gl::Buffer shadowUbo;
-    gl::Texture shadowMap;
-    std::array<gl::Framebuffer, kShadowCascades> shadowFbos;
-    int shadowSize = 0;
-
-    GpuMesh& meshFor(const std::shared_ptr<const Mesh>& mesh);
-    void ensureShadowMap(int size);
-
-    void createTargets(int w, int h, int msaa);
-    void updateAtmosphere(double visibilityM, FrameStats& stats);
-    void uploadStars(const FrameInput& input);
-    GpuChunk& chunkFor(const std::shared_ptr<const terrain::ChunkMesh>& mesh);
-    void ensureChunkIndices(int gridSize);
-    void evictChunks();
+    void create(int w, int h, int msaa);
 };
 
-void Renderer::Impl::createTargets(int w, int h, int msaa) {
+void HdrTargets::create(int w, int h, int msaa) {
     if (w == width && h == height && msaa == samples) {
         return;
     }
@@ -377,6 +333,57 @@ void Renderer::Impl::createTargets(int w, int h, int msaa) {
         log::error("HDR framebuffer incomplete ({}×{}, {} samples)", w, h, msaa);
     }
 }
+
+struct Renderer::Impl {
+    explicit Impl(std::filesystem::path shaderDir) : shaders(std::move(shaderDir)) {}
+
+    ShaderLibrary shaders;
+    gl::Buffer frameUbo;
+    gl::Buffer atmosphereUbo;
+    gl::Buffer exposureSsbo;
+    gl::Buffer starsSsbo;
+    GLsizei starCount = 0;
+    std::uint64_t starsVersion = ~std::uint64_t{0};
+    gl::VertexArray emptyVao;
+    gl::VertexArray terrainVao;
+    gl::Buffer chunkIndices;
+    GLsizei chunkIndexCount = 0;
+    int chunkGridSize = 0;
+
+    gl::Texture transmittance;
+    gl::Texture multiScatter;
+    gl::Texture skyView;
+    gl::Texture moonAlbedo;
+
+    // HDR targets of the main view and of the insets (drawn one after the other).
+    HdrTargets mainTargets;
+    HdrTargets insetTargets;
+
+    std::optional<double> atmosphereVisibility;
+    bool exposureReset = true;
+
+    std::unordered_map<const terrain::ChunkMesh*, GpuChunk> chunks;
+    std::uint64_t frame = 0;
+
+    // Objects.
+    gl::VertexArray objectVao;
+    std::unordered_map<const Mesh*, GpuMesh> meshes;
+
+    // Shadows.
+    gl::Buffer shadowUbo;
+    gl::Texture shadowMap;
+    std::array<gl::Framebuffer, kShadowCascades> shadowFbos;
+    int shadowSize = 0;
+
+    GpuMesh& meshFor(const std::shared_ptr<const Mesh>& mesh);
+    void ensureShadowMap(int size);
+
+    void updateAtmosphere(double visibilityM, FrameStats& stats);
+    void uploadStars(const FrameInput& input);
+    GpuChunk& chunkFor(const std::shared_ptr<const terrain::ChunkMesh>& mesh);
+    void ensureChunkIndices(int gridSize);
+    void evictChunks();
+};
 
 void Renderer::Impl::updateAtmosphere(double visibilityM, FrameStats& stats) {
     if (atmosphereVisibility && std::abs(*atmosphereVisibility - visibilityM) < 1.0) {
@@ -651,16 +658,41 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     if (target.width <= 0 || target.height <= 0) {
         return;
     }
-    Impl& r = *impl_;
-    ++r.frame;
+    ++impl_->frame;
     stats_ = {};
+    renderView(target, {.x = 0, .y = 0, .width = target.width, .height = target.height}, input,
+               true);
+}
+
+void Renderer::renderInset(const FrameTarget& target, const ViewRect& rect,
+                           const FrameInput& input) {
+    if (!initialized_ || impl_ == nullptr) {
+        return;
+    }
+    // Clip the rectangle to the target.
+    const int x0 = std::clamp(rect.x, 0, target.width);
+    const int y0 = std::clamp(rect.y, 0, target.height);
+    const int x1 = std::clamp(rect.x + rect.width, 0, target.width);
+    const int y1 = std::clamp(rect.y + rect.height, 0, target.height);
+    if (x1 - x0 < 2 || y1 - y0 < 2) {
+        return;
+    }
+    renderView(target, {.x = x0, .y = y0, .width = x1 - x0, .height = y1 - y0}, input, false);
+}
+
+void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const FrameInput& input,
+                          bool mainView) {
+    Impl& r = *impl_;
+    HdrTargets& t = mainView ? r.mainTargets : r.insetTargets;
+    const int width = view.width;
+    const int height = view.height;
     GLint maxSamples = 0;
     glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
-    r.createTargets(target.width, target.height, std::min(settings_.msaaSamples, maxSamples));
+    t.create(width, height, std::min(settings_.msaaSamples, maxSamples));
 
     // --- Uniforms ---------------------------------------------------------------------------
     Camera camera = input.camera;
-    camera.aspect = static_cast<double>(target.width) / static_cast<double>(target.height);
+    camera.aspect = static_cast<double>(width) / static_cast<double>(height);
     const glm::mat4 viewProj = camera.viewProjection();
     const SkyState& sky = input.sky;
     FrameUniforms u{};
@@ -673,9 +705,8 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     u.moonColorRadius = glm::vec4(sky.moon.color, sky.moon.angularRadiusRad);
     u.moonToSunDisc = glm::vec4(sky.moonToSun, sky.moonDiscLuminance);
     u.moonNorth = glm::vec4(sky.moonNorth, 0.0F);
-    u.viewport = {static_cast<float>(target.width), static_cast<float>(target.height),
-                  1.0F / static_cast<float>(target.width),
-                  1.0F / static_cast<float>(target.height)};
+    u.viewport = {static_cast<float>(width), static_cast<float>(height),
+                  1.0F / static_cast<float>(width), 1.0F / static_cast<float>(height)};
     const double camAltitudeM = input.originAltitudeM + camera.position.y;
     u.camera = {static_cast<float>(camera.position.y), static_cast<float>(camAltitudeM / 1000.0),
                 static_cast<float>(input.originAltitudeM),
@@ -828,12 +859,12 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     glBindTextureUnit(5, r.shadowMap.id());
 
     // --- Opaque scene (reversed-Z) ----------------------------------------------------------
-    glBindFramebuffer(GL_FRAMEBUFFER, r.sceneFbo.id());
-    glViewport(0, 0, target.width, target.height);
+    glBindFramebuffer(GL_FRAMEBUFFER, t.sceneFbo.id());
+    glViewport(0, 0, width, height);
     const std::array<GLfloat, 4> black{0.0F, 0.0F, 0.0F, 1.0F};
-    glClearNamedFramebufferfv(r.sceneFbo.id(), GL_COLOR, 0, black.data());
+    glClearNamedFramebufferfv(t.sceneFbo.id(), GL_COLOR, 0, black.data());
     const GLfloat farDepth = 0.0F;
-    glClearNamedFramebufferfv(r.sceneFbo.id(), GL_DEPTH, 0, &farDepth);
+    glClearNamedFramebufferfv(t.sceneFbo.id(), GL_DEPTH, 0, &farDepth);
     glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_GREATER);
@@ -842,7 +873,7 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
-    if (r.samples > 0) {
+    if (t.samples > 0) {
         glEnable(GL_MULTISAMPLE);
     }
 
@@ -975,44 +1006,55 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     glClipControl(GL_LOWER_LEFT, GL_NEGATIVE_ONE_TO_ONE);
 
     // --- Resolve, exposure, tone mapping ----------------------------------------------------
-    if (r.samples > 0) {
-        glBlitNamedFramebuffer(r.sceneFbo.id(), r.resolveFbo.id(), 0, 0, target.width,
-                               target.height, 0, 0, target.width, target.height,
-                               GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (t.samples > 0) {
+        glBlitNamedFramebuffer(t.sceneFbo.id(), t.resolveFbo.id(), 0, 0, width, height, 0, 0, width,
+                               height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
     glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
-    glBindTextureUnit(4, r.resolved.id());
-    glUseProgram(r.shaders.program(kHistogram));
-    glDispatchCompute(dispatchSize(target.width, 16), dispatchSize(target.height, 16), 1);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    glBindTextureUnit(4, t.resolved.id());
+    if (mainView) {
+        // Insets use the exposure of the main view: only the main view is metered.
+        glUseProgram(r.shaders.program(kHistogram));
+        glDispatchCompute(dispatchSize(width, 16), dispatchSize(height, 16), 1);
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        ++stats_.drawCalls;
+    }
 
-    // Tone mapping uses this frame's exposure: run it before the exposure update.
+    // Tone mapping uses this frame's exposure: run it before the exposure update. The
+    // rectangle is given from the top of the target; OpenGL counts from the bottom.
+    const int glY = target.height - view.y - height;
     glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer);
-    glViewport(0, 0, target.width, target.height);
+    glViewport(view.x, glY, width, height);
     glDisable(GL_FRAMEBUFFER_SRGB);
-    glUseProgram(r.shaders.program(kTonemap));
+    const GLuint tonemap = r.shaders.program(kTonemap);
+    glProgramUniform2i(tonemap, 0, view.x, glY);
+    glUseProgram(tonemap);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-    stats_.drawCalls += 2;
-
-    const GLuint exposure = r.shaders.program(kExposure);
-    const bool reset = input.resetExposure || r.exposureReset;
-    r.exposureReset = false;
-    glProgramUniform1f(exposure, 0, static_cast<float>(std::max(input.dtSeconds, 0.0)));
-    glProgramUniform1i(exposure, 1, input.exposure.mode == ExposureMode::Manual ? 1 : 0);
-    glProgramUniform1f(exposure, 2, static_cast<float>(input.exposure.manualEv100));
-    glProgramUniform1f(exposure, 3, static_cast<float>(input.exposure.compensationEv));
-    glProgramUniform1i(exposure, 4, reset ? 1 : 0);
-    glProgramUniform1f(exposure, 5,
-                       static_cast<float>(estimateEv100(sky, input.exposure.compensationEv)));
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-    glUseProgram(exposure);
-    glDispatchCompute(1, 1, 1);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
     ++stats_.drawCalls;
+
+    if (mainView) {
+        const GLuint exposure = r.shaders.program(kExposure);
+        const bool reset = input.resetExposure || r.exposureReset;
+        r.exposureReset = false;
+        glProgramUniform1f(exposure, 0, static_cast<float>(std::max(input.dtSeconds, 0.0)));
+        glProgramUniform1i(exposure, 1, input.exposure.mode == ExposureMode::Manual ? 1 : 0);
+        glProgramUniform1f(exposure, 2, static_cast<float>(input.exposure.manualEv100));
+        glProgramUniform1f(exposure, 3, static_cast<float>(input.exposure.compensationEv));
+        glProgramUniform1i(exposure, 4, reset ? 1 : 0);
+        glProgramUniform1f(exposure, 5,
+                           static_cast<float>(estimateEv100(sky, input.exposure.compensationEv)));
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        glUseProgram(exposure);
+        glDispatchCompute(1, 1, 1);
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        ++stats_.drawCalls;
+    }
 
     glUseProgram(0);
     glBindVertexArray(0);
-    r.evictChunks();
+    if (mainView) {
+        r.evictChunks();
+    }
     stats_.gpuChunks = r.chunks.size();
 }
 

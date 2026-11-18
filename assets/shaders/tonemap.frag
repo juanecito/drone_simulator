@@ -8,6 +8,8 @@
 #include "common.glsl"
 
 layout(binding = 4) uniform sampler2D t_hdr;
+// Lower-left corner of the view in the target (non-zero for picture-in-picture insets).
+layout(location = 0) uniform ivec2 u_offset;
 
 layout(location = 0) in vec2 v_ndc;
 layout(location = 0) out vec4 o_color;
@@ -23,7 +25,7 @@ vec3 toSrgb(vec3 c) {
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
 void main() {
-    vec3 c = texelFetch(t_hdr, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 c = texelFetch(t_hdr, ivec2(gl_FragCoord.xy) - u_offset, 0).rgb;
     float y = luminance(c);
     float absolute = y / max(e_exposure, 1e-12);
     // Mesopic blend: rods take over below ~3 cd/m², fully scotopic below ~0.003 cd/m².

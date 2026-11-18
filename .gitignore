@@ -26,3 +26,4 @@ compile_commands.json
 /biblio/*.pdf
 /CLAUDE.md
 .claude/
+/aux/

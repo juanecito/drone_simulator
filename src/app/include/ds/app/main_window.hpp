@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 #include <QPointer>
+#include <QRect>
 #include <QString>
 
 #include <cstdint>
@@ -117,7 +118,8 @@ signals:
 protected:
     /// @brief Saves the window layout before closing.
     void closeEvent(QCloseEvent* event) override;
-    /// @brief Keeps the full-screen action in step with the window state.
+    /// @brief Keeps the full-screen action in step with the window state, and the panel
+    /// docked while the window is full screen.
     void changeEvent(QEvent* event) override;
 
 private:
@@ -127,6 +129,7 @@ private:
     void createMenus();
     void createStatusBar();
     void setFullScreen(bool enabled);
+    void keepPanelDocked(bool fullScreen);
     void showAbout();
     void onGlReady(const QString& summary);
     void onGlFailed(const QString& message);
@@ -156,6 +159,11 @@ private:
     std::optional<std::int64_t> lastAttemptId_;
     std::optional<storage::MissionAttemptRecord> bestBefore_;
     bool panelWasVisible_ = true;
+    // Full screen docks a floating panel (a separate window would fight the full-screen
+    // window for focus and stacking); it floats again where it was afterwards.
+    bool panelDockedForFullScreen_ = false;
+    bool panelWasFloating_ = false;
+    QRect panelFloatingGeometry_;
     QAction* startMissionAction_ = nullptr;
     QAction* retryMissionAction_ = nullptr;
     QAction* abortMissionAction_ = nullptr;

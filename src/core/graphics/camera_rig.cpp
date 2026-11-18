@@ -88,6 +88,33 @@ glm::dvec3 CameraRig::chaseTarget(const VehiclePose& pose) {
     return pose.position - chaseDistanceM_ * chaseDirection_ + glm::dvec3(0.0, chaseHeight(), 0.0);
 }
 
+Camera CameraRig::topView(const VehiclePose& pose, double aspect) const {
+    Camera c;
+    c.position = pose.position + glm::dvec3(0.0, kTopHeightRatio * chaseDistanceM_, 0.0);
+    // Heading 0 looking straight down: image up = north (−z), right = east (+x).
+    c.yawRad = 0.0;
+    c.pitchRad = -0.5 * std::numbers::pi;
+    c.rollRad = 0.0;
+    c.fovYRad = kTopFovDeg * kDeg;
+    c.aspect = aspect;
+    return c;
+}
+
+Camera CameraRig::behindView(const VehiclePose& pose, double aspect) const {
+    const glm::dvec3 nose = pose.orientation * glm::dvec3(1.0, 0.0, 0.0);
+    glm::dvec3 dir(nose.x, 0.0, nose.z);
+    // Nose straight up or down: keep the chase direction.
+    dir = glm::length(dir) > 1e-3 ? glm::normalize(dir) : chaseDirection_;
+    const double distance = kBehindDistanceRatio * chaseDistanceM_;
+    const glm::dvec3 eye = aboveGround(pose.position - distance * dir +
+                                       glm::dvec3(0.0, kChaseHeightRatio * distance, 0.0));
+    const glm::dvec3 look = pose.position + glm::dvec3(0.0, 0.1 * distance, 0.0) - eye;
+    Camera c = cameraFromAxes(eye, look, glm::dvec3(0, 1, 0), kBehindFovDeg * kDeg);
+    c.rollRad = 0.0;
+    c.aspect = aspect;
+    return c;
+}
+
 Camera CameraRig::update(CameraMode mode, const VehiclePose& pose, const FpvCameraParams& fpv,
                          double aspect, double dt) {
     switch (mode) {

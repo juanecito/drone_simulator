@@ -1250,7 +1250,10 @@ magnetic-north marker turned by the declination, and the drone's heading arrow:
 
 The tab panel is a dockable `QDockWidget` containing a `QTabWidget`
 (hidden for full-screen flying; `F11` toggles full screen, `F9` toggles the panel — `Tab` is not
-used because it is needed for keyboard focus navigation).
+used because it is needed for keyboard focus navigation). In full screen the panel is always
+docked inside the window: a floating panel is docked when the window goes full screen and floats
+again where it was afterwards (a separate window next to a full-screen one flickers, as the window
+manager hands the focus back and forth).
 
 | ID | Requirement | Pri |
 |----|-------------|-----|
@@ -1579,6 +1582,13 @@ so Markdown pages appear in the generated site.
   direction of travel, distance 14 × arm length clamped to 1.5–6 m, height 0.35 × distance,
   smoothed with τ = 0.25 s), line of sight (pilot eye 1.7 m above the ground, 4 m behind the
   take-off point) and the M2 free camera. `C` cycles; the choice is saved.
+  The chase camera adds two insets in the bottom corners (22 % of the view width, 16:9, at most
+  28 % of its height; not below 320 × 240): a **top view** straight down from 2 × the chase
+  distance above the vehicle, north up, with a heading chevron marking the vehicle, and a
+  **behind view** rigidly behind the nose (heading only, level horizon, unsmoothed) at
+  0.4 × the chase distance with a 45° lens. The insets are rendered with the main view's
+  terrain chunks and exposure (`Renderer::renderInset`); the HUD's bottom columns move above
+  them.
 - **Keyboard flying** works only in the vehicle cameras (in the free camera W/S/A/D move the
   camera). Menu shortcuts are function keys (F5 start, F6 pause, F7 step, F8 reset) because
   letters are flight keys in the 3D view.

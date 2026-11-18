@@ -22,6 +22,7 @@
 #include <fstream>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "ds/app/opengl_check.hpp"
@@ -243,6 +244,46 @@ TEST_F(SceneRenderTest, DroneCastsAShadowAtNoon) {
     const Luma farWithout = average(without, 0.0, 0.0, 0.15, 0.15);
     const Luma farWith = average(with, 0.0, 0.0, 0.15, 0.15);
     EXPECT_NEAR(farWith.mean, farWithout.mean, 3.0);
+}
+
+TEST_F(SceneRenderTest, InsetDrawsIntoItsRectangleWithTheMainExposure) {
+    // Main view: the sky (looking up). Inset in the top-left quarter: the ground, straight down.
+    const QImage main = render("2026-06-21T12:00:00Z", 0.0, 40.0);
+    const auto before = renderer_->readExposure();
+    const int mainDraws = renderer_->lastStats().drawCalls;
+
+    graphics::FrameInput input;
+    input.camera = graphics::cameraFromAxes({0.0, source_->height(0.0, 0.0) + 30.0, 0.0},
+                                            {0.0, -1.0, 0.0}, {0.0, 0.0, -1.0}, 0.9);
+    input.originAltitudeM = 650.0;
+    input.sky = sky_.state();
+    input.stars = &sky_.stars();
+    input.starsVersion = sky_.starsVersion();
+    input.terrain.gridSize = layout_.gridSize;
+    input.terrain.waterLevelM = -40.0;
+    input.exposure = exposure_;
+    const auto chunks = streamer_->update(0.0, 330.0, 0.0);
+    input.terrain.chunks = chunks;
+    renderer_->renderInset({.framebuffer = fbo_->handle(), .width = kWidth, .height = kHeight},
+                           {.x = 0, .y = 0, .width = kWidth / 2, .height = kHeight / 2}, input);
+    const QImage image = fbo_->toImage().convertToFormat(QImage::Format_RGB32);
+    save(image, "inset.png");
+
+    // Inside the inset: ground (not blue sky). Outside: the main view, unchanged.
+    const Luma inset = average(image, 0.05, 0.05, 0.45, 0.45);
+    const Luma skyBefore = average(main, 0.05, 0.05, 0.45, 0.45);
+    EXPECT_GT(skyBefore.b, skyBefore.r + 10);
+    EXPECT_LT(inset.b, inset.r + 10) << "the inset should show the ground";
+    EXPECT_GT(inset.mean, 20.0);
+    for (const auto& [x0, y0] :
+         {std::pair{0.55, 0.05}, std::pair{0.05, 0.55}, std::pair{0.55, 0.55}}) {
+        EXPECT_NEAR(average(image, x0, y0, x0 + 0.4, y0 + 0.4).mean,
+                    average(main, x0, y0, x0 + 0.4, y0 + 0.4).mean, 0.5);
+    }
+    // Not metered: the exposure stays that of the main view; the counters add up.
+    EXPECT_DOUBLE_EQ(renderer_->readExposure().ev100, before.ev100);
+    EXPECT_GT(renderer_->lastStats().drawCalls, mainDraws);
+    EXPECT_GT(renderer_->lastStats().chunksDrawn, 0);
 }
 
 TEST_F(SceneRenderTest, SunsetIsRedderTowardsTheSun) {

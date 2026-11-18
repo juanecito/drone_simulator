@@ -586,6 +586,45 @@ TEST(CameraRig, ChaseIsBehindSmoothedAndAboveGround) {
     EXPECT_GE(c.position.y, 30.0 + CameraRig::kClearanceM - 1e-9);
 }
 
+TEST(CameraRig, ChaseInsetsLookDownAndFromBehind) {
+    CameraRig rig;
+    rig.setChaseDistance(2.0);
+    // Heading east (body x → world +x), climbing fast towards the north.
+    const glm::dquat east =
+        glm::quat_cast(glm::dmat3(glm::dvec3(1, 0, 0), glm::dvec3(0, 0, 1), glm::dvec3(0, -1, 0)));
+    const VehiclePose pose{.position = {10, 20, 30}, .orientation = east, .velocity = {0, 5, -9}};
+
+    // Top: straight above, looking down, north at the top of the image and east on the right.
+    const Camera top = rig.topView(pose, 1.6);
+    EXPECT_NEAR(glm::distance(top.position, pose.position), CameraRig::kTopHeightRatio * 2.0, 1e-9);
+    EXPECT_NEAR(top.position.y, 20.0 + CameraRig::kTopHeightRatio * 2.0, 1e-9);
+    EXPECT_NEAR(top.forward().y, -1.0, 1e-9);
+    EXPECT_NEAR(glm::dot(top.up(), glm::dvec3(0, 0, -1)), 1.0, 1e-9);
+    EXPECT_NEAR(glm::dot(top.right(), glm::dvec3(1, 0, 0)), 1.0, 1e-9);
+    EXPECT_NEAR(top.fovYRad, ds::common::degToRad(CameraRig::kTopFovDeg), 1e-12);
+    EXPECT_EQ(top.aspect, 1.6);
+
+    // Behind: west of the vehicle (behind its nose, not its travel), above, looking at it,
+    // level horizon; no smoothing, so it is there at once.
+    const Camera behind = rig.behindView(pose, 1.6);
+    const double d = CameraRig::kBehindDistanceRatio * 2.0;
+    EXPECT_NEAR(behind.position.x, 10.0 - d, 1e-9);
+    EXPECT_NEAR(behind.position.z, 30.0, 1e-9);
+    EXPECT_GT(behind.position.y, 20.0);
+    EXPECT_LT(angleBetweenDeg(behind.forward(), pose.position - behind.position), 10.0);
+    EXPECT_GT(behind.forward().x, 0.9);
+    EXPECT_EQ(behind.rollRad, 0.0);
+    EXPECT_EQ(behind.aspect, 1.6);
+
+    // Turning the vehicle turns the behind view with it.
+    const VehiclePose north{.position = pose.position, .orientation = levelNorth()};
+    EXPECT_NEAR(rig.behindView(north, 1.6).position.z, 30.0 + d, 1e-9);
+
+    // Kept above the ground.
+    rig.setGround([](double, double) { return std::optional<double>(25.0); });
+    EXPECT_GE(rig.behindView(pose, 1.6).position.y, 25.0 + CameraRig::kClearanceM - 1e-9);
+}
+
 TEST(CameraRig, LineOfSightLooksAtTheVehicle) {
     CameraRig rig;
     rig.setPilotEye({0, 1.7, 0});

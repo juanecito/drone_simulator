@@ -128,6 +128,13 @@ void MainWindow::restoreLayout() {
     if (const auto& state = settings_->windowState()) {
         restoreState(*state);
     }
+    // The saved state may float the panel again after the geometry made the window full
+    // screen: apply the full-screen rule to the restored layout.
+    if (panelDockedForFullScreen_) {
+        panelDock_->setFeatures(panelDock_->features() | QDockWidget::DockWidgetFloatable);
+        panelDockedForFullScreen_ = false;
+    }
+    keepPanelDocked(isFullScreen() || windowState().testFlag(Qt::WindowFullScreen));
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -141,6 +148,7 @@ void MainWindow::changeEvent(QEvent* event) {
     if (event->type() == QEvent::WindowStateChange && fullScreenAction_ != nullptr) {
         const QSignalBlocker blocker(fullScreenAction_);
         fullScreenAction_->setChecked(isFullScreen());
+        keepPanelDocked(isFullScreen());
     }
     QMainWindow::changeEvent(event);
 }
@@ -358,6 +366,30 @@ void MainWindow::setFullScreen(bool enabled) {
         showFullScreen();
     } else {
         showNormal();
+    }
+}
+
+void MainWindow::keepPanelDocked(bool fullScreen) {
+    // A floating panel is a window of its own: next to a full-screen window the window
+    // manager keeps handing the focus and the top of the stack from one to the other, and
+    // the panel flickers. In full screen it is docked and cannot be undocked.
+    if (panelDock_ == nullptr || fullScreen == panelDockedForFullScreen_) {
+        return;
+    }
+    panelDockedForFullScreen_ = fullScreen;
+    if (fullScreen) {
+        panelWasFloating_ = panelDock_->isFloating();
+        if (panelWasFloating_) {
+            panelFloatingGeometry_ = panelDock_->geometry();
+            panelDock_->setFloating(false);
+        }
+        panelDock_->setFeatures(panelDock_->features() & ~QDockWidget::DockWidgetFloatable);
+        return;
+    }
+    panelDock_->setFeatures(panelDock_->features() | QDockWidget::DockWidgetFloatable);
+    if (panelWasFloating_) {
+        panelDock_->setFloating(true);
+        panelDock_->setGeometry(panelFloatingGeometry_);
     }
 }
 
