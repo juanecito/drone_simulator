@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cmath>
+#include <numbers>
 
 #include "ds/app/simulation_controller.hpp"
 #include "ds/physics/flight_controller.hpp"
@@ -141,18 +142,18 @@ void SimulationPanel::buildUi() {
     pitch_ = stickBar(QStringLiteral("PitchBar"), true);
     yaw_ = stickBar(QStringLiteral("YawBar"), true);
     int row = 1;
-    for (auto [label, bar] : {std::pair{tr("Throttle"), throttle_}, std::pair{tr("Roll"), roll_},
-                              std::pair{tr("Pitch"), pitch_}, std::pair{tr("Yaw"), yaw_}}) {
-        grid->addWidget(new QLabel(label), row, 0);
+    for (QProgressBar* bar : {throttle_, roll_, pitch_, yaw_}) {
+        auto* label = new QLabel;
+        barLabels_[static_cast<std::size_t>(row - 1)] = label;
+        grid->addWidget(label, row, 0);
         grid->addWidget(bar, row, 1);
         ++row;
     }
-    auto* keys = new QLabel(
-        tr("<small>Keyboard (vehicle cameras): W/S throttle, A/D yaw, arrows pitch and roll, "
-           "Space arm, 1–4 Acro/Angle/Alt hold/Pos hold, L lights. "
-           "C camera, P pause, R reset.</small>"));
-    keys->setWordWrap(true);
-    grid->addWidget(keys, row, 0, 1, 2);
+    keys_ = new QLabel;
+    keys_->setObjectName(QStringLiteral("KeyboardHelpLabel"));
+    keys_->setWordWrap(true);
+    grid->addWidget(keys_, row, 0, 1, 2);
+    groundShown_ = simulation_->vehicleType() != physics::VehicleType::Ground;  // Forces a set-up.
     layout->addWidget(controlsBox);
 
     // --- Telemetry and statistics ----------------------------------------------------------
@@ -215,8 +216,30 @@ void SimulationPanel::refresh() {
     const sim::HudModel& hud = simulation_->hud();
     const auto percent = [](double v) { return static_cast<int>(std::lround(100.0 * v)); };
     const input::ControlInputs& c = s.controls;
-    throttle_->setValue(percent(c.throttle));
-    roll_->setValue(percent(c.roll));
+    const bool ground = simulation_->vehicleType() == physics::VehicleType::Ground;
+    if (ground != groundShown_) {
+        groundShown_ = ground;
+        const std::array<QString, 4> names =
+            ground ? std::array<QString, 4>{tr("Drive"), tr("Steering"), QString(), QString()}
+                   : std::array<QString, 4>{tr("Throttle"), tr("Roll"), tr("Pitch"), tr("Yaw")};
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            barLabels_[i]->setText(names[i]);
+        }
+        throttle_->setRange(ground ? -100 : 0, 100);
+        for (QWidget* w :
+             std::initializer_list<QWidget*>{pitch_, yaw_, barLabels_[2], barLabels_[3]}) {
+            w->setVisible(!ground);
+        }
+        keys_->setText(
+            ground ? tr("<small>Keyboard (vehicle cameras): W/S forward and reverse, A/D steer, "
+                        "Space brake, Enter arm, 1–2 Manual, 3–4 Speed control, L lights. "
+                        "C camera, P pause, R reset.</small>")
+                   : tr("<small>Keyboard (vehicle cameras): W/S throttle, A/D yaw, arrows pitch "
+                        "and roll, Space or Enter arm, 1–4 Acro/Angle/Alt hold/Pos hold, "
+                        "L lights. C camera, P pause, R reset.</small>"));
+    }
+    throttle_->setValue(percent(ground ? c.drive : c.throttle));
+    roll_->setValue(percent(ground ? c.steering : c.roll));
     pitch_->setValue(percent(c.pitch));
     yaw_->setValue(percent(c.yaw));
     switch (simulation_->activeInputSource()) {
@@ -231,7 +254,8 @@ void SimulationPanel::refresh() {
     }
 
     const physics::VehicleTelemetry& t = s.telemetry;
-    const auto mode = physics::flightModeName(t.mode);
+    const auto mode = t.type == physics::VehicleType::Ground ? physics::driveModeName(t.ground.mode)
+                                                             : physics::flightModeName(t.mode);
     QStringList lines;
     lines << tr("Vehicle: %1")
                  .arg(fromStd(s.profileName) +
@@ -239,8 +263,28 @@ void SimulationPanel::refresh() {
     lines << tr("%1   %2").arg(fromStd(hud.armed.text),
                                QString::fromUtf8(mode.data(), static_cast<qsizetype>(mode.size())));
     lines << fromStd(hud.battery.text);
-    lines << tr("%1   %2").arg(fromStd(hud.altitudeAgl.text), fromStd(hud.altitudeAmsl.text));
-    lines << tr("%1   %2").arg(fromStd(hud.speed.text), fromStd(hud.verticalSpeed.text));
+    if (ground) {
+        const physics::GroundTelemetry& g = t.ground;
+        const auto surface = physics::surfaceMaterialName(g.surface);
+        lines << tr("%1   odometry %2 m/s   %3 m")
+                     .arg(fromStd(hud.speed.text))
+                     .arg(g.odometrySpeedMs, 0, 'f', 2)
+                     .arg(g.odometerM, 0, 'f', 0);
+        lines << tr("Pitch %1°   Roll %2°   Slope %3° on %4")
+                     .arg(s.attitude.pitch * 180.0 / std::numbers::pi, 0, 'f', 0)
+                     .arg(s.attitude.roll * 180.0 / std::numbers::pi, 0, 'f', 0)
+                     .arg(g.slopeDeg, 0, 'f', 0)
+                     .arg(
+                         QString::fromUtf8(surface.data(), static_cast<qsizetype>(surface.size())));
+        lines << tr("Wheel slip up to %1 %   motors L %2 % R %3 %%4")
+                     .arg(100.0 * g.maxSlip, 0, 'f', 0)
+                     .arg(100.0 * g.leftCommand, 0, 'f', 0)
+                     .arg(100.0 * g.rightCommand, 0, 'f', 0)
+                     .arg(g.braking ? tr("   braking") : QString());
+    } else {
+        lines << tr("%1   %2").arg(fromStd(hud.altitudeAgl.text), fromStd(hud.altitudeAmsl.text));
+        lines << tr("%1   %2").arg(fromStd(hud.speed.text), fromStd(hud.verticalSpeed.text));
+    }
     lines << fromStd(hud.gps.text);
     if (!hud.wind.text.empty()) {
         lines << fromStd(hud.wind.text);

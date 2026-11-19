@@ -8,6 +8,7 @@ ds_add_core_module(graphics
         camera.cpp
         camera_rig.cpp
         drone_model.cpp
+        rover_model.cpp
         mesh.cpp
         shader_library.cpp
         exposure.cpp

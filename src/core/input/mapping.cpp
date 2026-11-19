@@ -7,14 +7,34 @@
 #include <cctype>
 #include <cmath>
 #include <format>
+#include <utility>
 
 namespace ds::input {
 namespace {
 
-constexpr std::array<SwitchFunction, 7> kFunctions{
+constexpr std::array<SwitchFunction, 8> kFunctions{
     SwitchFunction::Arm,          SwitchFunction::FlightMode,     SwitchFunction::Beeper,
     SwitchFunction::ReturnToHome, SwitchFunction::PayloadRelease, SwitchFunction::CameraTrigger,
-    SwitchFunction::Lights};
+    SwitchFunction::Lights,       SwitchFunction::Brake};
+
+// Validates an "AETR"-style channel order; returns it in upper case.
+common::Result<std::string> channelOrder(std::string_view order) {
+    std::string upper(order);
+    std::ranges::transform(upper, upper.begin(), [](char c) {
+        return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    });
+    std::string sorted = upper;
+    std::ranges::sort(sorted);
+    if (sorted != "AERT") {
+        return common::makeError(
+            std::format("channel order \"{}\" must be a permutation of AETR", order));
+    }
+    return upper;
+}
+
+int orderAxis(const std::string& order, char letter) {
+    return static_cast<int>(order.find(letter));
+}
 
 double rawAxis(const RawJoystickState& raw, int axis) noexcept {
     if (axis < 0 || static_cast<std::size_t>(axis) >= raw.axes.size()) {
@@ -42,6 +62,24 @@ std::string_view channelName(Channel channel) noexcept {
     return "?";
 }
 
+std::string_view groundChannelName(GroundChannel channel) noexcept {
+    switch (channel) {
+        case GroundChannel::Drive: return "drive";
+        case GroundChannel::Steering: return "steering";
+        case GroundChannel::Forward: return "forward";
+        case GroundChannel::Reverse: return "reverse";
+    }
+    return "?";
+}
+
+std::string_view channelName(VehicleControls type, std::size_t index) noexcept {
+    if (index >= kChannelCount) {
+        return "?";
+    }
+    return type == VehicleControls::Ground ? groundChannelName(static_cast<GroundChannel>(index))
+                                           : channelName(static_cast<Channel>(index));
+}
+
 std::string_view switchFunctionName(SwitchFunction function) noexcept {
     switch (function) {
         case SwitchFunction::Arm: return "arm";
@@ -51,6 +89,7 @@ std::string_view switchFunctionName(SwitchFunction function) noexcept {
         case SwitchFunction::PayloadRelease: return "payloadRelease";
         case SwitchFunction::CameraTrigger: return "cameraTrigger";
         case SwitchFunction::Lights: return "lights";
+        case SwitchFunction::Brake: return "brake";
     }
     return "?";
 }
@@ -88,6 +127,21 @@ double calibrateAxis(const AxisCalibration& c, double raw, bool throttle,
     return throttle ? 0.5 * (x + 1.0) : x;
 }
 
+double calibrateTrigger(const AxisCalibration& c, double raw) noexcept {
+    if (c.axis < 0) {
+        return 0.0;
+    }
+    const double span = c.max - c.min;
+    double x = std::abs(span) > 1e-9 ? std::clamp((raw - c.min) / span, 0.0, 1.0) : 0.0;
+    if (c.inverted) {
+        x = 1.0 - x;
+    }
+    const double dz = std::clamp(c.deadzone, 0.0, 0.5);
+    x = x <= dz ? 0.0 : (x - dz) / (1.0 - dz);
+    const double e = std::clamp(c.expo, 0.0, 1.0);
+    return (1.0 - e) * x + e * x * x * x;
+}
+
 ControlInputs mapControls(const InputMapping& m, const RawJoystickState& raw,
                           const RawJoystickState& previousRaw, const ControlInputs& previous) {
     ControlInputs out = previous;
@@ -100,10 +154,26 @@ ControlInputs mapControls(const InputMapping& m, const RawJoystickState& raw,
         const AxisCalibration& c = m.channels[static_cast<std::size_t>(ch)];
         return calibrateAxis(c, rawAxis(raw, c.axis), ch == Channel::Throttle, m.throttleCentred);
     };
-    out.throttle = channel(Channel::Throttle);
-    out.roll = channel(Channel::Roll);
-    out.pitch = channel(Channel::Pitch);
-    out.yaw = channel(Channel::Yaw);
+    if (m.vehicle == VehicleControls::Ground) {
+        auto slot = [&](GroundChannel ch) -> const AxisCalibration& {
+            return m.channels[static_cast<std::size_t>(ch)];
+        };
+        const AxisCalibration& drive = slot(GroundChannel::Drive);
+        const AxisCalibration& steering = slot(GroundChannel::Steering);
+        const AxisCalibration& forward = slot(GroundChannel::Forward);
+        const AxisCalibration& reverse = slot(GroundChannel::Reverse);
+        out.drive = std::clamp(calibrateAxis(drive, rawAxis(raw, drive.axis), false, false) +
+                                   calibrateTrigger(forward, rawAxis(raw, forward.axis)) -
+                                   calibrateTrigger(reverse, rawAxis(raw, reverse.axis)),
+                               -1.0, 1.0);
+        out.steering = calibrateAxis(steering, rawAxis(raw, steering.axis), false, false);
+        out.throttle = out.roll = out.pitch = out.yaw = 0.0;
+    } else {
+        out.throttle = channel(Channel::Throttle);
+        out.roll = channel(Channel::Roll);
+        out.pitch = channel(Channel::Pitch);
+        out.yaw = channel(Channel::Yaw);
+    }
     for (const SwitchMapping& s : m.switches) {
         bool on = false;
         int position = 0;  // 0 low, 1 middle, 2 high.
@@ -117,6 +187,7 @@ ControlInputs mapControls(const InputMapping& m, const RawJoystickState& raw,
                 case SwitchFunction::Lights: out.lights = !out.lights; break;
                 case SwitchFunction::Beeper: out.beeper = !out.beeper; break;
                 case SwitchFunction::ReturnToHome: out.returnToHome = !out.returnToHome; break;
+                case SwitchFunction::Brake: out.brake = !out.brake; break;
                 case SwitchFunction::FlightMode: {
                     const auto it = std::ranges::find(s.modes, out.flightMode);
                     const auto index = it == s.modes.end() ? 0 : (it - s.modes.begin() + 1) % 3;
@@ -150,6 +221,7 @@ ControlInputs mapControls(const InputMapping& m, const RawJoystickState& raw,
             case SwitchFunction::PayloadRelease: out.payloadRelease = on; break;
             case SwitchFunction::CameraTrigger: out.cameraTrigger = on; break;
             case SwitchFunction::Lights: out.lights = on; break;
+            case SwitchFunction::Brake: out.brake = on; break;
         }
     }
     return out;
@@ -161,11 +233,12 @@ common::Json InputMapping::toJson() const {
     j["deviceGuid"] = deviceGuid;
     j["deviceName"] = deviceName;
     j["name"] = name;
+    j["vehicleType"] = vehicleControlsName(vehicle);
     j["throttleCentred"] = throttleCentred;
     j["filterHz"] = filterHz;
     for (std::size_t i = 0; i < kChannelCount; ++i) {
         const AxisCalibration& c = channels[i];
-        j["channels"][std::string(channelName(static_cast<Channel>(i)))] = {
+        j["channels"][std::string(channelName(vehicle, i))] = {
             {"axis", c.axis}, {"min", c.min},           {"center", c.center},
             {"max", c.max},   {"inverted", c.inverted}, {"deadzone", c.deadzone},
             {"expo", c.expo}};
@@ -192,11 +265,15 @@ common::Result<InputMapping> InputMapping::fromJson(const common::Json& json) {
     m.deviceGuid = r.string("deviceGuid", "");
     m.deviceName = r.string("deviceName", "");
     m.name = r.string("name", "Default");
+    // Older mappings have no type: they are aerial.
+    if (r.has("vehicleType") && r.choice("vehicleType", {"aerial", "ground"}) == "ground") {
+        m.vehicle = VehicleControls::Ground;
+    }
     m.throttleCentred = r.boolean("throttleCentred", false);
     m.filterHz = r.number("filterHz", 0.0, 200.0, 0.0);
     common::JsonReader ch = r.object("channels");
     for (std::size_t i = 0; i < kChannelCount; ++i) {
-        common::JsonReader c = ch.object(channelName(static_cast<Channel>(i)));
+        common::JsonReader c = ch.object(channelName(m.vehicle, i));
         AxisCalibration& a = m.channels[i];
         a.axis = c.integer("axis", -1, 255);
         a.min = c.number("min", -1.0, 1.0);
@@ -239,16 +316,11 @@ common::Result<InputMapping> InputMapping::fromJson(const common::Json& json) {
 }
 
 common::Result<InputMapping> radioMapping(std::string_view order) {
-    std::string upper(order);
-    std::ranges::transform(upper, upper.begin(), [](char c) {
-        return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    });
-    std::string sorted = upper;
-    std::ranges::sort(sorted);
-    if (sorted != "AERT") {
-        return common::makeError(
-            std::format("channel order \"{}\" must be a permutation of AETR", order));
+    auto checked = channelOrder(order);
+    if (!checked) {
+        return common::makeError(checked.error().message);
     }
+    const std::string& upper = *checked;
     InputMapping m;
     m.name = "Radio " + upper;
     for (std::size_t i = 0; i < 4; ++i) {
@@ -306,6 +378,65 @@ common::Result<InputMapping> gamepadMapping(int mode) {
                                 .button = 10,
                                 .toggle = true,
                                 .modes = {1, 2, 0}}};
+    return m;
+}
+
+common::Result<InputMapping> groundRadioMapping(std::string_view order) {
+    auto checked = channelOrder(order);
+    if (!checked) {
+        return common::makeError(checked.error().message);
+    }
+    InputMapping m;
+    m.name = "Radio " + *checked;
+    m.vehicle = VehicleControls::Ground;
+    auto& drive = m.channels[static_cast<std::size_t>(GroundChannel::Drive)];
+    drive.axis = orderAxis(*checked, 'E');
+    drive.deadzone = 0.04;
+    auto& steering = m.channels[static_cast<std::size_t>(GroundChannel::Steering)];
+    steering.axis = orderAxis(*checked, 'A');
+    steering.deadzone = 0.03;
+    // Low and middle: Manual (index 1); high: Speed control (index 2).
+    m.switches = {
+        SwitchMapping{.function = SwitchFunction::Arm, .axis = 4},
+        SwitchMapping{.function = SwitchFunction::FlightMode, .axis = 5, .modes = {1, 1, 2}}};
+    return m;
+}
+
+InputMapping groundGamepadMapping(bool triggers) {
+    // SDL gamepad axes: 0 left X, 1 left Y (down = +), 2 right X, 3 right Y, 4 left trigger,
+    // 5 right trigger (0 released … 1 pressed).
+    InputMapping m;
+    m.vehicle = VehicleControls::Ground;
+    m.name = triggers ? "Gamepad triggers" : "Gamepad sticks";
+    auto& drive = m.channels[static_cast<std::size_t>(GroundChannel::Drive)];
+    auto& steering = m.channels[static_cast<std::size_t>(GroundChannel::Steering)];
+    steering.deadzone = 0.06;
+    steering.expo = 0.3;
+    if (triggers) {
+        steering.axis = 0;
+        for (const auto& [slot, axis] :
+             {std::pair{GroundChannel::Forward, 5}, std::pair{GroundChannel::Reverse, 4}}) {
+            AxisCalibration& t = m.channels[static_cast<std::size_t>(slot)];
+            t.axis = axis;
+            t.min = 0.0;
+            t.center = 0.0;
+            t.max = 1.0;
+            t.deadzone = 0.04;
+        }
+    } else {
+        drive.axis = 1;
+        drive.inverted = true;  // Stick up (negative Y) = forward.
+        drive.deadzone = 0.06;
+        steering.axis = 2;
+    }
+    // SDL gamepad buttons: 0 = south (A), 3 = north (Y), 6 = start, 10 = right shoulder.
+    m.switches = {SwitchMapping{.function = SwitchFunction::Arm, .button = 6, .toggle = true},
+                  SwitchMapping{.function = SwitchFunction::FlightMode,
+                                .button = 10,
+                                .toggle = true,
+                                .modes = {1, 2, 1}},
+                  SwitchMapping{.function = SwitchFunction::Brake, .button = 0},
+                  SwitchMapping{.function = SwitchFunction::Lights, .button = 3, .toggle = true}};
     return m;
 }
 

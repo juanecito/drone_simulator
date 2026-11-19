@@ -485,9 +485,12 @@ void MainWindow::startMission(const std::string& key) {
         simulation_->missionActive()) {
         return;
     }
-    const bool keyboardOnly = !simulation_->joystickMapping().has_value();
-    briefing_ = new MissionBriefingDialog(*row, missions_->entry(*row), simulation_->profiles(),
-                                          keyboardOnly, this);
+    // The briefing offers the profiles and checks the controls of the mission's vehicle type.
+    const physics::VehicleType type =
+        row->ground ? physics::VehicleType::Ground : physics::VehicleType::Aerial;
+    const bool keyboardOnly = !simulation_->joystickMapping(type).has_value();
+    briefing_ = new MissionBriefingDialog(*row, missions_->entry(*row),
+                                          simulation_->profiles(type), keyboardOnly, this);
     briefing_->setAttribute(Qt::WA_DeleteOnClose);
     connect(briefing_, &QDialog::finished, this, [this, key](int result) {
         // Closed: no longer "the open briefing", even before Qt deletes it.

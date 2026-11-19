@@ -88,9 +88,16 @@ private:
     void save();
     void remove();
     void updateStatus();
+    void onVehicleChanged();
+    void updateChannelLabels();
+    void showLive(const input::ControlInputs& controls, const input::RawJoystickState* raw);
     [[nodiscard]] std::optional<std::string> selectedGuid() const;
+    [[nodiscard]] bool ground() const noexcept {
+        return vehicle_ == input::VehicleControls::Ground;
+    }
 
     struct ChannelRow {
+        QLabel* name = nullptr;
         QLabel* axis = nullptr;
         QCheckBox* inverted = nullptr;
         QDoubleSpinBox* expo = nullptr;
@@ -110,6 +117,8 @@ private:
     std::array<ChannelRow, input::kChannelCount> rows_{};
     QTimer* timer_ = nullptr;
     std::uint64_t devicesVersion_ = ~std::uint64_t{0};
+    input::VehicleControls vehicle_ = input::VehicleControls::Aerial;  // Mappings shown.
+    QLabel* vehicleLabel_ = nullptr;
     input::InputMapping working_;
     input::RawJoystickState previousRaw_;
     input::ControlInputs previousControls_;

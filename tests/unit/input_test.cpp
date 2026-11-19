@@ -163,6 +163,127 @@ TEST(InputMapping, JsonRoundTripAndValidation) {
 
 constexpr auto key(FlightKey k) { return static_cast<std::uint32_t>(k); }
 
+TEST(AxisCalibration, Trigger) {
+    const AxisCalibration t{.axis = 5, .min = 0.0, .center = 0.0, .max = 1.0, .deadzone = 0.1};
+    EXPECT_DOUBLE_EQ(calibrateTrigger(t, 0.0), 0.0);
+    EXPECT_DOUBLE_EQ(calibrateTrigger(t, 0.08), 0.0);  // Resting trigger inside the deadzone.
+    EXPECT_NEAR(calibrateTrigger(t, 0.55), 0.5, 1e-12);
+    EXPECT_DOUBLE_EQ(calibrateTrigger(t, 1.0), 1.0);
+    EXPECT_DOUBLE_EQ(calibrateTrigger(t, 2.0), 1.0);  // Clamped.
+    // A trigger reported as −1 (released) … 1 (pressed) by a raw joystick.
+    AxisCalibration raw{.axis = 2, .min = -1.0, .center = -1.0, .max = 1.0, .deadzone = 0.0};
+    EXPECT_DOUBLE_EQ(calibrateTrigger(raw, -1.0), 0.0);
+    EXPECT_DOUBLE_EQ(calibrateTrigger(raw, 0.0), 0.5);
+    raw.inverted = true;
+    EXPECT_DOUBLE_EQ(calibrateTrigger(raw, -1.0), 1.0);
+    raw.axis = -1;
+    EXPECT_DOUBLE_EQ(calibrateTrigger(raw, 1.0), 0.0);  // Unassigned.
+}
+
+TEST(GroundMapping, GamepadTriggersStickAndButtons) {
+    const InputMapping m = groundGamepadMapping(true);
+    EXPECT_EQ(m.vehicle, VehicleControls::Ground);
+    // Axes: left X, left Y, right X, right Y, left trigger, right trigger.
+    ControlInputs c = mapControls(m, rawState({0.0, 0.0, 0.0, 0.0, 0.0, 1.0}), {}, {});
+    EXPECT_DOUBLE_EQ(c.drive, 1.0);
+    EXPECT_DOUBLE_EQ(c.throttle, 0.0);  // Ground mappings leave the aerial sticks alone.
+    c = mapControls(m, rawState({-1.0, 0.0, 0.0, 0.0, 1.0, 0.0}), {}, {});
+    EXPECT_DOUBLE_EQ(c.drive, -1.0);
+    EXPECT_DOUBLE_EQ(c.steering, -1.0);
+    c = mapControls(m, rawState({0.0, 0.0, 0.0, 0.0, 1.0, 1.0}), {}, {});
+    EXPECT_DOUBLE_EQ(c.drive, 0.0);  // Both triggers cancel.
+
+    // South button brakes while held; start toggles the arm switch; the right shoulder
+    // switches Manual (1) and Speed control (2).
+    std::vector<bool> none(11, false);
+    std::vector<bool> south = none;
+    south[0] = true;
+    EXPECT_TRUE(mapControls(m, rawState({0, 0, 0, 0, 0, 0}, south), {}, {}).brake);
+    EXPECT_FALSE(mapControls(m, rawState({0, 0, 0, 0, 0, 0}, none), {}, {}).brake);
+    std::vector<bool> shoulder = none;
+    shoulder[10] = true;
+    const RawJoystickState up = rawState({0, 0, 0, 0, 0, 0}, none);
+    const RawJoystickState down = rawState({0, 0, 0, 0, 0, 0}, shoulder);
+    c = mapControls(m, up, {}, {});
+    EXPECT_EQ(c.flightMode, 1);
+    c = mapControls(m, down, up, c);
+    EXPECT_EQ(c.flightMode, 2);
+    c = mapControls(m, up, down, c);
+    c = mapControls(m, down, up, c);
+    EXPECT_EQ(c.flightMode, 1);
+
+    const InputMapping sticks = groundGamepadMapping(false);
+    c = mapControls(sticks, rawState({0.0, -1.0, 0.5, 0.0, 0.0, 0.0}), {}, {});
+    EXPECT_DOUBLE_EQ(c.drive, 1.0);  // Left stick up.
+    EXPECT_GT(c.steering, 0.0);      // Right stick right.
+}
+
+TEST(GroundMapping, RadioChannelOrder) {
+    EXPECT_FALSE(groundRadioMapping("AETX").has_value());
+    const auto m = groundRadioMapping("TAER");
+    ASSERT_TRUE(m.has_value());
+    // T A E R: aileron (steering) on axis 1, elevator (drive) on axis 2.
+    const ControlInputs c = mapControls(*m, rawState({-1.0, 0.5, 1.0, 0.0, 1.0, 1.0}), {}, {});
+    EXPECT_DOUBLE_EQ(c.drive, 1.0);
+    EXPECT_GT(c.steering, 0.4);
+    EXPECT_TRUE(c.arm);
+    EXPECT_EQ(c.flightMode, 2);  // Mode switch high: Speed control.
+    EXPECT_EQ(mapControls(*m, rawState({0, 0, 0, 0, -1.0, 0.0}), {}, {}).flightMode, 1);
+}
+
+TEST(GroundMapping, JsonKeepsTheVehicleType) {
+    InputMapping m = groundGamepadMapping(true);
+    m.deviceGuid = "0300abcd";
+    const ds::common::Json json = m.toJson();
+    EXPECT_EQ(json["vehicleType"], "ground");
+    EXPECT_TRUE(json["channels"].contains("forward"));
+    EXPECT_TRUE(json["channels"].contains("steering"));
+    const auto back = InputMapping::fromJson(json);
+    ASSERT_TRUE(back.has_value()) << back.error().message;
+    EXPECT_EQ(*back, m);
+
+    // Mappings saved before ground drones existed have no type: aerial.
+    auto old = gamepadMapping(2)->toJson();
+    old.erase("vehicleType");
+    const auto aerial = InputMapping::fromJson(old);
+    ASSERT_TRUE(aerial.has_value());
+    EXPECT_EQ(aerial->vehicle, VehicleControls::Aerial);
+    // Ground channel names do not fit an aerial mapping.
+    auto mixed = json;
+    mixed["vehicleType"] = "aerial";
+    EXPECT_FALSE(InputMapping::fromJson(mixed).has_value());
+    mixed["vehicleType"] = "boat";
+    EXPECT_FALSE(InputMapping::fromJson(mixed).has_value());
+}
+
+TEST(KeyboardControl, GroundDriveSpringsBackAndBrakes) {
+    KeyboardControl k;
+    ControlInputs c;
+    for (int i = 0; i < 100; ++i) {
+        c = k.update(static_cast<std::uint32_t>(FlightKey::ThrottleUp) |
+                         static_cast<std::uint32_t>(FlightKey::YawLeft),
+                     0.01);
+    }
+    EXPECT_DOUBLE_EQ(c.drive, KeyboardControl::kDriveDeflection);
+    EXPECT_DOUBLE_EQ(c.steering, -KeyboardControl::kSteeringDeflection);
+    EXPECT_FALSE(c.brake);
+    // Released: back to neutral (not sticky like the aerial throttle).
+    for (int i = 0; i < 100; ++i) {
+        c = k.update(static_cast<std::uint32_t>(FlightKey::Brake), 0.01);
+    }
+    EXPECT_DOUBLE_EQ(c.drive, 0.0);
+    EXPECT_DOUBLE_EQ(c.steering, 0.0);
+    EXPECT_TRUE(c.brake);
+    // The arrows drive and steer too.
+    for (int i = 0; i < 100; ++i) {
+        c = k.update(static_cast<std::uint32_t>(FlightKey::PitchBack) |
+                         static_cast<std::uint32_t>(FlightKey::RollRight),
+                     0.01);
+    }
+    EXPECT_DOUBLE_EQ(c.drive, -KeyboardControl::kDriveDeflection);
+    EXPECT_DOUBLE_EQ(c.steering, KeyboardControl::kSteeringDeflection);
+}
+
 TEST(KeyboardControl, SticksRampAndReturnToCentre) {
     KeyboardControl kb;
     ControlInputs s;

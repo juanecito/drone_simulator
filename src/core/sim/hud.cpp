@@ -134,8 +134,17 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
     const double ground = std::hypot(s.body.velocity.x, s.body.velocity.z);
     h.speed.text = speedText(ground, o.imperial);
     h.verticalSpeed.text = std::format("{:+.1f} m/s", t.estimate.verticalSpeedMs);
-    h.throttle.text = std::format("THR {:.0f}%", 100.0 * t.throttle);
-    h.mode.text = std::string(physics::flightModeName(t.mode));
+    if (aerial) {
+        h.throttle.text = std::format("THR {:.0f}%", 100.0 * t.throttle);
+        h.mode.text = std::string(physics::flightModeName(t.mode));
+    } else {
+        // Ground: the drive command (the full ground HUD is FR-GFX-20). Parked, the holding
+        // brake is always on: only a brake applied while armed is shown.
+        h.throttle.text = t.armed && t.ground.braking
+                              ? std::string("BRAKE")
+                              : std::format("DRV {:+.0f}%", 100.0 * s.controls.drive);
+        h.mode.text = std::string(physics::driveModeName(t.ground.mode));
+    }
     if (t.failsafe) {
         h.mode.text = "FAILSAFE";
         h.mode.level = HudLevel::Warning;

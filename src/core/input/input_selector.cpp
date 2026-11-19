@@ -53,6 +53,8 @@ ControlInputs InputSelector::poll(double dt) {
             next.roll = joystickState_.roll + a * (next.roll - joystickState_.roll);
             next.pitch = joystickState_.pitch + a * (next.pitch - joystickState_.pitch);
             next.yaw = joystickState_.yaw + a * (next.yaw - joystickState_.yaw);
+            next.drive = joystickState_.drive + a * (next.drive - joystickState_.drive);
+            next.steering = joystickState_.steering + a * (next.steering - joystickState_.steering);
         }
         if (raw.connected) {
             lastRaw_ = raw;
@@ -65,6 +67,7 @@ ControlInputs InputSelector::poll(double dt) {
     if (!keyboardAllowed_.load()) {
         ControlInputs none = keyboard_.state();
         none.throttle = none.roll = none.pitch = none.yaw = 0.0;
+        none.drive = none.steering = 0.0;
         none.linkValid = false;
         return none;
     }
