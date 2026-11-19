@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "ds/common/event_bus.hpp"
+#include "ds/common/math.hpp"
 #include "ds/common/triple_buffer.hpp"
 #include "ds/geo/coordinates.hpp"
 #include "ds/sim/events.hpp"
@@ -375,6 +376,82 @@ TEST(Hud, LevelsAndWarnings) {
     HudOptions imperial;
     imperial.imperial = true;
     EXPECT_NE(buildHud(s, frame, imperial).altitudeAgl.text.find("ft"), std::string::npos);
+}
+
+TEST(Hud, GroundDroneReadOutsAndWarnings) {
+    // FR-GFX-20: attitude with the rollover warning, slope, slip, drive mode.
+    WorldSnapshot s;
+    s.hasVehicle = true;
+    s.telemetry.type = physics::VehicleType::Ground;
+    s.telemetry.battery.cells = 3;
+    s.telemetry.battery.voltage = 11.4;
+    s.telemetry.armed = true;
+    physics::GroundTelemetry& g = s.telemetry.ground;
+    g.wheelCount = 4;
+    g.contact = {true, true, true, false};
+    g.slip = {0.05, 0.25, 0.6, 0.0};
+    g.maxSlip = 0.6;
+    g.slopeDeg = 12.4;
+    g.surface = physics::SurfaceMaterial::Sand;
+    g.speedMs = 1.2;
+    g.odometerM = 123.4;
+    s.attitude.pitch = common::degToRad(4.0);
+    s.attitude.roll = common::degToRad(-3.0);
+    s.aglM = 0.0;
+    const geo::LocalFrame frame({40.4, -3.7, 650.0});
+
+    HudModel h = buildHud(s, frame, {});
+    ASSERT_TRUE(h.ground.has_value());
+    EXPECT_EQ(h.ground->pitch.text, "PITCH +4°");
+    EXPECT_EQ(h.ground->roll.text, "ROLL -3°");
+    EXPECT_EQ(h.ground->roll.level, HudLevel::Normal);
+    EXPECT_EQ(h.ground->slope.text, "SLOPE 12° sand");
+    EXPECT_EQ(h.ground->slip.text, "SLIP 60%");
+    EXPECT_EQ(h.ground->slip.level, HudLevel::Warning);
+    EXPECT_EQ(h.ground->odometer.text, "ODO 123 m");
+    EXPECT_EQ(h.ground->wheelCount, 4);
+    EXPECT_FALSE(h.ground->wheelContact[3]);
+    EXPECT_DOUBLE_EQ(h.ground->wheelSlip[1], 0.25);
+    EXPECT_TRUE(h.altitudeAgl.text.empty());  // Altitudes belong to aerial drones.
+    EXPECT_TRUE(h.verticalSpeed.text.empty());
+    EXPECT_EQ(h.mode.text, "Manual");
+    EXPECT_EQ(h.speed.text.rfind("R ", 0), std::string::npos);
+    EXPECT_TRUE(h.warnings.empty());
+
+    // Load transfer towards the tipping point: amber, then red.
+    g.loadTransfer = -0.7;
+    h = buildHud(s, frame, {});
+    EXPECT_EQ(h.ground->roll.level, HudLevel::Caution);
+    EXPECT_DOUBLE_EQ(h.ground->loadTransfer, -0.7);
+    ASSERT_EQ(h.warnings.size(), 1U);
+    EXPECT_EQ(h.warnings[0].text, "ROLLOVER RISK");
+    EXPECT_EQ(h.warnings[0].level, HudLevel::Caution);
+    g.loadTransfer = 0.9;
+    h = buildHud(s, frame, {});
+    EXPECT_EQ(h.ground->stability, HudLevel::Warning);
+    EXPECT_EQ(h.warnings[0].level, HudLevel::Warning);
+
+    // Rolled over, stuck, in water; reversing; Speed control shows the set speed.
+    g.rolledOver = true;
+    g.stuckS = 3.0;
+    g.inWater = true;
+    g.speedMs = -0.5;
+    g.mode = physics::DriveMode::SpeedControl;
+    g.cruiseSetpointMs = 1.5;
+    h = buildHud(s, frame, {});
+    std::vector<std::string> texts;
+    for (const HudItem& w : h.warnings) {
+        texts.push_back(w.text);
+    }
+    EXPECT_EQ(texts,
+              (std::vector<std::string>{"ROLLED OVER — PRESS R TO RESET", "IN WATER", "STUCK"}));
+    EXPECT_EQ(h.speed.text.rfind("R ", 0), 0U) << h.speed.text;
+    EXPECT_NE(h.mode.text.find("Speed"), std::string::npos) << h.mode.text;
+    EXPECT_NE(h.mode.text.find("km/h"), std::string::npos) << h.mode.text;
+
+    // Aerial drones have no ground block.
+    s.telemetry.type = physics::VehicleType::Aerial;
+    EXPECT_FALSE(buildHud(s, frame, {}).ground.has_value());
 }
 
 TEST(Hud, CompassUsesTheWorldMagneticModel) {

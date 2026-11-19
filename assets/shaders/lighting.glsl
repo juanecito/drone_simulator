@@ -4,6 +4,35 @@
 // Surface lighting shared by terrain, water and objects. Requires common.glsl,
 // atmosphere.glsl and shadow.glsl.
 
+// Local spot lights (headlights, FR-GFX-08d). Mirrors LightUniforms in renderer.cpp and
+// spotIlluminance() in light.cpp; positions are camera-relative.
+const int kMaxSpotLights = 8;
+layout(std140, binding = 3) uniform LightUniforms {
+    vec4 l_count;                       // x: number of lights.
+    vec4 l_posRange[kMaxSpotLights];    // xyz: position; w: range (m).
+    vec4 l_dirCos[kMaxSpotLights];      // xyz: beam axis; w: cosine of the outer half-angle.
+    vec4 l_colorCd[kMaxSpotLights];     // rgb: colour (luminance 1); w: intensity (cd).
+    vec4 l_cosInner[kMaxSpotLights];    // x: cosine of the inner half-angle.
+};
+
+// Illuminance (lux) of the spot lights on a surface at rel with normal n.
+vec3 spotIrradiance(vec3 rel, vec3 n) {
+    vec3 e = vec3(0.0);
+    int count = min(int(l_count.x), kMaxSpotLights);
+    for (int i = 0; i < count; ++i) {
+        vec3 d = l_posRange[i].xyz - rel;
+        float distSq = max(dot(d, d), 0.01);
+        float dist = sqrt(distSq);
+        vec3 l = d / dist;
+        float cone = smoothstep(l_dirCos[i].w, l_cosInner[i].x, dot(-l, l_dirCos[i].xyz));
+        float ratio = dist / l_posRange[i].w;
+        float window = clamp(1.0 - ratio * ratio * ratio * ratio, 0.0, 1.0);
+        e += l_colorCd[i].rgb * (l_colorCd[i].w * cone * window * window *
+                                 max(dot(n, l), 0.0) / distSq);
+    }
+    return e;
+}
+
 // Radius (km) of a surface point at camera-relative height relY (m).
 float surfaceRadius(float relY) {
     float amsl = u_camera.z + u_camera.x + relY;

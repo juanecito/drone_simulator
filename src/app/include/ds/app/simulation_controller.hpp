@@ -247,6 +247,8 @@ public:
     }
     /// @brief Objects to draw (the vehicle, except from its own FPV camera).
     [[nodiscard]] std::span<const graphics::DrawItem> drawItems() const noexcept { return items_; }
+    /// @brief Local lights of the frame (the vehicle's headlights).
+    [[nodiscard]] std::span<const graphics::SpotLight> lights() const noexcept { return lights_; }
     /// @brief HUD of the frame.
     [[nodiscard]] const sim::HudModel& hud() const noexcept { return hud_; }
     /// @brief Vehicle pose of the frame (extrapolated between ticks).
@@ -291,6 +293,7 @@ private:
     void activateJoystick();
     void buildModel();
     void appendVehicleItems(const sim::WorldSnapshot& s);
+    [[nodiscard]] graphics::RoverVisualState roverState(const sim::WorldSnapshot& s) const;
     [[nodiscard]] static std::size_t typeIndex(physics::VehicleType type) noexcept {
         return type == physics::VehicleType::Ground ? 1 : 0;
     }
@@ -331,6 +334,7 @@ private:
     graphics::VehiclePose pose_;
     graphics::Camera camera_;
     std::vector<graphics::DrawItem> items_;
+    std::vector<graphics::SpotLight> lights_;
     sim::HudModel hud_;
     double telemetryClock_ = 0.0;
 

@@ -14,6 +14,7 @@
 #include "ds/common/error.hpp"
 #include "ds/graphics/camera.hpp"
 #include "ds/graphics/exposure.hpp"
+#include "ds/graphics/light.hpp"
 #include "ds/graphics/mesh.hpp"
 #include "ds/graphics/sky_model.hpp"
 #include "ds/terrain/chunk.hpp"
@@ -109,6 +110,8 @@ struct FrameInput {
     TerrainView terrain;             ///< Terrain and water.
     /// Objects (vehicles, later items); meshes are uploaded once and cached by address.
     std::span<const DrawItem> objects;
+    /// Local spot lights (headlights); at most kMaxSpotLights are used.
+    std::span<const SpotLight> lights;
     ExposureSettings exposure;      ///< Exposure mode.
     double visibilityM = 60'000.0;  ///< Meteorological visibility (aerosol density, FR-GFX-09).
     /// Background night-sky luminance (airglow + unresolved stars), cd/m² (moonless night
@@ -127,6 +130,7 @@ struct FrameStats {
     int chunksCulled = 0;         ///< Chunks outside the view frustum.
     int objectsDrawn = 0;         ///< Object draw items drawn.
     int shadowCascades = 0;       ///< Shadow cascades rendered (0 when no light casts).
+    int spotLights = 0;           ///< Spot lights of the main view.
     std::uint64_t triangles = 0;  ///< Triangles submitted.
     std::size_t gpuChunks = 0;    ///< Chunk meshes resident on the GPU.
 };

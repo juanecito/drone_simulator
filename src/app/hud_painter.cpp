@@ -94,6 +94,72 @@ void horizon(QPainter& p, const QRectF& area, const sim::HudModel& hud) {
     p.drawEllipse(c, 3.0, 3.0);
 }
 
+// Ground drone gauges under the attitude column (FR-GFX-20): the lateral load transfer as a
+// bar (the marker reaching an end means the wheels on the other side lift) and a top view of
+// the wheels coloured by their slip (grey: off the ground).
+void groundGauges(QPainter& p, QPointF topLeft, const sim::HudGround& g, double scale) {
+    p.save();
+    const double barW = 110.0 * scale;
+    const double barH = 7.0 * scale;
+    const QRectF bar(topLeft.x(), topLeft.y(), barW, barH);
+    p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
+    p.setBrush(QColor(0, 0, 0, 110));
+    p.drawRect(bar);
+    // Amber and red zones at both ends.
+    for (const double side : {-1.0, 1.0}) {
+        for (const auto& [from, color] :
+             {std::pair{sim::kRolloverCaution, colorFor(sim::HudLevel::Caution)},
+              std::pair{sim::kRolloverWarning, colorFor(sim::HudLevel::Warning)}}) {
+            const double x0 = bar.center().x() + side * from * 0.5 * barW;
+            const double x1 = bar.center().x() + side * 0.5 * barW;
+            QColor c = color;
+            c.setAlpha(90);
+            p.setPen(Qt::NoPen);
+            p.setBrush(c);
+            p.drawRect(QRectF(QPointF(std::min(x0, x1), bar.top()),
+                              QPointF(std::max(x0, x1), bar.bottom())));
+        }
+    }
+    const double x = bar.center().x() + g.loadTransfer * 0.5 * barW;
+    p.setPen(QPen(QColor(0, 0, 0, 220), 3.0 * scale));
+    p.drawLine(QPointF(x, bar.top() - 3.0 * scale), QPointF(x, bar.bottom() + 3.0 * scale));
+    p.setPen(QPen(colorFor(g.stability), 1.5 * scale));
+    p.drawLine(QPointF(x, bar.top() - 3.0 * scale), QPointF(x, bar.bottom() + 3.0 * scale));
+    p.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
+    p.drawLine(QPointF(bar.center().x(), bar.top()), QPointF(bar.center().x(), bar.bottom()));
+
+    // Wheels seen from above, nose up: left column, right column, front to rear.
+    const int perSide = std::max(g.wheelCount / 2, 1);
+    const double wheelW = 6.0 * scale;
+    const double wheelH = 10.0 * scale;
+    const double gap = 3.0 * scale;
+    const double bodyW = 18.0 * scale;
+    const double top = bar.bottom() + 9.0 * scale;
+    const double left = topLeft.x();
+    const double bodyH = perSide * wheelH + (perSide - 1) * gap;
+    p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
+    p.setBrush(QColor(255, 255, 255, 60));
+    p.drawRect(QRectF(left + wheelW + 2.0 * scale, top, bodyW, bodyH));
+    for (int i = 0; i < g.wheelCount; ++i) {
+        const bool right = i >= perSide;
+        const int row = right ? i - perSide : i;
+        const double wx = right ? left + wheelW + 4.0 * scale + bodyW : left;
+        const double wy = top + row * (wheelH + gap);
+        const auto k = static_cast<std::size_t>(i);
+        const sim::HudLevel level = !g.wheelContact[k]                    ? sim::HudLevel::Muted
+                                    : g.wheelSlip[k] >= sim::kSlipWarning ? sim::HudLevel::Warning
+                                    : g.wheelSlip[k] >= sim::kSlipCaution ? sim::HudLevel::Caution
+                                                                          : sim::HudLevel::Good;
+        QColor c = colorFor(level);
+        if (level == sim::HudLevel::Muted) {
+            c.setAlpha(110);
+        }
+        p.setBrush(c);
+        p.drawRect(QRectF(wx, wy, wheelW, wheelH));
+    }
+    p.restore();
+}
+
 void windArrow(QPainter& p, QPointF centre, double radius, double angleRad) {
     p.save();
     p.translate(centre);
@@ -412,14 +478,27 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
         }
     }
 
-    // Heights and climb (left middle); speeds, distances and wind (right middle).
+    // Heights and climb, or a ground drone's attitude and slope (left middle); speeds,
+    // distances and wind (right middle).
     const double middle = area.center().y() - line;
-    column(p, {area.left() + margin, std::max(middle, leftColumnTop)},
-           {&hud.altitudeAgl, &hud.altitudeAmsl, &hud.verticalSpeed}, Qt::AlignLeft);
-    column(p, {area.right() - margin, middle},
-           {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind}, Qt::AlignRight);
+    const double leftTop = std::max(middle, leftColumnTop);
+    if (hud.ground) {
+        const sim::HudGround& g = *hud.ground;
+        column(p, {area.left() + margin, leftTop}, {&g.pitch, &g.roll, &g.slope}, Qt::AlignLeft);
+        groundGauges(p, {area.left() + margin, leftTop + 3.0 * line + 4.0 * options.scale}, g,
+                     options.scale);
+        column(p, {area.right() - margin, middle},
+               {&hud.speed, &g.slip, &g.odometer, &hud.home, &hud.pilotDistance, &hud.wind},
+               Qt::AlignRight);
+    } else {
+        column(p, {area.left() + margin, leftTop},
+               {&hud.altitudeAgl, &hud.altitudeAmsl, &hud.verticalSpeed}, Qt::AlignLeft);
+        column(p, {area.right() - margin, middle},
+               {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind}, Qt::AlignRight);
+    }
     if (hud.windArrowRad) {
-        windArrow(p, {area.right() - margin - 14.0 * options.scale, middle + 5.0 * line},
+        const double rows = hud.ground ? 7.0 : 5.0;
+        windArrow(p, {area.right() - margin - 14.0 * options.scale, middle + rows * line},
                   12.0 * options.scale, *hud.windArrowRad);
     }
 

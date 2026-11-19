@@ -36,7 +36,8 @@ void main() {
     vec3 refl = reflect(-v, n);
     refl.y = max(refl.y, 0.01);
     vec3 sky = skyLuminance(normalize(refl), cameraRadius());
-    vec3 body = vec3(0.010, 0.025, 0.030) / PI * surfaceIrradiance(r, vec3(0.0, 1.0, 0.0));
+    vec3 body = vec3(0.010, 0.025, 0.030) / PI *
+                (surfaceIrradiance(r, vec3(0.0, 1.0, 0.0)) + spotIrradiance(v_rel, vec3(0.0, 1.0, 0.0)));
     vec3 luminance = mix(body, sky, fresnel) + fresnel *
         (glint(r, n, v, u_sunDirLux, u_sunColorRadius) + glint(r, n, v, u_moonDirLux, u_moonColorRadius));
     o_color = finishSurface(luminance, v_rel);

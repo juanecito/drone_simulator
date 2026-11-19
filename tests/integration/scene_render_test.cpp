@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <numbers>
 #include <span>
 #include <utility>
 #include <vector>
@@ -136,7 +138,8 @@ protected:
     // Renders from @p camera with @p objects; converges the exposure over several seconds of
     // simulated time.
     QImage renderScene(const char* utc, const graphics::Camera& camera,
-                       std::span<const graphics::DrawItem> objects) {
+                       std::span<const graphics::DrawItem> objects,
+                       std::span<const graphics::SpotLight> lights = {}) {
         const auto time = astro::parseUtc(utc);
         EXPECT_TRUE(time.has_value());
         const geo::Geodetic observer{40.4, -3.7, 650.0};  // Madrid.
@@ -152,6 +155,7 @@ protected:
         input.terrain.waterLevelM = -40.0;
         input.exposure = exposure_;
         input.objects = objects;
+        input.lights = lights;
 
         std::vector<std::shared_ptr<const terrain::ChunkMesh>> chunks;
         for (int i = 0; i < 200; ++i) {
@@ -401,6 +405,35 @@ TEST_F(SceneRenderTest, MoonlessNightIsDarkWithStars) {
         }
     }
     EXPECT_GT(stars, 5) << "stars should be visible";
+}
+
+TEST_F(SceneRenderTest, HeadlightLightsTheGroundAtNight) {
+    // FR-GFX-08d: a spot light 3 m above the ground, aimed straight down, on a moonless night.
+    const double ground = source_->height(0.0, 0.0);
+    graphics::SpotLight lamp;
+    lamp.position = {0.0, ground + 3.0, 0.0};
+    lamp.direction = {0.0, -1.0, 0.0};
+    lamp.color = graphics::headlightColor();
+    lamp.intensityCd = 400.0;  // ≈ 44 lux under it.
+    lamp.innerAngleRad = 10.0 * std::numbers::pi / 180.0;
+    lamp.outerAngleRad = 25.0 * std::numbers::pi / 180.0;
+    const std::array<graphics::SpotLight, 1> lights{lamp};
+    const graphics::Camera camera =
+        graphics::cameraFromAxes({0.0, ground + 6.0, 0.0}, {0.0, -1.0, 0.0}, {0.0, 0.0, -1.0}, 0.9);
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 0.0};
+    const QImage dark = renderScene("2026-08-12T23:30:00Z", camera, {});
+    const QImage lit = renderScene("2026-08-12T23:30:00Z", camera, {}, lights);
+    exposure_ = {};
+    save(lit, "headlight.png");
+    EXPECT_EQ(renderer_->lastStats().spotLights, 1);
+    const Luma centreDark = average(dark, 0.45, 0.45, 0.55, 0.55);
+    const Luma centreLit = average(lit, 0.45, 0.45, 0.55, 0.55);
+    EXPECT_GT(centreLit.mean, centreDark.mean + 40.0)
+        << "dark " << centreDark.mean << " lit " << centreLit.mean;
+    // Outside the beam (the image corners) the night is unchanged.
+    const Luma cornerDark = average(dark, 0.0, 0.0, 0.1, 0.1);
+    const Luma cornerLit = average(lit, 0.0, 0.0, 0.1, 0.1);
+    EXPECT_NEAR(cornerLit.mean, cornerDark.mean, 2.0);
 }
 
 TEST_F(SceneRenderTest, ManualExposureIsApplied) {

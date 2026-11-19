@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Objects: Lambert diffuse plus a soft plastic highlight under sun, moon and sky light, with
-// shadows, emission (LEDs) and aerial perspective. Translucent parts (propeller blur discs)
+// shadows, local spot lights (headlights), emission (LEDs) and aerial perspective. Translucent parts (propeller blur discs)
 // are blended over the opaque scene.
 
 #include "common.glsl"
@@ -38,7 +38,7 @@ void main() {
     vec3 albedo = v_color.rgb * u_tint.rgb;
     float r = surfaceRadius(v_rel.y);
     float visibility = shadowVisibility(v_rel, n);
-    vec3 irradiance = surfaceIrradianceShadowed(r, n, visibility);
+    vec3 irradiance = surfaceIrradianceShadowed(r, n, visibility) + spotIrradiance(v_rel, n);
     vec3 lum = albedo / PI * irradiance;
     bool sunCasts = s_texel.w < 0.5;
     lum += highlight(r, n, v, u_sunDirLux, u_sunColorRadius, sunCasts ? visibility : 1.0);
