@@ -16,9 +16,17 @@ double approach(double value, double target, double step) noexcept {
     return value < target ? std::min(value + step, target) : std::max(value - step, target);
 }
 
-double axisTarget(std::uint32_t keys, FlightKey negative, FlightKey positive) noexcept {
-    return (held(keys, positive) ? KeyboardControl::kDeflection : 0.0) -
-           (held(keys, negative) ? KeyboardControl::kDeflection : 0.0);
+double axisTarget(std::uint32_t keys, FlightKey negative, FlightKey positive,
+                  double deflection = KeyboardControl::kDeflection) noexcept {
+    return (held(keys, positive) ? deflection : 0.0) - (held(keys, negative) ? deflection : 0.0);
+}
+
+// Ground: either key of a pair (letters or arrows) moves the control.
+double pairTarget(std::uint32_t keys, FlightKey negativeA, FlightKey negativeB, FlightKey positiveA,
+                  FlightKey positiveB, double deflection) noexcept {
+    const bool positive = held(keys, positiveA) || held(keys, positiveB);
+    const bool negative = held(keys, negativeA) || held(keys, negativeB);
+    return (positive ? deflection : 0.0) - (negative ? deflection : 0.0);
 }
 
 }  // namespace
@@ -42,6 +50,18 @@ ControlInputs KeyboardControl::update(std::uint32_t keys, double dt) {
         state_.throttle =
             std::clamp(state_.throttle + (up ? rate : 0.0) - (down ? rate : 0.0), 0.0, 1.0);
     }
+    // Ground controls.
+    state_.drive =
+        approach(state_.drive,
+                 pairTarget(keys, FlightKey::ThrottleDown, FlightKey::PitchBack,
+                            FlightKey::ThrottleUp, FlightKey::PitchForward, kDriveDeflection),
+                 step);
+    state_.steering =
+        approach(state_.steering,
+                 pairTarget(keys, FlightKey::YawLeft, FlightKey::RollLeft, FlightKey::YawRight,
+                            FlightKey::RollRight, kSteeringDeflection),
+                 step);
+    state_.brake = held(keys, FlightKey::Brake);
     state_.linkValid = true;
     state_.source = InputSource::Keyboard;
     return state_;

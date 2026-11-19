@@ -38,9 +38,11 @@ class SimulationController;
 /// In the Chase camera two insets in the bottom corners show the vehicle from straight above
 /// (north up) and from right behind its nose.
 ///
-/// Vehicle cameras (FR-IN-05): `W`/`S` throttle, `A`/`D` yaw, arrows pitch and roll, `Space`
-/// arms or disarms, `1`–`4` select the flight mode, `L` the lights. Always: `C` next camera,
-/// `P` pause or resume, `R` reset the vehicle.
+/// Vehicle cameras (FR-IN-05): aerial drones: `W`/`S` throttle, `A`/`D` yaw, arrows pitch
+/// and roll, `Space` arms or disarms; ground drones: `W`/`S` (or up/down) forward and reverse,
+/// `A`/`D` (or left/right) steer, `Space` brakes while held. Both: `Enter` arms or disarms,
+/// `1`–`4` select the flight or drive mode, `L` the lights. Always: `C` next camera, `P`
+/// pause or resume, `R` reset the vehicle.
 class Viewport final : public QOpenGLWidget {
     Q_OBJECT
 

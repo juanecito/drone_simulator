@@ -32,7 +32,6 @@
 namespace ds::app {
 namespace {
 
-constexpr const char* kVehicleType = "aerial";
 constexpr int kPollMs = 30;
 
 // Mapping combo entries: saved profiles carry their row id, presets a negative code.
@@ -41,6 +40,10 @@ enum PresetCode : int {
     kRadioTaer = -2,
     kGamepadMode2 = -3,
     kGamepadMode1 = -4,
+    kGroundRadioAetr = -5,
+    kGroundRadioTaer = -6,
+    kGroundGamepadTriggers = -7,
+    kGroundGamepadSticks = -8,
 };
 
 QString fromStd(const std::string& text) { return QString::fromStdString(text); }
@@ -139,11 +142,16 @@ void CalibrationDialog::updatePrompt() {
 ControlsPanel::ControlsPanel(SimulationController& simulation, SettingsController* settings,
                              QWidget* parent)
     : QWidget(parent), simulation_(&simulation), settings_(settings) {
+    vehicle_ = simulation_->vehicleControls();
+    working_.vehicle = vehicle_;
     if (simulation_->joystickMapping()) {
         working_ = *simulation_->joystickMapping();
     }
     buildUi();
     refreshDevices();
+    // Each vehicle type has its own mappings (FR-IN-03a): follow the vehicle being flown.
+    connect(simulation_, &SimulationController::profileChanged, this,
+            &ControlsPanel::onVehicleChanged);
     timer_ = new QTimer(this);
     connect(timer_, &QTimer::timeout, this, &ControlsPanel::poll);
     timer_->start(kPollMs);
@@ -157,6 +165,9 @@ void ControlsPanel::buildUi() {
     auto* layout = new QVBoxLayout(box);
 
     auto* form = new QFormLayout;
+    vehicleLabel_ = new QLabel;
+    vehicleLabel_->setObjectName(QStringLiteral("ControlsVehicleLabel"));
+    form->addRow(tr("Vehicle:"), vehicleLabel_);
     device_ = new QComboBox;
     device_->setObjectName(QStringLiteral("DeviceCombo"));
     connect(device_, &QComboBox::activated, this, &ControlsPanel::onDeviceChosen);
@@ -192,11 +203,10 @@ void ControlsPanel::buildUi() {
     grid->addWidget(new QLabel(tr("<b>Expo</b>")), 0, 3);
     grid->addWidget(new QLabel(tr("<b>Deadzone</b>")), 0, 4);
     grid->addWidget(new QLabel(tr("<b>Live</b>")), 0, 5);
-    const std::array<QString, input::kChannelCount> names{tr("Throttle"), tr("Roll"), tr("Pitch"),
-                                                          tr("Yaw")};
     for (std::size_t i = 0; i < input::kChannelCount; ++i) {
         ChannelRow& r = rows_[i];
         const int row = static_cast<int>(i) + 1;
+        r.name = new QLabel;
         r.axis = new QLabel;
         r.inverted = new QCheckBox;
         r.expo = new QDoubleSpinBox;
@@ -208,11 +218,10 @@ void ControlsPanel::buildUi() {
         r.deadzone->setSingleStep(0.01);
         r.deadzone->setDecimals(2);
         r.bar = new QProgressBar;
-        r.bar->setRange(i == 0 ? 0 : -100, 100);
         r.bar->setFormat(QStringLiteral("%v"));
         r.bar->setMaximumHeight(16);
         r.bar->setObjectName(QStringLiteral("LiveBar%1").arg(row));
-        grid->addWidget(new QLabel(names[i]), row, 0);
+        grid->addWidget(r.name, row, 0);
         grid->addWidget(r.axis, row, 1);
         grid->addWidget(r.inverted, row, 2);
         grid->addWidget(r.expo, row, 3);
@@ -224,6 +233,7 @@ void ControlsPanel::buildUi() {
     }
     grid->setColumnStretch(5, 1);
     layout->addLayout(grid);
+    updateChannelLabels();
 
     status_ = new QLabel;
     status_->setObjectName(QStringLiteral("InputStatusLabel"));
@@ -301,6 +311,11 @@ void ControlsPanel::reloadMappings() {
     for (QWidget* w : std::initializer_list<QWidget*>{mapping_, calibrate_, save_, delete_}) {
         w->setEnabled(joystick);
     }
+    // The wizard calibrates aerial sticks; ground mappings start from a preset.
+    calibrate_->setEnabled(joystick && !ground());
+    calibrate_->setToolTip(ground() ? tr("Calibration of ground mappings is not available yet: "
+                                         "start from a preset and adjust the channels.")
+                                    : QString());
     for (ChannelRow& r : rows_) {
         r.inverted->setEnabled(joystick);
         r.expo->setEnabled(joystick);
@@ -319,7 +334,7 @@ void ControlsPanel::reloadMappings() {
                            .get();
         if (records) {
             for (const auto& r : *records) {
-                if (r.vehicleType == kVehicleType && r.id) {
+                if (r.vehicleType == input::vehicleControlsName(vehicle_) && r.id) {
                     mapping_->addItem(fromStd(r.name), QVariant::fromValue(*r.id));
                 }
             }
@@ -327,10 +342,18 @@ void ControlsPanel::reloadMappings() {
             log::warn("Cannot list input profiles: {}", records.error().message);
         }
     }
-    mapping_->addItem(tr("Preset: radio, AETR"), static_cast<int>(kRadioAetr));
-    mapping_->addItem(tr("Preset: radio, TAER"), static_cast<int>(kRadioTaer));
-    mapping_->addItem(tr("Preset: gamepad, mode 2"), static_cast<int>(kGamepadMode2));
-    mapping_->addItem(tr("Preset: gamepad, mode 1"), static_cast<int>(kGamepadMode1));
+    if (ground()) {
+        mapping_->addItem(tr("Preset: gamepad, triggers"),
+                          static_cast<int>(kGroundGamepadTriggers));
+        mapping_->addItem(tr("Preset: gamepad, sticks"), static_cast<int>(kGroundGamepadSticks));
+        mapping_->addItem(tr("Preset: radio, AETR"), static_cast<int>(kGroundRadioAetr));
+        mapping_->addItem(tr("Preset: radio, TAER"), static_cast<int>(kGroundRadioTaer));
+    } else {
+        mapping_->addItem(tr("Preset: radio, AETR"), static_cast<int>(kRadioAetr));
+        mapping_->addItem(tr("Preset: radio, TAER"), static_cast<int>(kRadioTaer));
+        mapping_->addItem(tr("Preset: gamepad, mode 2"), static_cast<int>(kGamepadMode2));
+        mapping_->addItem(tr("Preset: gamepad, mode 1"), static_cast<int>(kGamepadMode1));
+    }
 
     // Show the mapping in use for this device, else its first saved profile or a preset.
     const auto& active = simulation_->joystickMapping();
@@ -348,8 +371,9 @@ void ControlsPanel::reloadMappings() {
         }
     }
     if (mapping_->itemData(0).toLongLong() < 0) {
-        mapping_->setCurrentIndex(
-            mapping_->findData(static_cast<int>(gamepad ? kGamepadMode2 : kRadioAetr)));
+        const int preset = ground() ? (gamepad ? kGroundGamepadTriggers : kGroundRadioAetr)
+                                    : (gamepad ? kGamepadMode2 : kRadioAetr);
+        mapping_->setCurrentIndex(mapping_->findData(preset));
     }
     onMappingChosen();
 }
@@ -367,20 +391,27 @@ void ControlsPanel::onMappingChosen() {
         case kRadioTaer: m = input::radioMapping("TAER"); break;
         case kGamepadMode2: m = input::gamepadMapping(2); break;
         case kGamepadMode1: m = input::gamepadMapping(1); break;
+        case kGroundRadioAetr: m = input::groundRadioMapping("AETR"); break;
+        case kGroundRadioTaer: m = input::groundRadioMapping("TAER"); break;
+        case kGroundGamepadTriggers: m = input::groundGamepadMapping(true); break;
+        case kGroundGamepadSticks: m = input::groundGamepadMapping(false); break;
         default: {
             if (settings_ == nullptr) {
                 break;
             }
             const std::string name = mapping_->currentText().toStdString();
             auto record = settings_->storage()
-                              .submit([g = *guid, name](storage::DbConnection& c) {
+                              .submit([g = *guid, name, type = vehicle_](storage::DbConnection& c) {
                                   storage::InputProfileStore store(c);
-                                  return store.find(g, kVehicleType, name);
+                                  return store.find(g, input::vehicleControlsName(type), name);
                               })
                               .get();
             if (record && *record) {
                 if (auto json = common::parseJson((*record)->mappingJson)) {
                     m = input::InputMapping::fromJson(*json);
+                    if (m) {
+                        m->vehicle = vehicle_;  // The table's type (older rows have none).
+                    }
                 }
             }
             break;
@@ -442,11 +473,7 @@ void ControlsPanel::poll() {
     input::JoystickService* js = simulation_->joysticks();
     if (!guid || js == nullptr) {
         // Keyboard: show what the simulation receives.
-        const input::ControlInputs& c = simulation_->snapshot().controls;
-        const std::array<double, 4> v{c.throttle, c.roll, c.pitch, c.yaw};
-        for (std::size_t i = 0; i < input::kChannelCount; ++i) {
-            rows_[i].bar->setValue(percent(v[i]));
-        }
+        showLive(simulation_->snapshot().controls, nullptr);
         return;
     }
     const input::RawJoystickState raw = js->state(*guid);
@@ -454,18 +481,82 @@ void ControlsPanel::poll() {
         input::mapControls(working_, raw, previousRaw_, previousControls_);
     previousRaw_ = raw;
     previousControls_ = c;
-    const std::array<double, 4> v{c.throttle, c.roll, c.pitch, c.yaw};
+    showLive(c, &raw);
+}
+
+void ControlsPanel::showLive(const input::ControlInputs& c, const input::RawJoystickState* raw) {
+    std::array<double, 4> v{c.throttle, c.roll, c.pitch, c.yaw};
+    if (ground()) {
+        // Drive (sum of the stick and the triggers), steering, then each trigger.
+        auto trigger = [&](input::GroundChannel ch) {
+            const input::AxisCalibration& cal = working_.channels[static_cast<std::size_t>(ch)];
+            if (raw == nullptr || cal.axis < 0 ||
+                static_cast<std::size_t>(cal.axis) >= raw->axes.size()) {
+                return 0.0;
+            }
+            return input::calibrateTrigger(cal, raw->axes[static_cast<std::size_t>(cal.axis)]);
+        };
+        v = {c.drive, c.steering, trigger(input::GroundChannel::Forward),
+             trigger(input::GroundChannel::Reverse)};
+    }
     for (std::size_t i = 0; i < input::kChannelCount; ++i) {
         rows_[i].bar->setValue(percent(v[i]));
     }
 }
 
+void ControlsPanel::updateChannelLabels() {
+    const std::array<QString, input::kChannelCount> names =
+        ground() ? std::array<QString, input::kChannelCount>{tr("Drive"), tr("Steering"),
+                                                             tr("Forward trigger"),
+                                                             tr("Reverse trigger")}
+                 : std::array<QString, input::kChannelCount>{tr("Throttle"), tr("Roll"),
+                                                             tr("Pitch"), tr("Yaw")};
+    for (std::size_t i = 0; i < input::kChannelCount; ++i) {
+        rows_[i].name->setText(names[i]);
+        // Aerial throttle and ground triggers go from 0; the others are centred.
+        const bool fromZero = ground() ? i >= 2 : i == 0;
+        rows_[i].bar->setRange(fromZero ? 0 : -100, 100);
+    }
+    vehicleLabel_->setText(ground() ? tr("Ground drone (drive and steering)")
+                                    : tr("Aerial drone (sticks)"));
+}
+
+void ControlsPanel::onVehicleChanged() {
+    const input::VehicleControls now = simulation_->vehicleControls();
+    if (now == vehicle_) {
+        return;
+    }
+    vehicle_ = now;
+    working_ = input::InputMapping{};
+    working_.vehicle = vehicle_;
+    previousRaw_ = {};
+    previousControls_ = {};
+    updateChannelLabels();
+    // Show the device of this type's mapping, if any.
+    const auto& active = simulation_->joystickMapping();
+    if (active) {
+        const int index = device_->findData(fromStd(active->deviceGuid));
+        if (index >= 0) {
+            device_->setCurrentIndex(index);
+        }
+    }
+    reloadMappings();
+    if (!active || active->deviceGuid != selectedGuid().value_or(std::string())) {
+        onMappingChosen();
+    }
+    updateStatus();
+}
+
 void ControlsPanel::use() {
+    common::Result<void> used;
     if (const auto guid = selectedGuid()) {
         readChannels();
-        simulation_->setJoystickMapping(working_);
+        used = simulation_->setJoystickMapping(working_);
     } else {
-        simulation_->setJoystickMapping(std::nullopt);
+        used = simulation_->setJoystickMapping(std::nullopt);
+    }
+    if (!used) {
+        QMessageBox::warning(this, tr("Controls"), fromStd(used.error().message));
     }
     updateStatus();
 }
@@ -473,7 +564,7 @@ void ControlsPanel::use() {
 void ControlsPanel::calibrate() {
     const auto guid = selectedGuid();
     input::JoystickService* js = simulation_->joysticks();
-    if (!guid || js == nullptr) {
+    if (!guid || js == nullptr || ground()) {
         return;
     }
     int axes = 0;
@@ -513,8 +604,9 @@ void ControlsPanel::save() {
     readChannels();
     working_.name = name.toStdString();
     working_.deviceGuid = *guid;
+    working_.vehicle = vehicle_;
     const storage::InputProfileRecord record{.deviceGuid = *guid,
-                                             .vehicleType = kVehicleType,
+                                             .vehicleType = input::vehicleControlsName(vehicle_),
                                              .name = working_.name,
                                              .mappingJson = working_.toJson().dump()};
     auto saved = settings_->storage()
@@ -534,7 +626,7 @@ void ControlsPanel::save() {
     delete_->setEnabled(true);
     // A mapping being flown is updated at once.
     if (simulation_->joystickMapping() && simulation_->joystickMapping()->deviceGuid == *guid) {
-        simulation_->setJoystickMapping(working_);
+        (void)simulation_->setJoystickMapping(working_);
     }
     showMapping();
 }

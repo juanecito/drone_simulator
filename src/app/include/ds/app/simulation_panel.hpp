@@ -5,6 +5,8 @@
 
 #include <QWidget>
 
+#include <array>
+
 class QComboBox;
 class QLabel;
 class QListWidget;
@@ -49,6 +51,9 @@ private:
     QProgressBar* roll_ = nullptr;
     QProgressBar* pitch_ = nullptr;
     QProgressBar* yaw_ = nullptr;
+    std::array<QLabel*, 4> barLabels_{};  // Throttle/drive, roll/steering, pitch, yaw.
+    QLabel* keys_ = nullptr;
+    bool groundShown_ = false;
     QLabel* telemetry_ = nullptr;
     QLabel* stats_ = nullptr;
     QListWidget* events_ = nullptr;

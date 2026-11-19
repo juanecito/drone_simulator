@@ -17,6 +17,7 @@
 #include "ds/graphics/exposure.hpp"
 #include "ds/graphics/image.hpp"
 #include "ds/graphics/mesh.hpp"
+#include "ds/graphics/rover_model.hpp"
 #include "ds/graphics/shader_source.hpp"
 #include "ds/graphics/shadow_cascades.hpp"
 #include "ds/graphics/sky_model.hpp"
@@ -486,6 +487,73 @@ TEST(DroneModel, PropellersSpinAndBlur) {
     EXPECT_GT(c[1].tint.r, c[1].tint.b);   // Front: orange.
     EXPECT_FALSE(c[3].mesh->transparent);  // Slow: blades.
     EXPECT_GT(c[1].tint.a, c[2].tint.a - 1e-6F);
+}
+
+// --- Rover model (FR-GFX-20) ------------------------------------------------------------------
+
+RoverModel rover() {
+    RoverShape s;
+    for (const double y : {-0.15, 0.15}) {
+        for (const double x : {0.13, -0.13}) {
+            s.wheelHubs.emplace_back(x, y, 0.045);
+        }
+    }
+    s.staticCompressionM = 0.012;
+    return RoverModel(s);
+}
+
+TEST(RoverModel, WheelsTurnAndFollowTheSuspension) {
+    const RoverModel model = rover();
+    RoverVisualState state;
+    state.orientation = levelNorth();
+    state.compression = {0.012, 0.012, 0.012, 0.012};
+    std::vector<DrawItem> a;
+    model.appendDrawItems(state, a);
+    ASSERT_EQ(a.size(), 1U + 4U + 4U);  // Body, wheels, two headlights and two tail lights.
+    // At the static compression the hubs are where the profile puts them.
+    EXPECT_NEAR(glm::length(model.hubAt(0, 0.012) - glm::dvec3(0.13, -0.15, 0.045)), 0.0, 1e-12);
+    // More compression lifts the wheel towards the body (body z is down).
+    EXPECT_NEAR(model.hubAt(0, 0.022).z, 0.035, 1e-12);
+    EXPECT_NEAR(model.hubAt(0, 0.0).z, 0.057, 1e-12);  // Full droop off the ground.
+
+    state.wheelAngle = {0.4, 0.4, 0.4, 0.4};
+    std::vector<DrawItem> b;
+    model.appendDrawItems(state, b);
+    for (std::size_t i = 1; i <= 4; ++i) {
+        // Rotation about the axle (body y).
+        const glm::dquat delta = glm::inverse(a[i].orientation) * b[i].orientation;
+        EXPECT_NEAR(glm::angle(delta), 0.4, 1e-9);
+        EXPECT_NEAR(std::abs(glm::axis(delta).y), 1.0, 1e-9);
+        // Rolling forward moves the top of the wheel forward (body +x).
+        const glm::dvec3 top = b[i].orientation * glm::dvec3(0, 0, -0.065);
+        const glm::dvec3 topBefore = a[i].orientation * glm::dvec3(0, 0, -0.065);
+        const glm::dvec3 forward = levelNorth() * glm::dvec3(1, 0, 0);
+        EXPECT_GT(glm::dot(top - topBefore, forward), 0.0);
+    }
+}
+
+TEST(RoverModel, LightsAndBrakeLights) {
+    const RoverModel model = rover();
+    RoverVisualState state;
+    state.lights = false;
+    std::vector<DrawItem> off;
+    model.appendDrawItems(state, off);
+    for (std::size_t i = 5; i < off.size(); ++i) {
+        EXPECT_FLOAT_EQ(off[i].emissiveScale, 0.0F);
+        EXPECT_FALSE(off[i].castsShadow);
+    }
+    state.braking = true;
+    std::vector<DrawItem> braking;
+    model.appendDrawItems(state, braking);
+    // Lamps alternate headlight, tail light per side: the tail lights glow while braking.
+    EXPECT_FLOAT_EQ(braking[5].emissiveScale, 0.0F);
+    EXPECT_GT(braking[6].emissiveScale, 1.0F);
+    state.lights = true;
+    state.braking = false;
+    std::vector<DrawItem> on;
+    model.appendDrawItems(state, on);
+    EXPECT_FLOAT_EQ(on[5].emissiveScale, 1.0F);
+    EXPECT_LT(on[6].emissiveScale, braking[6].emissiveScale);
 }
 
 // --- Camera roll and rig (FR-GFX-05) --------------------------------------------------------

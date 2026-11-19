@@ -408,7 +408,8 @@ weather, so missions stay fair and repeatable (FR-X-05).
 
 Default keyboard mapping (Mode 2): `W/S` throttle, `A/D` yaw, arrows pitch/roll,
 `Space` arm/disarm, `1–4` flight modes, `R` reset, `P` pause, `C` cycle camera.
-Ground drone: `W/S` forward/reverse, `A/D` steer, `Space` brake, other keys as above.
+Ground drone: `W/S` forward/reverse, `A/D` steer, `Space` brake (held), `Enter` arm/disarm
+(also for aerial drones), other keys as above.
 
 ### 4.4 Graphics Engine (`core/graphics`)
 
@@ -1784,14 +1785,44 @@ so Markdown pages appear in the generated site.
   and 1 (the default) and Speed control for 2 and 3; Heading hold (S), traction control (S),
   regenerative braking (S) and the waypoint autopilot (C) are not in this step.
 - **Pilot controls:** `ControlInputs` and `PilotCommand` gain `drive` (−1 … 1), `steering` and
-  `brake`; the keyboard and joystick mappings for ground drones are step 2.
-- **Next steps:** ground input mapping (keyboard `W/S`, `A/D`, `Space` brake; gamepad
-  triggers) and arming key; vehicle type in the Vehicle tab (ground profiles, parameters and
-  derived figures), storage of ground profiles; ground visuals (body, rotating wheels,
-  suspension travel, headlights and tail lights) and cameras; ground HUD (speed, heading,
-  pitch/roll with the rollover warning from the load transfer, slope, wheel slip, drive mode);
-  ramps and bridges as driving surfaces; the parking-zone item and objective; at least four
-  ground missions.
+  `brake`.
+- **Step 2 — Driving the rover in the app (done):**
+  - *Keyboard:* `W/S` (or up/down) drive forward and reverse and spring back to neutral like
+    the trigger of an RC car transmitter (full deflection in 0.33 s); `A/D` (or left/right)
+    steer to ±0.6; `Space` brakes while held; `Enter` arms or disarms either vehicle type
+    (`Space` keeps arming aerial drones). `1`–`2` select Manual, `3`–`4` Speed control.
+  - *Joystick mappings per vehicle type (FR-IN-03a):* an `InputMapping` carries its vehicle
+    type (`vehicleType` in its JSON; older mappings without it are aerial) and stores the
+    four channel slots as drive (self-centring stick), steering, forward trigger and reverse
+    trigger; the triggers are added to and subtracted from the drive stick. A `brake` switch
+    function brakes while its button is held. Presets: gamepad with the triggers (right
+    forward, left reverse, left stick steers) or with the sticks (left stick drive, right
+    stick steering), both with A = brake, start = arm, right shoulder = Manual/Speed control,
+    Y = lights; and RC transmitter AETR/TAER (aileron steers, elevator drives, arm on axis 4,
+    mode on axis 5). The calibration wizard stays aerial-only for now.
+  - *Vehicle tab:* type selector (aerial / ground); the profile list, parameter editor
+    (`groundParameters()`) and computed figures (FR-GND-13: top speed, 0 → 90 % time, stall
+    torque, static rollover angles, range and endurance, steepest slope per material) follow
+    the type. The type is locked during a mission.
+  - *Simulation adapter:* the flown profile is a `VehicleProfile`; built-in ground profiles
+    load from `assets/vehicles/ground/` and are synchronised into `vehicle_profiles` with
+    `vehicle_type = 'ground'`; user profiles of both types are saved there. Settings remember
+    the vehicle type (`sim.vehicleType`), one profile per type (`sim.vehicleProfile`,
+    `sim.groundProfile`) and one joystick mapping per type (`input.activeProfile`,
+    `input.activeGroundProfile`). Sessions are recorded with their vehicle type. Missions
+    check that the profile matches the mission's vehicle type, and the briefing offers only
+    profiles of that type (ground missions stay unplayable until their step).
+  - *Interim visuals:* a procedural rover model (`graphics::RoverModel`: body, wheels that
+    turn with the wheel angles and follow the suspension compression, emissive headlights
+    and tail lights that brighten when braking); the chase distance is 4 body lengths. The
+    HUD shows the drive mode and the drive command (or BRAKE); the Simulation tab shows
+    drive/steering bars and ground telemetry (speed and odometry, pitch, roll, slope and
+    surface, wheel slip, motor commands).
+- **Next steps:** ground visuals finished (lights that illuminate the scene, steering of
+  Ackermann layouts later) and the ground HUD (heading, pitch/roll with the rollover warning
+  from the load transfer, slope, wheel slip indicator); ramps and bridges as driving
+  surfaces; the parking-zone item and objective; at least four ground missions; calibration
+  wizard for ground mappings.
 
 ---
 

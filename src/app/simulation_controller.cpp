@@ -34,7 +34,35 @@ constexpr double kMinRecordedFlightS = 1.0;
 constexpr double kChaseArmLengths = 14.0;
 constexpr double kMinChaseDistanceM = 1.5;
 constexpr double kMaxChaseDistanceM = 6.0;
-constexpr const char* kVehicleType = "aerial";
+constexpr double kChaseRoverLengths = 4.0;
+
+const char* typeName(physics::VehicleType type) {
+    return type == physics::VehicleType::Ground ? "ground" : "aerial";
+}
+
+const char* profileSettingKey(physics::VehicleType type) {
+    return type == physics::VehicleType::Ground ? sim_settings_keys::kGroundProfile
+                                                : sim_settings_keys::kProfile;
+}
+
+const char* joystickSettingKey(physics::VehicleType type) {
+    return type == physics::VehicleType::Ground ? sim_settings_keys::kGroundJoystick
+                                                : sim_settings_keys::kJoystick;
+}
+
+const char* defaultProfileKey(physics::VehicleType type) {
+    return type == physics::VehicleType::Ground ? SimulationController::kDefaultGroundProfile
+                                                : SimulationController::kDefaultProfile;
+}
+
+// A JSON string: the array's only element.
+QByteArray jsonString(const QString& text) {
+    return QJsonDocument(QJsonArray{text}).toJson(QJsonDocument::Compact).mid(1).chopped(1);
+}
+
+void setProfileKey(physics::VehicleProfile& profile, std::string key) {
+    std::visit([&](auto& p) { p.key = std::move(key); }, profile);
+}
 
 QString slug(const QString& name) {
     QString s = name.trimmed().toLower();
@@ -64,8 +92,8 @@ std::optional<graphics::CameraMode> cameraModeFromKey(const QString& key) {
 }
 
 // Validates a profile the same way a file or a database row is validated.
-common::Result<physics::AerialProfile> validated(const physics::AerialProfile& profile) {
-    return physics::aerialProfileFromJson(physics::aerialProfileToJson(profile));
+common::Result<physics::VehicleProfile> validated(const physics::VehicleProfile& profile) {
+    return physics::vehicleProfileFromJson(physics::vehicleProfileToJson(profile));
 }
 
 // Nose direction (world) for a heading clockwise from north.
@@ -118,7 +146,8 @@ SimulationController::SimulationController(SceneController& scene, SettingsContr
 SimulationController::~SimulationController() {
     loop_->shutdown();
     loop_->acquireSnapshot();
-    recordSession(loop_->snapshot().stats, loop_->snapshot().profileKey);
+    recordSession(loop_->snapshot().stats, loop_->snapshot().profileKey,
+                  loop_->snapshot().telemetry.type);
     scene_->followSimulationTime(std::nullopt);
 }
 
@@ -134,29 +163,46 @@ void SimulationController::loadWindTable(const std::filesystem::path& assets) {
 }
 
 void SimulationController::loadBuiltInProfiles(const std::filesystem::path& assets) {
-    const auto dir = assets / "vehicles" / kVehicleType;
-    std::error_code ec;
-    std::vector<std::filesystem::path> files;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (entry.path().extension() == ".json") {
-            files.push_back(entry.path());
+    for (const physics::VehicleType type :
+         {physics::VehicleType::Aerial, physics::VehicleType::Ground}) {
+        const auto dir = assets / "vehicles" / typeName(type);
+        std::error_code ec;
+        std::vector<std::filesystem::path> files;
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            if (entry.path().extension() == ".json") {
+                files.push_back(entry.path());
+            }
         }
-    }
-    std::ranges::sort(files);
-    for (const auto& file : files) {
-        if (auto profile = physics::loadAerialProfile(file)) {
-            builtIn_.push_back(std::move(*profile));
-        } else {
-            log::warn("Skipping vehicle profile {}: {}", file.string(), profile.error().message);
+        std::ranges::sort(files);
+        bool found = false;
+        for (const auto& file : files) {
+            auto profile = physics::loadVehicleProfile(file);
+            if (profile && physics::profileType(*profile) != type) {
+                profile = common::makeError(std::string("not a ") + typeName(type) + " profile");
+            }
+            if (profile) {
+                builtIn_.push_back(std::move(*profile));
+                found = true;
+            } else {
+                log::warn("Skipping vehicle profile {}: {}", file.string(),
+                          profile.error().message);
+            }
         }
-    }
-    if (builtIn_.empty()) {
-        // Never run without a vehicle: fall back to the compiled-in defaults.
-        log::error("No vehicle profiles in {}; using the generic defaults", dir.string());
-        physics::AerialProfile generic;
-        generic.key = "generic";
-        generic.name = "Generic quadcopter";
-        builtIn_.push_back(std::move(generic));
+        if (!found) {
+            // Never run without a vehicle: fall back to the compiled-in defaults.
+            log::error("No vehicle profiles in {}; using the generic defaults", dir.string());
+            if (type == physics::VehicleType::Aerial) {
+                physics::AerialProfile generic;
+                generic.key = "generic";
+                generic.name = "Generic quadcopter";
+                builtIn_.emplace_back(std::move(generic));
+            } else {
+                physics::GroundProfile generic;
+                generic.key = "generic-rover";
+                generic.name = "Generic rover";
+                builtIn_.emplace_back(std::move(generic));
+            }
+        }
     }
 }
 
@@ -166,11 +212,11 @@ void SimulationController::syncBuiltInProfiles() {
     }
     std::vector<storage::VehicleProfileRecord> records;
     for (const auto& p : builtIn_) {
-        records.push_back({.key = p.key,
-                           .vehicleType = kVehicleType,
-                           .name = p.name,
+        records.push_back({.key = physics::profileKey(p),
+                           .vehicleType = typeName(physics::profileType(p)),
+                           .name = physics::profileName(p),
                            .origin = "builtin",
-                           .paramsJson = physics::aerialProfileToJson(p).dump()});
+                           .paramsJson = physics::vehicleProfileToJson(p).dump()});
     }
     auto report = settings_->storage()
                       .submit([records](storage::DbConnection& c) {
@@ -189,7 +235,9 @@ void SimulationController::syncBuiltInProfiles() {
 void SimulationController::reloadProfiles() {
     profiles_.clear();
     for (const auto& p : builtIn_) {
-        profiles_.append({QString::fromStdString(p.key), QString::fromStdString(p.name), true});
+        profiles_.append({QString::fromStdString(physics::profileKey(p)),
+                          QString::fromStdString(physics::profileName(p)), true,
+                          physics::profileType(p)});
     }
     if (settings_ == nullptr) {
         return;
@@ -197,7 +245,7 @@ void SimulationController::reloadProfiles() {
     auto records = settings_->storage()
                        .submit([](storage::DbConnection& c) {
                            storage::VehicleProfileStore store(c);
-                           return store.list(kVehicleType);
+                           return store.list("");
                        })
                        .get();
     if (!records) {
@@ -206,42 +254,70 @@ void SimulationController::reloadProfiles() {
     }
     for (const auto& r : *records) {
         if (r.origin == "user") {
-            profiles_.append(
-                {QString::fromStdString(r.key), QString::fromStdString(r.name), false});
+            profiles_.append({QString::fromStdString(r.key), QString::fromStdString(r.name), false,
+                              r.vehicleType == "ground" ? physics::VehicleType::Ground
+                                                        : physics::VehicleType::Aerial});
         }
     }
 }
 
-void SimulationController::restoreSelections() {
-    QString key = QString::fromLatin1(kDefaultProfile);
-    if (settings_ != nullptr) {
-        if (const auto json = settings_->readJson(sim_settings_keys::kProfile)) {
-            const QJsonDocument doc = QJsonDocument::fromJson("[" + *json + "]");
-            if (const QString saved = doc.array().at(0).toString(); !saved.isEmpty()) {
-                key = saved;
-            }
-        }
-        if (const auto json = settings_->readJson(sim_settings_keys::kCameraMode)) {
-            const QJsonDocument doc = QJsonDocument::fromJson("[" + *json + "]");
-            cameraMode_ = cameraModeFromKey(doc.array().at(0).toString())
-                              .value_or(graphics::CameraMode::Free);
+QList<VehicleProfileInfo> SimulationController::profiles(physics::VehicleType type) const {
+    QList<VehicleProfileInfo> out;
+    for (const VehicleProfileInfo& p : profiles_) {
+        if (p.type == type) {
+            out.append(p);
         }
     }
+    return out;
+}
+
+void SimulationController::restoreSelections() {
+    physics::VehicleType type = physics::VehicleType::Aerial;
+    QString key = QString::fromLatin1(kDefaultProfile);
+    if (settings_ != nullptr) {
+        auto savedString = [this](const char* settingKey) -> QString {
+            const auto json = settings_->readJson(settingKey);
+            if (!json) {
+                return {};
+            }
+            const QJsonDocument doc = QJsonDocument::fromJson("[" + *json + "]");
+            return doc.array().at(0).toString();
+        };
+        if (savedString(sim_settings_keys::kVehicleType) == QLatin1String("ground")) {
+            type = physics::VehicleType::Ground;
+        }
+        key = savedString(profileSettingKey(type));
+        if (key.isEmpty()) {
+            key = QString::fromLatin1(defaultProfileKey(type));
+        }
+        cameraMode_ = cameraModeFromKey(savedString(sim_settings_keys::kCameraMode))
+                          .value_or(graphics::CameraMode::Free);
+    }
     auto profile = profileFor(key);
+    if (profile && physics::profileType(*profile) != type) {
+        profile = common::makeError("the profile is not of the saved vehicle type");
+    }
     if (!profile) {
         log::warn("Vehicle profile {} not available: {}", key.toStdString(),
                   profile.error().message);
-        profile = profileFor(QString::fromLatin1(kDefaultProfile));
+        profile = profileFor(QString::fromLatin1(defaultProfileKey(type)));
     }
     profile_ = profile ? *profile : builtIn_.front();
     model_.reset();
+    rover_.reset();
 
-    // Joystick profile chosen last time (applied even if the device is not plugged in yet:
+    // Joystick profiles chosen last time (applied even if the device is not plugged in yet:
     // the selector falls back to the keyboard until it appears).
+    restoreJoystick(physics::VehicleType::Aerial);
+    restoreJoystick(physics::VehicleType::Ground);
+    activateJoystick();
+}
+
+void SimulationController::restoreJoystick(physics::VehicleType type) {
     if (settings_ == nullptr) {
         return;
     }
-    const auto json = settings_->readJson(sim_settings_keys::kJoystick);
+    const auto json = settings_->readJson(joystickSettingKey(type));
     if (!json) {
         return;
     }
@@ -252,9 +328,9 @@ void SimulationController::restoreSelections() {
         return;
     }
     auto record = settings_->storage()
-                      .submit([guid, name](storage::DbConnection& c) {
+                      .submit([guid, name, type](storage::DbConnection& c) {
                           storage::InputProfileStore store(c);
-                          return store.find(guid, kVehicleType, name);
+                          return store.find(guid, typeName(type), name);
                       })
                       .get();
     if (!record || !*record) {
@@ -264,13 +340,18 @@ void SimulationController::restoreSelections() {
     if (!parsed) {
         return;
     }
-    if (auto mapping = input::InputMapping::fromJson(*parsed)) {
-        mapping_ = std::move(*mapping);
-        selector_->setJoystick(mapping_);
-    } else {
+    auto mapping = input::InputMapping::fromJson(*parsed);
+    if (!mapping) {
         log::warn("Ignoring the saved joystick mapping: {}", mapping.error().message);
+        return;
     }
+    // The table's type is authoritative (older aerial rows carry no type in their JSON).
+    mapping->vehicle = type == physics::VehicleType::Ground ? input::VehicleControls::Ground
+                                                            : input::VehicleControls::Aerial;
+    mappings_[typeIndex(type)] = std::move(*mapping);
 }
+
+void SimulationController::activateJoystick() { selector_->setJoystick(joystickMapping()); }
 
 sim::GroundFunction SimulationController::groundFunction() const {
     // A private query object: the world reads it from the simulation thread.
@@ -311,7 +392,8 @@ void SimulationController::createLoop() {
                                               [selector](double dt) { return selector->poll(dt); });
     loop_->acquireSnapshot();
     lastResetCount_ = loop_->snapshot().resetCount;
-    lastProfileKey_ = profile_.key;
+    lastProfileKey_ = physics::profileKey(profile_);
+    lastVehicleType_ = vehicleType();
     updatePilotEye();
     rig_.reset({.position = loop_->snapshot().body.position,
                 .orientation = loop_->snapshot().body.orientation});
@@ -351,10 +433,10 @@ bool SimulationController::keyboardAllowed() const noexcept {
 
 // --- Profiles -------------------------------------------------------------------------------
 
-common::Result<physics::AerialProfile> SimulationController::profileFor(const QString& key) const {
+common::Result<physics::VehicleProfile> SimulationController::profileFor(const QString& key) const {
     const std::string k = key.toStdString();
     for (const auto& p : builtIn_) {
-        if (p.key == k) {
+        if (physics::profileKey(p) == k) {
             return p;
         }
     }
@@ -377,20 +459,25 @@ common::Result<physics::AerialProfile> SimulationController::profileFor(const QS
     if (!json) {
         return common::makeError("Vehicle profile " + k + ": " + json.error().message);
     }
-    auto profile = physics::aerialProfileFromJson(*json);
+    auto profile = physics::vehicleProfileFromJson(*json);
     if (!profile) {
         return common::makeError("Vehicle profile " + k + ": " + profile.error().message);
     }
-    profile->key = k;
+    setProfileKey(*profile, k);
     return profile;
 }
 
-void SimulationController::setFlownProfile(const physics::AerialProfile& profile, bool modified) {
+void SimulationController::setFlownProfile(const physics::VehicleProfile& profile, bool modified) {
+    const bool typeChanged = physics::profileType(profile) != vehicleType();
     profile_ = profile;
     modified_ = modified;
     model_.reset();
+    rover_.reset();
     loop_->post([profile](sim::World& w) { w.setProfile(profile); });
     selector_->keyboardAction(input::KeyboardAction::Reset);
+    if (typeChanged) {
+        activateJoystick();
+    }
     emit profileChanged();
 }
 
@@ -404,23 +491,58 @@ common::Result<void> SimulationController::selectProfile(const QString& key) {
     }
     setFlownProfile(*profile, false);
     if (settings_ != nullptr) {
-        // A JSON string: the array's only element.
-        settings_->writeJson(
-            sim_settings_keys::kProfile,
-            QJsonDocument(QJsonArray{key}).toJson(QJsonDocument::Compact).mid(1).chopped(1));
+        settings_->writeJson(profileSettingKey(vehicleType()), jsonString(key));
+        settings_->writeJson(sim_settings_keys::kVehicleType,
+                             jsonString(QString::fromLatin1(typeName(vehicleType()))));
     }
     return {};
 }
 
-common::Result<void> SimulationController::applyProfile(const physics::AerialProfile& profile) {
+common::Result<void> SimulationController::selectVehicleType(physics::VehicleType type) {
+    if (type == vehicleType()) {
+        return {};
+    }
+    if (mission_) {
+        return common::makeError("The vehicle is locked during a mission.");
+    }
+    QString key = QString::fromLatin1(defaultProfileKey(type));
+    if (settings_ != nullptr) {
+        if (const auto json = settings_->readJson(profileSettingKey(type))) {
+            const QJsonDocument doc = QJsonDocument::fromJson("[" + *json + "]");
+            if (const QString saved = doc.array().at(0).toString(); !saved.isEmpty()) {
+                key = saved;
+            }
+        }
+    }
+    auto profile = profileFor(key);
+    if (!profile || physics::profileType(*profile) != type) {
+        key = QString::fromLatin1(defaultProfileKey(type));
+        profile = profileFor(key);
+    }
+    if (!profile) {
+        // The compiled-in fallback of that type.
+        for (const auto& p : builtIn_) {
+            if (physics::profileType(p) == type) {
+                key = QString::fromStdString(physics::profileKey(p));
+                break;
+            }
+        }
+    }
+    return selectProfile(key);
+}
+
+common::Result<void> SimulationController::applyProfile(const physics::VehicleProfile& profile) {
     if (mission_) {
         return common::makeError("The vehicle profile is locked during a mission.");
+    }
+    if (physics::profileType(profile) != vehicleType()) {
+        return common::makeError("The edited profile is of another vehicle type.");
     }
     auto checked = validated(profile);
     if (!checked) {
         return common::makeError(checked.error().message);
     }
-    checked->key = profile_.key;
+    setProfileKey(*checked, physics::profileKey(profile_));
     setFlownProfile(*checked, true);
     return {};
 }
@@ -433,20 +555,27 @@ common::Result<QString> SimulationController::saveProfileAs(const QString& name)
     if (trimmed.isEmpty() || trimmed.size() > 80) {
         return common::makeError("A profile name must have 1 to 80 characters.");
     }
-    physics::AerialProfile p = profile_;
-    p.key = (QStringLiteral("user.") + slug(trimmed)).toStdString();
-    p.name = trimmed.toStdString();
-    p.reference.reset();  // Reference figures belong to the built-in profiles.
+    physics::VehicleProfile p = profile_;
+    const std::string key = (QStringLiteral("user.") + slug(trimmed)).toStdString();
+    std::visit(
+        [&](auto& v) {
+            v.key = key;
+            v.name = trimmed.toStdString();
+            if constexpr (std::is_same_v<std::decay_t<decltype(v)>, physics::AerialProfile>) {
+                v.reference.reset();  // Reference figures belong to the built-in profiles.
+            }
+        },
+        p);
     auto checked = validated(p);
     if (!checked) {
         return common::makeError(checked.error().message);
     }
     const storage::VehicleProfileRecord record{
-        .key = p.key,
-        .vehicleType = kVehicleType,
-        .name = p.name,
+        .key = key,
+        .vehicleType = typeName(physics::profileType(p)),
+        .name = physics::profileName(p),
         .origin = "user",
-        .paramsJson = physics::aerialProfileToJson(p).dump()};
+        .paramsJson = physics::vehicleProfileToJson(p).dump()};
     auto saved = settings_->storage()
                      .submit([record](storage::DbConnection& c) {
                          storage::VehicleProfileStore store(c);
@@ -458,11 +587,11 @@ common::Result<QString> SimulationController::saveProfileAs(const QString& name)
     }
     reloadProfiles();
     emit profilesChanged();
-    const QString key = QString::fromStdString(p.key);
-    if (auto selected = selectProfile(key); !selected) {
+    const QString savedKey = QString::fromStdString(key);
+    if (auto selected = selectProfile(savedKey); !selected) {
         return common::makeError(selected.error().message);
     }
-    return key;
+    return savedKey;
 }
 
 common::Result<void> SimulationController::deleteProfile(const QString& key) {
@@ -480,8 +609,8 @@ common::Result<void> SimulationController::deleteProfile(const QString& key) {
     }
     reloadProfiles();
     emit profilesChanged();
-    if (profile_.key == key.toStdString()) {
-        return selectProfile(QString::fromLatin1(kDefaultProfile));
+    if (physics::profileKey(profile_) == key.toStdString()) {
+        return selectProfile(QString::fromLatin1(defaultProfileKey(vehicleType())));
     }
     return {};
 }
@@ -552,15 +681,19 @@ common::Result<void> SimulationController::setTimeScale(double scale) {
 // --- Missions -------------------------------------------------------------------------------
 
 common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
-                                                        const physics::AerialProfile& profile) {
+                                                        const physics::VehicleProfile& profile) {
     if (auto reason = unplayableReason(m)) {
         return common::makeError(*reason);
+    }
+    if (physics::profileType(profile) != m.vehicle.type) {
+        return common::makeError(std::string("the mission needs a ") + typeName(m.vehicle.type) +
+                                 " vehicle");
     }
     auto checked = validated(profile);
     if (!checked) {
         return common::makeError("vehicle profile: " + checked.error().message);
     }
-    checked->key = profile.key;
+    setProfileKey(*checked, physics::profileKey(profile));
     auto scene = missionScene(m, scene_->environment());
     if (!scene) {
         return common::makeError(scene.error().message);
@@ -597,9 +730,14 @@ common::Result<void> SimulationController::startMission(const missions::MissionD
     missionHeadingRad_ = common::degToRad((*runner)->spawnHeadingDeg());
     missionPilot_ = (*runner)->pilotPosition();
     mission_ = m;
+    const bool typeChanged = physics::profileType(*checked) != vehicleType();
     profile_ = *checked;
     modified_ = false;
     model_.reset();
+    rover_.reset();
+    if (typeChanged) {
+        activateJoystick();
+    }
     home_ = missionSpawn_;
     homeHeadingRad_ = missionHeadingRad_;
     updatePilotEye();
@@ -629,7 +767,7 @@ common::Result<void> SimulationController::startMission(const missions::MissionD
     } else {
         loop_->start();
     }
-    log::info("Mission {} started with {}", m.id, profile_.key);
+    log::info("Mission {} started with {}", m.id, physics::profileKey(profile_));
     emit profileChanged();
     emit missionActiveChanged();
     return {};
@@ -689,9 +827,14 @@ void SimulationController::endMission() {
     loop_->setMissionActive(false);
     selector_->setKeyboardAllowed(true);
     selector_->keyboardAction(input::KeyboardAction::Reset);
+    const bool typeChanged = physics::profileType(freeProfile_) != vehicleType();
     profile_ = freeProfile_;
     modified_ = freeProfileModified_;
     model_.reset();
+    rover_.reset();
+    if (typeChanged) {
+        activateJoystick();
+    }
     home_ = freeHome_;
     homeHeadingRad_ = freeHeadingRad_;
     // The free-mode terrain first, then the vehicle back at its take-off point on it.
@@ -741,18 +884,24 @@ void SimulationController::keyboardAction(input::KeyboardAction action) {
     selector_->keyboardAction(action);
 }
 
-void SimulationController::setJoystickMapping(std::optional<input::InputMapping> mapping) {
-    mapping_ = std::move(mapping);
-    selector_->setJoystick(mapping_);
+common::Result<void> SimulationController::setJoystickMapping(
+    std::optional<input::InputMapping> mapping) {
+    if (mapping && mapping->vehicle != vehicleControls()) {
+        return common::makeError(std::string("the mapping is for ") +
+                                 input::vehicleControlsName(mapping->vehicle) + " drones");
+    }
+    std::optional<input::InputMapping>& slot = mappings_[typeIndex(vehicleType())];
+    slot = std::move(mapping);
+    activateJoystick();
     if (settings_ != nullptr) {
         const QJsonObject o =
-            mapping_ ? QJsonObject{{QStringLiteral("guid"),
-                                    QString::fromStdString(mapping_->deviceGuid)},
-                                   {QStringLiteral("name"), QString::fromStdString(mapping_->name)}}
-                     : QJsonObject{};
-        settings_->writeJson(sim_settings_keys::kJoystick,
+            slot ? QJsonObject{{QStringLiteral("guid"), QString::fromStdString(slot->deviceGuid)},
+                               {QStringLiteral("name"), QString::fromStdString(slot->name)}}
+                 : QJsonObject{};
+        settings_->writeJson(joystickSettingKey(vehicleType()),
                              QJsonDocument(o).toJson(QJsonDocument::Compact));
     }
+    return {};
 }
 
 input::InputSource SimulationController::activeInputSource() const noexcept {
@@ -794,11 +943,17 @@ void SimulationController::onEnvironmentChanged() {
 
 graphics::FpvCameraParams SimulationController::fpvParams() const {
     graphics::FpvCameraParams p;
-    p.uptiltDeg = profile_.camera.uptiltDeg;
-    p.horizontalFovDeg = profile_.camera.fovDeg;
+    const physics::CameraParams& camera = physics::profileCamera(profile_);
+    p.uptiltDeg = camera.uptiltDeg;
+    p.horizontalFovDeg = camera.fovDeg;
     if (model_) {
         const glm::dvec3& body = model_->shape().bodySize;
         p.offsetBody = {0.5 * body.x + 0.15 * body.y, 0.0, -0.1 * body.z};
+    } else if (rover_) {
+        // On top of the shell, near the front.
+        const graphics::RoverShape& shape = rover_->shape();
+        p.offsetBody = {0.4 * shape.bodySize.x, 0.0,
+                        shape.bodyBottomM - 1.1 * shape.bodySize.z - 0.02};
     }
     return p;
 }
@@ -816,13 +971,13 @@ void SimulationController::handleEvents() {
 }
 
 void SimulationController::recordSession(const sim::SessionStats& stats,
-                                         const std::string& profileKey) {
+                                         const std::string& profileKey, physics::VehicleType type) {
     if (settings_ == nullptr || stats.flightTimeS < kMinRecordedFlightS) {
         return;
     }
     storage::SessionRecord r;
     r.vehicleProfileKey = profileKey;
-    r.vehicleType = kVehicleType;
+    r.vehicleType = typeName(type);
     r.startedAt = astro::formatUtc(stats.startedAt);
     r.durationS = stats.durationS;
     r.maxAltitudeAglM = stats.maxAglM;
@@ -846,12 +1001,13 @@ void SimulationController::updateFrame(double dt, double aspect) {
     if (loop_->acquireSnapshot()) {
         const sim::WorldSnapshot& s = loop_->snapshot();
         if (s.resetCount != lastResetCount_) {
-            recordSession(lastStats_, lastProfileKey_);
+            recordSession(lastStats_, lastProfileKey_, lastVehicleType_);
             lastResetCount_ = s.resetCount;
             rig_.reset({.position = s.body.position, .orientation = s.body.orientation});
         }
         lastStats_ = s.stats;
         lastProfileKey_ = s.profileKey;
+        lastVehicleType_ = s.telemetry.type;
     }
     handleEvents();
     const sim::WorldSnapshot& s = loop_->snapshot();
@@ -897,14 +1053,8 @@ void SimulationController::updateFrame(double dt, double aspect) {
         }
     }
 
-    if (!model_) {
-        const auto motors = profile_.motorPositions();
-        model_ = std::make_unique<graphics::DroneModel>(graphics::droneShapeFor(
-            {motors[0], motors[1], motors[2], motors[3]}, profile_.propeller.diameterM,
-            profile_.propeller.blades, profile_.frame.gearHeightM, profile_.camera.uptiltDeg));
-        // Close enough to see a small quad, far enough to see a large one.
-        rig_.setChaseDistance(std::clamp(kChaseArmLengths * profile_.frame.armLengthM,
-                                         kMinChaseDistanceM, kMaxChaseDistanceM));
+    if (!model_ && !rover_) {
+        buildModel();
     }
     if (cameraMode_ != graphics::CameraMode::Free) {
         camera_ = rig_.update(cameraMode_, pose_, fpvParams(), aspect, dt);
@@ -917,23 +1067,7 @@ void SimulationController::updateFrame(double dt, double aspect) {
         freeVisuals_->appendDrawItems(s.simTimeS, {}, items_);
     }
     if (cameraMode_ != graphics::CameraMode::Fpv) {
-        graphics::DroneVisualState v;
-        v.position = pose_.position;
-        v.orientation = pose_.orientation;
-        v.propAngleRad = s.telemetry.propAngleRad;
-        double meanRpm = 0.0;
-        for (const double rpm : s.telemetry.motorRpm) {
-            meanRpm += 0.25 * std::abs(rpm);
-        }
-        for (std::size_t i = 0; i < 4; ++i) {
-            v.rotorSpeedFraction[i] =
-                meanRpm > 1e-6
-                    ? s.telemetry.motorSpeedFraction * std::abs(s.telemetry.motorRpm[i]) / meanRpm
-                    : 0.0;
-        }
-        v.lights = s.controls.lights;
-        v.timeS = s.simTimeS;
-        model_->appendDrawItems(v, items_);
+        appendVehicleItems(s);
     }
 
     sim::HudOptions options;
@@ -959,6 +1093,70 @@ void SimulationController::updateFrame(double dt, double aspect) {
         telemetryClock_ = 0.0;
         emit telemetryUpdated();
     }
+}
+
+void SimulationController::buildModel() {
+    if (const physics::AerialProfile* a = aerialProfile()) {
+        const auto motors = a->motorPositions();
+        model_ = std::make_unique<graphics::DroneModel>(graphics::droneShapeFor(
+            {motors[0], motors[1], motors[2], motors[3]}, a->propeller.diameterM,
+            a->propeller.blades, a->frame.gearHeightM, a->camera.uptiltDeg));
+        // Close enough to see a small quad, far enough to see a large one.
+        rig_.setChaseDistance(std::clamp(kChaseArmLengths * a->frame.armLengthM, kMinChaseDistanceM,
+                                         kMaxChaseDistanceM));
+    } else if (const physics::GroundProfile* g = groundProfile()) {
+        graphics::RoverShape shape;
+        for (const physics::Vec3& hub : g->wheelHubsAtRest()) {
+            shape.wheelHubs.emplace_back(hub.x, hub.y, hub.z);
+        }
+        shape.wheelRadiusM = g->wheels.radiusM;
+        shape.wheelWidthM = g->wheels.widthM;
+        shape.bodySize = {g->chassis.lengthM, g->chassis.widthM, g->chassis.heightM};
+        shape.bodyBottomM = g->chassis.cogHeightM - g->chassis.clearanceM;
+        shape.staticCompressionM = g->staticCompressionM();
+        shape.cameraUptiltDeg = g->camera.uptiltDeg;
+        rover_ = std::make_unique<graphics::RoverModel>(std::move(shape));
+        rig_.setChaseDistance(std::clamp(kChaseRoverLengths * g->chassis.lengthM,
+                                         kMinChaseDistanceM, kMaxChaseDistanceM));
+    }
+}
+
+void SimulationController::appendVehicleItems(const sim::WorldSnapshot& s) {
+    if (rover_ && s.telemetry.type == physics::VehicleType::Ground) {
+        const physics::GroundTelemetry& g = s.telemetry.ground;
+        graphics::RoverVisualState v;
+        v.position = pose_.position;
+        v.orientation = pose_.orientation;
+        const std::size_t wheels = std::min<std::size_t>(static_cast<std::size_t>(g.wheelCount),
+                                                         graphics::kRoverMaxWheels);
+        for (std::size_t i = 0; i < wheels; ++i) {
+            v.wheelAngle[i] = g.wheelAngle[i];
+            v.compression[i] = g.compression[i];
+        }
+        v.lights = s.controls.lights;
+        v.braking = g.braking && s.telemetry.armed;
+        rover_->appendDrawItems(v, items_);
+        return;
+    }
+    if (!model_ || s.telemetry.type != physics::VehicleType::Aerial) {
+        return;  // The snapshot is still of the previous vehicle.
+    }
+    graphics::DroneVisualState v;
+    v.position = pose_.position;
+    v.orientation = pose_.orientation;
+    v.propAngleRad = s.telemetry.propAngleRad;
+    double meanRpm = 0.0;
+    for (const double rpm : s.telemetry.motorRpm) {
+        meanRpm += 0.25 * std::abs(rpm);
+    }
+    for (std::size_t i = 0; i < 4; ++i) {
+        v.rotorSpeedFraction[i] = meanRpm > 1e-6 ? s.telemetry.motorSpeedFraction *
+                                                       std::abs(s.telemetry.motorRpm[i]) / meanRpm
+                                                 : 0.0;
+    }
+    v.lights = s.controls.lights;
+    v.timeS = s.simTimeS;
+    model_->appendDrawItems(v, items_);
 }
 
 }  // namespace ds::app

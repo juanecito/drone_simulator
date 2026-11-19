@@ -20,10 +20,12 @@
 #include "ds/graphics/camera.hpp"
 #include "ds/graphics/camera_rig.hpp"
 #include "ds/graphics/drone_model.hpp"
+#include "ds/graphics/rover_model.hpp"
 #include "ds/input/input_selector.hpp"
 #include "ds/input/joystick_service.hpp"
 #include "ds/missions/mission.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/vehicle_factory.hpp"
 #include "ds/sim/hud.hpp"
 #include "ds/sim/item_visuals.hpp"
 #include "ds/sim/simulation_loop.hpp"
@@ -45,17 +47,24 @@ struct VehicleProfileInfo {
     QString key;           ///< Stable key (built-in key or `user.*`).
     QString name;          ///< Display name.
     bool builtIn = false;  ///< Built-in profiles are read-only.
+    physics::VehicleType type = physics::VehicleType::Aerial;  ///< Vehicle type.
 };
 
 /// @brief Settings keys used by the simulation.
 namespace sim_settings_keys {
-inline constexpr const char* kProfile = "sim.vehicleProfile";    ///< Selected profile key.
-inline constexpr const char* kCameraMode = "sim.cameraMode";     ///< "fpv", "chase", "los", "free".
-inline constexpr const char* kJoystick = "input.activeProfile";  ///< {guid, name} or null.
+inline constexpr const char* kProfile = "sim.vehicleProfile";       ///< Aerial profile key.
+inline constexpr const char* kGroundProfile = "sim.groundProfile";  ///< Ground profile key.
+inline constexpr const char* kVehicleType = "sim.vehicleType";      ///< "aerial" or "ground".
+inline constexpr const char* kCameraMode = "sim.cameraMode";  ///< "fpv", "chase", "los", "free".
+/// Joystick profile of the aerial drone: {guid, name} or null.
+inline constexpr const char* kJoystick = "input.activeProfile";
+/// Joystick profile of the ground drone: {guid, name} or null.
+inline constexpr const char* kGroundJoystick = "input.activeGroundProfile";
 }  // namespace sim_settings_keys
 
 /// @brief Owns the simulation loop (on its own thread) and everything the GUI needs from it.
-/// @details Lives on the GUI thread. The world is built from the scene's terrain and
+/// @details Lives on the GUI thread. The vehicle is an aerial or a ground drone; each type
+/// remembers its own profile and joystick mapping. The world is built from the scene's terrain and
 /// environment and follows their changes (terrain, wind, air, time). Once the simulation has
 /// been started the scene's clock follows the simulated UTC. Finished flights are written to
 /// the `sessions` table.
@@ -65,11 +74,14 @@ class SimulationController final : public QObject {
 public:
     /// @brief Default profile for new users (gentle, GPS altitude hold).
     static constexpr const char* kDefaultProfile = "camera-250g";
+    /// @brief Default ground profile.
+    static constexpr const char* kDefaultGroundProfile = "rover-4wd-3kg";
 
     /// @brief Builds the world at the free camera's ground position, heading the same way.
     /// @param scene Scene (terrain, environment); must outlive this object.
     /// @param settings User settings, or null (no persistence, no user profiles).
-    /// @param assetDirectory Holds `vehicles/aerial/*.json` and `environment/wind_levels.json`.
+    /// @param assetDirectory Holds `vehicles/aerial/*.json`, `vehicles/ground/*.json` and
+    /// `environment/wind_levels.json`.
     /// @param joysticks Start the SDL joystick service (off in tests).
     /// @param parent Parent object.
     SimulationController(SceneController& scene, SettingsController* settings,
@@ -84,21 +96,48 @@ public:
 
     // --- Vehicle profiles (Vehicle tab) ---------------------------------------------------
 
-    /// @brief Built-in profiles followed by the user's (sorted by name).
+    /// @brief Built-in profiles followed by the user's (sorted by name), both vehicle types.
     [[nodiscard]] const QList<VehicleProfileInfo>& profiles() const noexcept { return profiles_; }
+    /// @brief The profiles of vehicle type @p type.
+    [[nodiscard]] QList<VehicleProfileInfo> profiles(physics::VehicleType type) const;
     /// @brief Profile being flown (possibly edited and not saved).
-    [[nodiscard]] const physics::AerialProfile& profile() const noexcept { return profile_; }
+    [[nodiscard]] const physics::VehicleProfile& profile() const noexcept { return profile_; }
+    /// @brief The flown profile if it is an aerial one, else null.
+    [[nodiscard]] const physics::AerialProfile* aerialProfile() const noexcept {
+        return std::get_if<physics::AerialProfile>(&profile_);
+    }
+    /// @brief The flown profile if it is a ground one, else null.
+    [[nodiscard]] const physics::GroundProfile* groundProfile() const noexcept {
+        return std::get_if<physics::GroundProfile>(&profile_);
+    }
+    /// @brief Key of the flown profile.
+    [[nodiscard]] QString profileKey() const {
+        return QString::fromStdString(physics::profileKey(profile_));
+    }
+    /// @brief Display name of the flown profile.
+    [[nodiscard]] QString profileName() const {
+        return QString::fromStdString(physics::profileName(profile_));
+    }
+    /// @brief Type of the vehicle being flown or driven.
+    [[nodiscard]] physics::VehicleType vehicleType() const noexcept {
+        return physics::profileType(profile_);
+    }
     /// @brief True if the flown profile has unsaved edits.
     [[nodiscard]] bool profileModified() const noexcept { return modified_; }
-    /// @brief Loads profile @p key (built-in or user).
-    [[nodiscard]] common::Result<physics::AerialProfile> profileFor(const QString& key) const;
+    /// @brief Loads profile @p key (built-in or user, either type).
+    [[nodiscard]] common::Result<physics::VehicleProfile> profileFor(const QString& key) const;
     /// @brief Flies profile @p key (resets the vehicle) and remembers the choice.
     common::Result<void> selectProfile(const QString& key);
-    /// @brief Flies an edited copy of the current profile (validated; resets the vehicle).
-    common::Result<void> applyProfile(const physics::AerialProfile& profile);
+    /// @brief Switches to vehicle type @p type with the profile last chosen for it (or its
+    /// default); nothing happens if it is already the type flown.
+    common::Result<void> selectVehicleType(physics::VehicleType type);
+    /// @brief Flies an edited copy of the current profile (same type; validated; resets the
+    /// vehicle).
+    common::Result<void> applyProfile(const physics::VehicleProfile& profile);
     /// @brief Saves the flown profile as user profile @p name; returns its key.
     common::Result<QString> saveProfileAs(const QString& name);
-    /// @brief Deletes user profile @p key (the default profile is flown if it was selected).
+    /// @brief Deletes user profile @p key (the default profile of its type is flown if it was
+    /// selected).
     common::Result<void> deleteProfile(const QString& key);
     /// @brief Wind levels (from `wind_levels.json`).
     [[nodiscard]] const weather::WindLevelTable& windTable() const noexcept { return windTable_; }
@@ -129,7 +168,7 @@ public:
     /// vehicle is armed). Mission rules apply until endMission(): time scale 1×, no free
     /// camera, no resets, the profile locked, the keyboard only if `allowKeyboard`.
     common::Result<void> startMission(const missions::MissionDefinition& mission,
-                                      const physics::AerialProfile& profile);
+                                      const physics::VehicleProfile& profile);
     /// @brief Starts the attempt again from a clean state (vehicle back at the spawn point).
     void retryMission();
     /// @brief Ends the running attempt as Aborted.
@@ -172,11 +211,22 @@ public:
     void setFlightKeys(std::uint32_t keys);
     /// @brief One-shot keyboard action (arm, modes, lights).
     void keyboardAction(input::KeyboardAction action);
-    /// @brief Flies with @p mapping (a joystick), or with the keyboard if empty; remembered.
-    void setJoystickMapping(std::optional<input::InputMapping> mapping);
-    /// @brief The joystick mapping in use, if any.
+    /// @brief Flies the current vehicle type with @p mapping (a joystick mapping of that
+    /// type), or with the keyboard if empty; remembered per vehicle type.
+    common::Result<void> setJoystickMapping(std::optional<input::InputMapping> mapping);
+    /// @brief The joystick mapping of the current vehicle type, if any.
     [[nodiscard]] const std::optional<input::InputMapping>& joystickMapping() const noexcept {
-        return mapping_;
+        return mappings_[typeIndex(vehicleType())];
+    }
+    /// @brief The joystick mapping remembered for vehicle type @p type, if any.
+    [[nodiscard]] const std::optional<input::InputMapping>& joystickMapping(
+        physics::VehicleType type) const noexcept {
+        return mappings_[typeIndex(type)];
+    }
+    /// @brief Controls of the current vehicle type (aerial sticks or ground drive).
+    [[nodiscard]] input::VehicleControls vehicleControls() const noexcept {
+        return vehicleType() == physics::VehicleType::Ground ? input::VehicleControls::Ground
+                                                             : input::VehicleControls::Aerial;
     }
     /// @brief Device of the last tick.
     [[nodiscard]] input::InputSource activeInputSource() const noexcept;
@@ -195,7 +245,7 @@ public:
     [[nodiscard]] std::array<graphics::Camera, 2> chaseInsetCameras(double aspect) const {
         return {rig_.topView(pose_, aspect), rig_.behindView(pose_, aspect)};
     }
-    /// @brief Objects to draw (the drone, except from its own FPV camera).
+    /// @brief Objects to draw (the vehicle, except from its own FPV camera).
     [[nodiscard]] std::span<const graphics::DrawItem> drawItems() const noexcept { return items_; }
     /// @brief HUD of the frame.
     [[nodiscard]] const sim::HudModel& hud() const noexcept { return hud_; }
@@ -235,12 +285,20 @@ private:
     void syncBuiltInProfiles();
     void reloadProfiles();
     void restoreSelections();
+    void restoreJoystick(physics::VehicleType type);
     void createLoop();
-    void setFlownProfile(const physics::AerialProfile& profile, bool modified);
+    void setFlownProfile(const physics::VehicleProfile& profile, bool modified);
+    void activateJoystick();
+    void buildModel();
+    void appendVehicleItems(const sim::WorldSnapshot& s);
+    [[nodiscard]] static std::size_t typeIndex(physics::VehicleType type) noexcept {
+        return type == physics::VehicleType::Ground ? 1 : 0;
+    }
     void onTerrainChanged();
     void onEnvironmentChanged();
     void handleEvents();
-    void recordSession(const sim::SessionStats& stats, const std::string& profileKey);
+    void recordSession(const sim::SessionStats& stats, const std::string& profileKey,
+                       physics::VehicleType type);
     void updatePilotEye();
     void applyFreeFlightRules();
     void refuseInMission(const QString& what);
@@ -250,15 +308,16 @@ private:
     SceneController* scene_;
     SettingsController* settings_;
     weather::WindLevelTable windTable_ = weather::WindLevelTable::builtIn();
-    std::vector<physics::AerialProfile> builtIn_;
+    std::vector<physics::VehicleProfile> builtIn_;
     QList<VehicleProfileInfo> profiles_;
-    physics::AerialProfile profile_;
+    physics::VehicleProfile profile_;
     bool modified_ = false;
     std::unique_ptr<graphics::DroneModel> model_;
+    std::unique_ptr<graphics::RoverModel> rover_;
 
     std::unique_ptr<input::JoystickService> joysticks_;
     std::unique_ptr<input::InputSelector> selector_;
-    std::optional<input::InputMapping> mapping_;
+    std::array<std::optional<input::InputMapping>, 2> mappings_;  // Aerial, ground.
     std::unique_ptr<sim::SimulationLoop> loop_;
     sim::RunState state_ = sim::RunState::Stopped;
     bool started_ = false;
@@ -283,7 +342,7 @@ private:
     glm::dvec3 missionSpawn_{0.0};
     double missionHeadingRad_ = 0.0;
     glm::dvec3 missionPilot_{0.0};
-    physics::AerialProfile freeProfile_;
+    physics::VehicleProfile freeProfile_;
     bool freeProfileModified_ = false;
     glm::dvec3 freeHome_{0.0};
     double freeHeadingRad_ = 0.0;
@@ -292,6 +351,7 @@ private:
 
     sim::SessionStats lastStats_;
     std::string lastProfileKey_;
+    physics::VehicleType lastVehicleType_ = physics::VehicleType::Aerial;
     std::uint64_t lastResetCount_ = 0;
 };
 

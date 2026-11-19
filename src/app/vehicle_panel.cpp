@@ -23,6 +23,7 @@
 
 #include "ds/app/simulation_controller.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/ground_profile.hpp"
 
 namespace ds::app {
 namespace {
@@ -39,7 +40,52 @@ VehiclePanel::VehiclePanel(SimulationController& simulation, QWidget* parent)
     connect(simulation_, &SimulationController::profilesChanged, this,
             &VehiclePanel::reloadProfiles);
     connect(simulation_, &SimulationController::profileChanged, this, &VehiclePanel::refresh);
+    connect(simulation_, &SimulationController::missionActiveChanged, this,
+            &VehiclePanel::updateButtons);
     refresh();
+}
+
+void VehiclePanel::buildEditor(QWidget* parent, bool ground) {
+    auto* layout = new QVBoxLayout(parent);
+    layout->setContentsMargins(0, 0, 0, 0);
+    // One group box per parameter group, in table order.
+    std::map<std::string_view, QFormLayout*> forms;
+    auto add = [&](const auto& d) {
+        QFormLayout*& form = forms[d.group];
+        if (form == nullptr) {
+            auto* box = new QGroupBox(fromView(d.group));
+            form = new QFormLayout(box);
+            layout->addWidget(box);
+        }
+        auto* spin = new QDoubleSpinBox;
+        spin->setObjectName((ground ? QStringLiteral("GroundParam") : QStringLiteral("Param")) +
+                            fromView(d.pointer));
+        spin->setRange(d.min, d.max);
+        spin->setDecimals(d.kind == physics::ParamKind::Integer ? 0 : d.decimals);
+        // One step changes the second-to-last shown digit (e.g. 0.01 for 3 decimals).
+        const int stepDigits = d.decimals >= 2 ? d.decimals - 1 : d.decimals;
+        spin->setSingleStep(d.kind == physics::ParamKind::Integer ? 1.0
+                                                                  : std::pow(10.0, -stepDigits));
+        if (!d.unit.empty()) {
+            spin->setSuffix(QLatin1Char(' ') + fromView(d.unit));
+        }
+        spin->setKeyboardTracking(false);
+        connect(spin, &QDoubleSpinBox::valueChanged, this, [this] {
+            edited_ = true;
+            updateButtons();
+        });
+        form->addRow(fromView(d.label) + QLatin1Char(':'), spin);
+        (ground ? groundParams_ : params_).push_back(spin);
+    };
+    if (ground) {
+        for (const physics::GroundParamDescriptor& d : physics::groundParameters()) {
+            add(d);
+        }
+    } else {
+        for (const physics::ParamDescriptor& d : physics::aerialParameters()) {
+            add(d);
+        }
+    }
 }
 
 void VehiclePanel::buildUi() {
@@ -48,6 +94,20 @@ void VehiclePanel::buildUi() {
 
     auto* profileBox = new QGroupBox(tr("Profile"));
     auto* profileLayout = new QVBoxLayout(profileBox);
+    auto* typeRow = new QFormLayout;
+    type_ = new QComboBox;
+    type_->setObjectName(QStringLiteral("VehicleTypeCombo"));
+    type_->addItem(tr("Aerial drone"), static_cast<int>(physics::VehicleType::Aerial));
+    type_->addItem(tr("Ground drone"), static_cast<int>(physics::VehicleType::Ground));
+    connect(type_, &QComboBox::activated, this, [this](int index) {
+        const auto type = static_cast<physics::VehicleType>(type_->itemData(index).toInt());
+        if (auto selected = simulation_->selectVehicleType(type); !selected) {
+            showError(QString::fromStdString(selected.error().message));
+            refresh();
+        }
+    });
+    typeRow->addRow(tr("Type:"), type_);
+    profileLayout->addLayout(typeRow);
     profile_ = new QComboBox;
     profile_->setObjectName(QStringLiteral("ProfileCombo"));
     connect(profile_, &QComboBox::activated, this, [this](int index) {
@@ -84,41 +144,22 @@ void VehiclePanel::buildUi() {
     figuresLayout->addWidget(figures_);
     layout->addWidget(figuresBox);
 
-    // Parameter editor, one group box per parameter group, in table order.
-    std::map<std::string_view, QFormLayout*> forms;
-    for (const physics::ParamDescriptor& d : physics::aerialParameters()) {
-        QFormLayout*& form = forms[d.group];
-        if (form == nullptr) {
-            auto* box = new QGroupBox(fromView(d.group));
-            form = new QFormLayout(box);
-            layout->addWidget(box);
-        }
-        auto* spin = new QDoubleSpinBox;
-        spin->setObjectName(QStringLiteral("Param") + fromView(d.pointer));
-        spin->setRange(d.min, d.max);
-        spin->setDecimals(d.kind == physics::ParamKind::Integer ? 0 : d.decimals);
-        // One step changes the second-to-last shown digit (e.g. 0.01 for 3 decimals).
-        const int stepDigits = d.decimals >= 2 ? d.decimals - 1 : d.decimals;
-        spin->setSingleStep(d.kind == physics::ParamKind::Integer ? 1.0
-                                                                  : std::pow(10.0, -stepDigits));
-        if (!d.unit.empty()) {
-            spin->setSuffix(QLatin1Char(' ') + fromView(d.unit));
-        }
-        spin->setKeyboardTracking(false);
-        connect(spin, &QDoubleSpinBox::valueChanged, this, [this] {
-            edited_ = true;
-            updateButtons();
-        });
-        form->addRow(fromView(d.label) + QLatin1Char(':'), spin);
-        params_.push_back(spin);
-    }
+    // Parameter editors: one per vehicle type, the one of the flown type shown.
+    aerialEditor_ = new QWidget;
+    aerialEditor_->setObjectName(QStringLiteral("AerialEditor"));
+    buildEditor(aerialEditor_, false);
+    layout->addWidget(aerialEditor_);
+    groundEditor_ = new QWidget;
+    groundEditor_->setObjectName(QStringLiteral("GroundEditor"));
+    buildEditor(groundEditor_, true);
+    layout->addWidget(groundEditor_);
 
     auto* editBox = new QHBoxLayout;
     status_ = new QLabel;
     status_->setObjectName(QStringLiteral("ProfileStatus"));
     apply_ = new QPushButton(tr("Apply"));
     apply_->setObjectName(QStringLiteral("ApplyProfileButton"));
-    apply_->setToolTip(tr("Fly with these parameters (the vehicle is reset)."));
+    apply_->setToolTip(tr("Fly or drive with these parameters (the vehicle is reset)."));
     revert_ = new QPushButton(tr("Revert"));
     revert_->setObjectName(QStringLiteral("RevertProfileButton"));
     editBox->addWidget(status_, 1);
@@ -126,8 +167,7 @@ void VehiclePanel::buildUi() {
     editBox->addWidget(apply_);
     connect(apply_, &QPushButton::clicked, this, &VehiclePanel::apply);
     connect(revert_, &QPushButton::clicked, this, [this] {
-        const QString key = QString::fromStdString(simulation_->profile().key);
-        if (auto selected = simulation_->selectProfile(key); !selected) {
+        if (auto selected = simulation_->selectProfile(simulation_->profileKey()); !selected) {
             showError(QString::fromStdString(selected.error().message));
         }
     });
@@ -150,10 +190,15 @@ void VehiclePanel::refresh() {
 }
 
 void VehiclePanel::reloadProfiles() {
+    const physics::VehicleType type = simulation_->vehicleType();
+    {
+        const QSignalBlocker block(type_);
+        type_->setCurrentIndex(type_->findData(static_cast<int>(type)));
+    }
     const QSignalBlocker block(profile_);
     profile_->clear();
-    const QString current = QString::fromStdString(simulation_->profile().key);
-    for (const VehicleProfileInfo& p : simulation_->profiles()) {
+    const QString current = simulation_->profileKey();
+    for (const VehicleProfileInfo& p : simulation_->profiles(type)) {
         profile_->addItem(p.builtIn ? p.name : tr("%1 (user)").arg(p.name), p.key);
         if (p.key == current) {
             profile_->setCurrentIndex(profile_->count() - 1);
@@ -163,19 +208,62 @@ void VehiclePanel::reloadProfiles() {
 }
 
 void VehiclePanel::loadParameters() {
-    const physics::AerialProfile& p = simulation_->profile();
-    description_->setText(QString::fromStdString(p.description));
-    const auto descriptors = physics::aerialParameters();
-    for (std::size_t i = 0; i < params_.size(); ++i) {
-        const QSignalBlocker block(params_[i]);
-        params_[i]->setValue(descriptors[i].get(p));
+    const bool ground = simulation_->vehicleType() == physics::VehicleType::Ground;
+    aerialEditor_->setVisible(!ground);
+    groundEditor_->setVisible(ground);
+    if (const physics::AerialProfile* p = simulation_->aerialProfile()) {
+        description_->setText(QString::fromStdString(p->description));
+        const auto descriptors = physics::aerialParameters();
+        for (std::size_t i = 0; i < params_.size(); ++i) {
+            const QSignalBlocker block(params_[i]);
+            params_[i]->setValue(descriptors[i].get(*p));
+        }
+    } else if (const physics::GroundProfile* g = simulation_->groundProfile()) {
+        description_->setText(QString::fromStdString(g->description));
+        const auto descriptors = physics::groundParameters();
+        for (std::size_t i = 0; i < groundParams_.size(); ++i) {
+            const QSignalBlocker block(groundParams_[i]);
+            groundParams_[i]->setValue(descriptors[i].get(*g));
+        }
     }
     edited_ = false;
     updateButtons();
 }
 
 void VehiclePanel::updateFigures() {
-    const physics::AerialProfile& p = simulation_->profile();
+    if (const physics::GroundProfile* g = simulation_->groundProfile()) {
+        const physics::GroundStats s = physics::computeGroundStats(*g);
+        QString text = tr("Top speed: %1 m/s (%2 km/h)\n"
+                          "0 → 90 % of top speed: %3 s\n"
+                          "Stall torque per wheel: %4 N·m\n"
+                          "Static rollover: %5° sideways, %6° front/back\n"
+                          "Range: %7 km at %8 m/s on grass (%9 A, %10 min)")
+                           .arg(s.topSpeedMs, 0, 'f', 2)
+                           .arg(3.6 * s.topSpeedMs, 0, 'f', 1)
+                           .arg(s.accelerationTimeS, 0, 'f', 2)
+                           .arg(s.stallTorqueNm, 0, 'f', 2)
+                           .arg(s.rolloverSideDeg, 0, 'f', 0)
+                           .arg(s.rolloverPitchDeg, 0, 'f', 0)
+                           .arg(s.rangeKm, 0, 'f', 1)
+                           .arg(s.cruiseSpeedMs, 0, 'f', 2)
+                           .arg(s.cruiseCurrentA, 0, 'f', 1)
+                           .arg(s.enduranceMin, 0, 'f', 0);
+        text += tr("\nSteepest climbable slope:");
+        for (const physics::SlopeLimit& l : s.slopes) {
+            text += tr("\n  %1: %2°%3")
+                        .arg(fromView(physics::surfaceMaterialName(l.material)))
+                        .arg(l.maxSlopeDeg, 0, 'f', 0)
+                        .arg(l.tractionLimited ? tr(" (wheels slip)") : tr(" (motors stall)"));
+        }
+        figures_->setText(text);
+        return;
+    }
+    const physics::AerialProfile* a = simulation_->aerialProfile();
+    if (a == nullptr) {
+        figures_->clear();
+        return;
+    }
+    const physics::AerialProfile& p = *a;
     const physics::AerialStats s = physics::computeAerialStats(p);
     const int windLevel = simulation_->windTable().highestLevelWithGustsAtMost(s.maxWindMs);
     QString text = tr("Hover: %1 % throttle, %2 A, %3 W\n"
@@ -207,27 +295,40 @@ void VehiclePanel::updateFigures() {
 }
 
 void VehiclePanel::updateButtons() {
-    const QString key = QString::fromStdString(simulation_->profile().key);
+    const QString key = simulation_->profileKey();
     const bool modified = simulation_->profileModified();
+    // The vehicle is locked during a mission (FR-MIS-09).
+    type_->setEnabled(!simulation_->missionActive());
     apply_->setEnabled(edited_);
     revert_->setEnabled(edited_ || modified);
     delete_->setEnabled(key.startsWith(QLatin1String("user.")) && !modified);
     if (edited_) {
-        status_->setText(tr("Edited: Apply to fly with it."));
+        status_->setText(tr("Edited: Apply to use it."));
     } else if (modified) {
-        status_->setText(tr("Flying edited parameters (not saved)."));
+        status_->setText(tr("Using edited parameters (not saved)."));
     } else {
         status_->clear();
     }
 }
 
 void VehiclePanel::apply() {
-    physics::AerialProfile p = simulation_->profile();
-    const auto descriptors = physics::aerialParameters();
-    for (std::size_t i = 0; i < params_.size(); ++i) {
-        descriptors[i].set(p, params_[i]->value());
+    common::Result<void> applied;
+    if (const physics::AerialProfile* a = simulation_->aerialProfile()) {
+        physics::AerialProfile p = *a;
+        const auto descriptors = physics::aerialParameters();
+        for (std::size_t i = 0; i < params_.size(); ++i) {
+            descriptors[i].set(p, params_[i]->value());
+        }
+        applied = simulation_->applyProfile(p);
+    } else if (const physics::GroundProfile* g = simulation_->groundProfile()) {
+        physics::GroundProfile p = *g;
+        const auto descriptors = physics::groundParameters();
+        for (std::size_t i = 0; i < groundParams_.size(); ++i) {
+            descriptors[i].set(p, groundParams_[i]->value());
+        }
+        applied = simulation_->applyProfile(p);
     }
-    if (auto applied = simulation_->applyProfile(p); !applied) {
+    if (!applied) {
         showError(QString::fromStdString(applied.error().message));
     }
 }
@@ -239,7 +340,7 @@ void VehiclePanel::saveAs() {
     bool ok = false;
     const QString name = QInputDialog::getText(
         this, tr("Save Vehicle Profile"), tr("Profile name:"), QLineEdit::Normal,
-        tr("%1 (copy)").arg(QString::fromStdString(simulation_->profile().name)), &ok);
+        tr("%1 (copy)").arg(simulation_->profileName()), &ok);
     if (!ok) {
         return;
     }
@@ -249,10 +350,9 @@ void VehiclePanel::saveAs() {
 }
 
 void VehiclePanel::remove() {
-    const QString key = QString::fromStdString(simulation_->profile().key);
+    const QString key = simulation_->profileKey();
     if (QMessageBox::question(this, tr("Delete Vehicle Profile"),
-                              tr("Delete the profile “%1”?")
-                                  .arg(QString::fromStdString(simulation_->profile().name))) !=
+                              tr("Delete the profile “%1”?").arg(simulation_->profileName())) !=
         QMessageBox::Yes) {
         return;
     }

@@ -263,6 +263,13 @@ bool Viewport::flightKey(SimulationController& sim, int key, bool pressed) {
         case Qt::Key_Down: bit = FlightKey::PitchBack; break;
         case Qt::Key_Left: bit = FlightKey::RollLeft; break;
         case Qt::Key_Right: bit = FlightKey::RollRight; break;
+        case Qt::Key_Space:
+            // Ground drones brake while Space is held; aerial drones arm with it (commandKey).
+            if (pressed && sim.vehicleType() != physics::VehicleType::Ground) {
+                return false;
+            }
+            bit = FlightKey::Brake;
+            break;
         default: return false;
     }
     const auto mask = static_cast<std::uint32_t>(bit);
@@ -283,7 +290,14 @@ bool Viewport::commandKey(SimulationController& sim, int key) {
         return false;
     }
     switch (key) {
-        case Qt::Key_Space: sim.keyboardAction(KeyboardAction::ToggleArm); return true;
+        case Qt::Key_Space:
+            if (sim.vehicleType() == physics::VehicleType::Ground) {
+                return false;  // Brake: a held flight key.
+            }
+            sim.keyboardAction(KeyboardAction::ToggleArm);
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter: sim.keyboardAction(KeyboardAction::ToggleArm); return true;
         case Qt::Key_1: sim.keyboardAction(KeyboardAction::Mode1); return true;
         case Qt::Key_2: sim.keyboardAction(KeyboardAction::Mode2); return true;
         case Qt::Key_3: sim.keyboardAction(KeyboardAction::Mode3); return true;

@@ -23,8 +23,9 @@ astronomically correct day/night sky.
 > campaign of 12 built-in aerial missions (basics, racing, operations) plus your own, each
 > with a briefing, objectives on the HUD, flight rules, scoring with stars, a debrief and your
 > progress saved per user. The **Items** tab places gates, obstacles, pads and zones in the
-> free-flight scene. Real terrain, the ground drone and weather arrive in milestones M4 and
-> M6–M8 (see the specification).
+> free-flight scene. The **ground drone** (a 4WD skid-steer RC rover) can already be driven in
+> free mode (milestone M6 in progress: its HUD, missions and the parking zone are next). Real
+> terrain and weather arrive in milestones M4 and M7–M8 (see the specification).
 
 ## Quick start
 
@@ -62,8 +63,19 @@ rules, prints its errors and exits (0 = valid); see [docs/MISSIONS.md](docs/MISS
 | `P` | Pause / resume |
 | `R` | Reset the drone to the take-off point |
 
-`F5`–`F8` are *Start*, *Pause*, *Step* and *Reset* in the Simulation menu. In the **free
-camera**:
+**Driving** (ground drone, chosen in the Vehicle tab):
+
+| Key | Action (vehicle cameras) |
+|-----|--------|
+| `Enter` | Arm / disarm (drive keys released) |
+| `W` / `S` or up / down arrows | Forward / reverse (back to neutral when released) |
+| `A` / `D` or left / right arrows | Steer left / right |
+| `Space` (held) | Brake |
+| `1` `2` / `3` `4` | Manual / Speed control (the drive key sets the cruise speed) |
+| `L`, `C`, `P`, `R` | Lights, camera, pause, reset (as when flying) |
+
+`Enter` also arms the aerial drone. `F5`–`F8` are *Start*, *Pause*, *Step* and *Reset* in the
+Simulation menu. In the **free camera**:
 
 | Key / mouse | Action |
 |-------------|--------|
@@ -90,14 +102,17 @@ rate.
   stick positions, telemetry, statistics of the current flight and simulation events
   (crashes, arming refused, battery warnings). *Take Off From Free-Camera Position* moves the
   take-off point.
-- **Vehicle tab:** choose a profile (5″ FPV racer, sub-250 g camera drone, 1.5 kg survey
-  quad, or your own) and see its computed hover throttle, thrust-to-weight, endurance, top
-  speed and the highest wind level it can handle. All parameters can be edited (*Apply* to
-  fly them) and saved as your own profile.
+- **Vehicle tab:** choose the type (aerial or ground drone) and a profile (5″ FPV racer,
+  sub-250 g camera drone, 1.5 kg survey quad, the 4WD rover, or your own). Aerial profiles
+  show their computed hover throttle, thrust-to-weight, endurance, top speed and the highest
+  wind level they can handle; ground profiles their top speed, acceleration, steepest
+  climbable slope per surface, static rollover angles and range. All parameters can be edited
+  (*Apply* to use them) and saved as your own profile. Each type remembers its profile.
 - **Settings › Controls:** choose the keyboard or a joystick (RC transmitter in USB joystick
-  mode, or a gamepad), start from a preset (radio AETR/TAER, gamepad mode 1/2), run the
-  calibration wizard and set expo and deadzones, then *Fly With This*. Mappings are saved per
-  device.
+  mode, or a gamepad), start from a preset (aerial: radio AETR/TAER, gamepad mode 1/2;
+  ground: gamepad with the triggers or the sticks, radio AETR/TAER), run the calibration
+  wizard (aerial mappings) and set expo and deadzones, then *Fly With This*. Mappings are
+  saved per device and per vehicle type, and the panel edits those of the type in use.
 
 - **Terrain tab:** choose a preset (built-in or your own: *Save As…* / *Delete*), set the seed
   (*Random*), shape parameters, water level, unlimited or custom dimensions with the edge

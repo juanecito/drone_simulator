@@ -18,6 +18,15 @@ inline constexpr int kFlightModeCount = 4;
 /// @brief Where the controls come from.
 enum class InputSource { None, Keyboard, Joystick };
 
+/// @brief Vehicle type a set of controls is meant for (FR-IN-03a): aerial sticks (throttle,
+/// roll, pitch, yaw) or ground drive (forward/reverse and steering).
+enum class VehicleControls { Aerial, Ground };
+
+/// @brief "aerial" or "ground" (as stored in `input_profiles.vehicle_type`).
+[[nodiscard]] constexpr const char* vehicleControlsName(VehicleControls type) noexcept {
+    return type == VehicleControls::Ground ? "ground" : "aerial";
+}
+
 /// @brief Controls of one simulation tick.
 struct ControlInputs {
     double throttle = 0.0;                   ///< 0 … 1.

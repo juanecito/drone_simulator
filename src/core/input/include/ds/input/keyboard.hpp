@@ -8,8 +8,10 @@
 #include "ds/input/control.hpp"
 
 /// @file
-/// @brief Keyboard flying (FR-IN-05), default Mode 2 layout: W/S throttle, A/D yaw, arrows
-/// pitch/roll, Space arm/disarm, 1–4 flight modes. The GUI only reports which keys are held.
+/// @brief Keyboard flying and driving (FR-IN-05). Aerial, default Mode 2 layout: W/S throttle,
+/// A/D yaw, arrows pitch/roll, Space arm/disarm, 1–4 flight modes. Ground: W/S (or the up and
+/// down arrows) forward/reverse, A/D (or the left and right arrows) steer, Space brake, Enter
+/// arm/disarm. The GUI only reports which keys are held.
 /// @ingroup input
 
 namespace ds::input {
@@ -24,12 +26,16 @@ enum class FlightKey : std::uint32_t {
     PitchBack = 1U << 5U,     ///< Down arrow.
     RollLeft = 1U << 6U,      ///< Left arrow.
     RollRight = 1U << 7U,     ///< Right arrow.
+    Brake = 1U << 8U,         ///< Space (ground drones).
 };
 
 /// @brief Turns held keys into smooth stick movements.
 /// @details Sticks move towards ±deflection while a key is held and spring back when it is
 /// released. The throttle is "sticky" (it stays where W/S left it) except in altitude-hold
-/// modes, where it springs back to the centre (hold altitude) like a gamepad stick.
+/// modes, where it springs back to the centre (hold altitude) like a gamepad stick. The
+/// ground controls are produced at the same time: drive springs back to neutral like the
+/// trigger of an RC car transmitter, and steering like a stick; each vehicle reads its own
+/// fields.
 class KeyboardControl {
 public:
     /// @brief Stick deflection reached with a key held.
@@ -38,10 +44,14 @@ public:
     static constexpr double kStickRate = 3.0;
     /// @brief Throttle change per second while W/S is held (sticky throttle).
     static constexpr double kThrottleRate = 0.5;
+    /// @brief Ground: drive reached with W/S held (full forward or reverse).
+    static constexpr double kDriveDeflection = 1.0;
+    /// @brief Ground: steering reached with A/D held.
+    static constexpr double kSteeringDeflection = 0.6;
 
     /// @brief Advances by @p dt with @p keys held (FlightKey bits).
     ControlInputs update(std::uint32_t keys, double dt);
-    /// @brief Space: toggles the arm switch.
+    /// @brief Space (aerial) or Enter: toggles the arm switch.
     void toggleArm() noexcept { state_.arm = !state_.arm; }
     /// @brief Sets the arm switch.
     void setArm(bool arm) noexcept { state_.arm = arm; }

@@ -6,11 +6,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "ds/app/scene_config.hpp"
 #include "ds/common/error.hpp"
 #include "ds/missions/mission.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/vehicle_factory.hpp"
 
 /// @file
 /// @brief Turning a mission definition into the scene it is flown in (FR-MIS-02, §4.9.1):
@@ -48,16 +50,20 @@ struct MissionScene {
 /// @brief The vehicle profile of @p mission: the embedded `customProfile`, else the profile
 /// found by @p lookup (built-in or user key).
 template <typename Lookup>
-[[nodiscard]] common::Result<physics::AerialProfile> missionProfile(
+[[nodiscard]] common::Result<physics::VehicleProfile> missionProfile(
     const missions::MissionDefinition& mission, Lookup&& lookup) {
     if (!mission.vehicle.customProfile.is_null()) {
-        auto profile = physics::aerialProfileFromJson(mission.vehicle.customProfile);
+        auto profile = physics::vehicleProfileFromJson(mission.vehicle.customProfile);
         if (!profile) {
             return common::makeError("vehicle.customProfile: " + profile.error().message);
         }
-        if (profile->key.empty()) {
-            profile->key = "mission." + mission.id;
-        }
+        std::visit(
+            [&](auto& p) {
+                if (p.key.empty()) {
+                    p.key = "mission." + mission.id;
+                }
+            },
+            *profile);
         return profile;
     }
     return lookup(mission.vehicle.profile);

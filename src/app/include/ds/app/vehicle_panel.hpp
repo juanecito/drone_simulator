@@ -13,8 +13,10 @@ class QLabel;
 class QPushButton;
 
 /// @file
-/// @brief Vehicle tab (SPECIFICATION §4.11, FR-PHY-15): profile selection, derived figures
-/// (hover, thrust-to-weight, endurance, top speed, wind limit) and the parameter editor.
+/// @brief Vehicle tab (SPECIFICATION §4.11, FR-PHY-15, FR-GND-13): vehicle type (aerial or
+/// ground), profile selection, derived figures (aerial: hover, thrust-to-weight, endurance,
+/// top speed, wind limit; ground: top speed, acceleration, climbing limits, rollover angles,
+/// range) and the parameter editor.
 /// @ingroup app
 
 namespace ds::app {
@@ -34,6 +36,7 @@ public:
 
 private:
     void buildUi();
+    void buildEditor(QWidget* parent, bool ground);
     void reloadProfiles();
     void loadParameters();
     void updateFigures();
@@ -44,6 +47,7 @@ private:
     void showError(const QString& message);
 
     SimulationController* simulation_;
+    QComboBox* type_ = nullptr;
     QComboBox* profile_ = nullptr;
     QLabel* description_ = nullptr;
     QLabel* figures_ = nullptr;
@@ -52,7 +56,10 @@ private:
     QPushButton* revert_ = nullptr;
     QPushButton* saveAs_ = nullptr;
     QPushButton* delete_ = nullptr;
-    std::vector<QDoubleSpinBox*> params_;  // In aerialParameters() order.
+    QWidget* aerialEditor_ = nullptr;
+    QWidget* groundEditor_ = nullptr;
+    std::vector<QDoubleSpinBox*> params_;        // In aerialParameters() order.
+    std::vector<QDoubleSpinBox*> groundParams_;  // In groundParameters() order.
     bool edited_ = false;
 };
 
