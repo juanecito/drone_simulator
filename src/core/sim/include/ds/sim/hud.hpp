@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -70,6 +71,31 @@ struct HudMarker {
     glm::dvec3 position{0.0};  ///< World position.
 };
 
+/// @brief Ground drone part of the OSD (FR-GFX-20): attitude with the rollover warning, slope,
+/// wheel slip and odometry.
+struct HudGround {
+    HudItem pitch;     ///< "PITCH +4°".
+    HudItem roll;      ///< "ROLL −3°"; amber/red as the load transfer nears the tipping point.
+    HudItem slope;     ///< "SLOPE 12° grass".
+    HudItem slip;      ///< "SLIP 8%"; amber past the tyres' peak grip, red when spinning.
+    HudItem odometer;  ///< "ODO 123 m" (wheel encoders).
+    /// Lateral load transfer (N_right − N_left) / ΣN: ±1 = one side's wheels lifting.
+    double loadTransfer = 0.0;
+    HudLevel stability = HudLevel::Normal;  ///< Level of the load transfer.
+    int wheelCount = 0;                     ///< Wheels (left side first, front to rear).
+    std::array<double, physics::kMaxWheels> wheelSlip{};   ///< Combined slip per wheel.
+    std::array<bool, physics::kMaxWheels> wheelContact{};  ///< Wheel on the ground.
+};
+
+/// @brief Load transfer above which the rollover warning is amber.
+inline constexpr double kRolloverCaution = 0.6;
+/// @brief Load transfer above which it is red (the inner wheels are about to lift).
+inline constexpr double kRolloverWarning = 0.85;
+/// @brief Combined slip above which a tyre is past its peak grip (amber).
+inline constexpr double kSlipCaution = 0.2;
+/// @brief Combined slip of a spinning or locked tyre (red).
+inline constexpr double kSlipWarning = 0.5;
+
 /// @brief Everything drawn over the 3D view.
 struct HudModel {
     std::string positionUtm;        ///< "UTM 30T  440 123.4 E  4 474 567.8 N".
@@ -99,6 +125,8 @@ struct HudModel {
     /// Direction the wind blows towards, relative to the drone's nose (radians, clockwise).
     std::optional<double> windArrowRad;
     std::optional<HudMission> mission;  ///< Mission panel, while a mission is flown.
+    /// Ground drone read-outs (empty for aerial drones, whose altitude items are used instead).
+    std::optional<HudGround> ground;
     std::vector<HudMarker> markers;     ///< Guidance markers.
 };
 

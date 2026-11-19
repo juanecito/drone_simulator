@@ -8,8 +8,10 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QImage>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTemporaryDir>
@@ -19,12 +21,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <thread>
 
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/controls_panel.hpp"
 #include "ds/app/environment_panel.hpp"
+#include "ds/app/hud_painter.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/app/simulation_controller.hpp"
@@ -395,6 +399,76 @@ TEST_F(SimulationPanelsTest, KeyboardDrivesTheRoverAndIsRecorded) {
     EXPECT_EQ(sessions->front().vehicleType, "ground");
     EXPECT_EQ(sessions->front().vehicleProfileKey, "rover-4wd-3kg");
     EXPECT_GT(sessions->front().distanceM, 1.5);
+}
+
+TEST(HudPainter, PaintsTheGroundGauges) {
+    // FR-GFX-20: the load-transfer bar and the wheel-slip diagram are drawn under the
+    // attitude column; one wheel spinning (red), one off the ground (grey).
+    sim::WorldSnapshot s;
+    s.hasVehicle = true;
+    s.telemetry.type = physics::VehicleType::Ground;
+    s.telemetry.armed = true;
+    physics::GroundTelemetry& g = s.telemetry.ground;
+    g.wheelCount = 4;
+    g.contact = {true, true, true, false};
+    g.slip = {0.05, 0.3, 0.8, 0.0};
+    g.maxSlip = 0.8;
+    g.loadTransfer = 0.7;
+    const sim::HudModel hud = sim::buildHud(s, geo::LocalFrame({40.4, -3.7, 650.0}), {});
+    ASSERT_TRUE(hud.ground.has_value());
+
+    QImage image(1280, 720, QImage::Format_RGB32);
+    image.fill(QColor(70, 90, 120));
+    {
+        QPainter painter(&image);
+        app::paintHud(painter, image.rect(), hud, {});
+    }
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        image.save(QString::fromUtf8(dir) + QStringLiteral("/ground_hud.png"));
+    }
+    // Strongly red pixels (the spinning wheel, the red end of the bar and the warning) and
+    // amber ones exist in the left half.
+    int red = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width() / 2; ++x) {
+            const QColor c = image.pixelColor(x, y);
+            if (c.red() > 200 && c.green() < 90 && c.blue() < 90) {
+                ++red;
+            }
+        }
+    }
+    EXPECT_GT(red, 40);
+}
+
+TEST_F(SimulationPanelsTest, RoverHeadlightsAndGroundHud) {
+    ASSERT_TRUE(sim_->selectVehicleType(physics::VehicleType::Ground).has_value());
+    sim_->setCameraMode(graphics::CameraMode::Fpv);
+    run(0.5);
+    EXPECT_TRUE(sim_->lights().empty());
+    ASSERT_TRUE(sim_->hud().ground.has_value());
+    EXPECT_EQ(sim_->hud().ground->wheelCount, 4);
+    EXPECT_TRUE(sim_->hud().altitudeAgl.text.empty());
+
+    // `L`: two headlight beams, also from the rover's own FPV camera (where the rover itself
+    // is not drawn), aimed the way the rover faces.
+    sim_->keyboardAction(input::KeyboardAction::ToggleLights);
+    run(0.1);
+    EXPECT_TRUE(sim_->drawItems().empty());
+    ASSERT_EQ(sim_->lights().size(), 2U);
+    const glm::dvec3 nose = sim_->vehiclePose().orientation * glm::dvec3(1.0, 0.0, 0.0);
+    for (const graphics::SpotLight& l : sim_->lights()) {
+        EXPECT_GT(glm::dot(l.direction, nose), 0.99);
+    }
+    sim_->keyboardAction(input::KeyboardAction::ToggleLights);
+    run(0.1);
+    EXPECT_TRUE(sim_->lights().empty());
+
+    // The aerial drone has no headlights (yet) and no ground HUD.
+    ASSERT_TRUE(sim_->selectVehicleType(physics::VehicleType::Aerial).has_value());
+    sim_->keyboardAction(input::KeyboardAction::ToggleLights);
+    run(0.1);
+    EXPECT_TRUE(sim_->lights().empty());
+    EXPECT_FALSE(sim_->hud().ground.has_value());
 }
 
 TEST_F(SimulationPanelsTest, VehiclePanelEditsGroundProfiles) {

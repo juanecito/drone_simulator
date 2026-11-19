@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "ds/graphics/light.hpp"
 #include "ds/graphics/mesh.hpp"
 
 #include <glm/glm.hpp>
@@ -50,17 +51,35 @@ struct RoverVisualState {
 /// @brief GPU-independent rover model: builds the meshes once, emits draw items per frame.
 class RoverModel {
 public:
+    /// @brief Luminous intensity of each headlight on its axis (a 1 W-class LED with a
+    /// ~25° reflector, ≈ 100 lm): ≈ 16 lux at 5 m.
+    static constexpr double kHeadlightCd = 400.0;
+    /// @brief Headlight beam: full intensity within this half-angle…
+    static constexpr double kHeadlightInnerDeg = 10.0;
+    /// @brief …fading out by this one.
+    static constexpr double kHeadlightOuterDeg = 25.0;
+    /// @brief Headlights aim this far below the body's x axis.
+    static constexpr double kHeadlightDownDeg = 4.0;
+    /// @brief Distance where the headlight beam is cut off.
+    static constexpr double kHeadlightRangeM = 60.0;
+
     /// @brief Builds the meshes for @p shape.
     explicit RoverModel(RoverShape shape);
 
     /// @brief Appends the items for @p state to @p out.
     void appendDrawItems(const RoverVisualState& state, std::vector<DrawItem>& out) const;
 
+    /// @brief Appends the two headlight beams for @p state to @p out (none when the lights
+    /// are off).
+    void appendLights(const RoverVisualState& state, std::vector<SpotLight>& out) const;
+
     /// @brief The shape.
     [[nodiscard]] const RoverShape& shape() const noexcept { return shape_; }
     /// @brief Hub of wheel @p index for a suspension compression of @p compressionM (body
     /// frame): more compression lifts the wheel towards the body.
     [[nodiscard]] glm::dvec3 hubAt(std::size_t index, double compressionM) const;
+    /// @brief Position of headlight @p side (−1 left, +1 right) in the body frame.
+    [[nodiscard]] glm::dvec3 headlightAt(double side) const;
 
 private:
     RoverShape shape_;

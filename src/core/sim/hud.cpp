@@ -3,6 +3,7 @@
 
 #include "ds/sim/hud.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 
@@ -109,6 +110,69 @@ HudCompass buildCompass(const geo::Geodetic& position, double trueHeadingDeg, as
     return c;
 }
 
+namespace {
+
+HudLevel slipLevel(double slip) {
+    return slip >= kSlipWarning   ? HudLevel::Warning
+           : slip >= kSlipCaution ? HudLevel::Caution
+                                  : HudLevel::Normal;
+}
+
+// Ground drone read-outs and warnings (FR-GFX-20, FR-GND-07/08/09).
+void buildGroundHud(const WorldSnapshot& s, const HudOptions& o, HudModel& h) {
+    const physics::VehicleTelemetry& t = s.telemetry;
+    const physics::GroundTelemetry& g = t.ground;
+    HudGround ground;
+    ground.pitch.text = std::format("PITCH {:+.0f}°", common::radToDeg(s.attitude.pitch));
+    ground.roll.text = std::format("ROLL {:+.0f}°", common::radToDeg(s.attitude.roll));
+    const double transfer = std::abs(g.loadTransfer);
+    ground.loadTransfer = std::clamp(g.loadTransfer, -1.0, 1.0);
+    ground.stability = g.rolledOver || transfer >= kRolloverWarning ? HudLevel::Warning
+                       : transfer >= kRolloverCaution               ? HudLevel::Caution
+                                                                    : HudLevel::Normal;
+    ground.roll.level = ground.stability;
+    ground.slope.text =
+        std::format("SLOPE {:.0f}° {}", g.slopeDeg, physics::surfaceMaterialName(g.surface));
+    ground.slip.text = std::format("SLIP {:.0f}%", 100.0 * g.maxSlip);
+    ground.slip.level = slipLevel(g.maxSlip);
+    ground.odometer.text = "ODO " + length(g.odometerM, o.imperial, 0);
+    ground.wheelCount = std::clamp(g.wheelCount, 0, physics::kMaxWheels);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(ground.wheelCount); ++i) {
+        ground.wheelSlip[i] = g.slip[i];
+        ground.wheelContact[i] = g.contact[i];
+    }
+    // Forward speed from the truth, signed: reversing shows "−".
+    h.speed.text = (g.speedMs < -0.05 ? "R " : "") + speedText(std::abs(g.speedMs), o.imperial);
+    if (g.mode == physics::DriveMode::SpeedControl && t.armed && !t.failsafe) {
+        h.mode.text += " " + speedText(g.cruiseSetpointMs, o.imperial);
+    }
+    // The altitude items belong to aerial drones.
+    h.altitudeAgl = {};
+    h.altitudeAmsl = {};
+    h.verticalSpeed = {};
+
+    if (g.rolledOver) {
+        h.warnings.push_back({s.mission.active ? "ROLLED OVER" : "ROLLED OVER — PRESS R TO RESET",
+                              HudLevel::Warning});
+    } else if (ground.stability == HudLevel::Warning) {
+        h.warnings.push_back({"ROLLOVER RISK", HudLevel::Warning});
+    } else if (ground.stability == HudLevel::Caution) {
+        h.warnings.push_back({"ROLLOVER RISK", HudLevel::Caution});
+    }
+    if (g.inWater) {
+        h.warnings.push_back({"IN WATER", HudLevel::Warning});
+    } else if (g.waterDepthM > 0.0) {
+        h.warnings.push_back(
+            {std::format("WATER {:.0f} cm", 100.0 * g.waterDepthM), HudLevel::Caution});
+    }
+    if (g.stuckS >= 2.0) {
+        h.warnings.push_back({"STUCK", HudLevel::Caution});
+    }
+    h.ground = ground;
+}
+
+}  // namespace
+
 HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const HudOptions& o) {
     HudModel h;
     const physics::VehicleTelemetry& t = s.telemetry;
@@ -168,7 +232,8 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
             break;
         case physics::BatteryWarning::Critical:
             h.battery.level = HudLevel::Warning;
-            h.warnings.push_back({"BATTERY CRITICAL — LAND", HudLevel::Warning});
+            h.warnings.push_back(
+                {aerial ? "BATTERY CRITICAL — LAND" : "BATTERY CRITICAL", HudLevel::Warning});
             break;
         case physics::BatteryWarning::Depleted:
             h.battery.level = HudLevel::Warning;
@@ -227,7 +292,11 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
                               HudLevel::Warning});
     }
     if (t.failsafe) {
-        h.warnings.push_back({"RC LINK LOST — LANDING", HudLevel::Warning});
+        h.warnings.push_back(
+            {aerial ? "RC LINK LOST — LANDING" : "RC LINK LOST — STOPPED", HudLevel::Warning});
+    }
+    if (!aerial) {
+        buildGroundHud(s, o, h);
     }
     // Flight rules (FR-MIS-06b, FR-MIS-06d): broken ones in red, close ones in amber.
     bool heightRule = false;
@@ -235,7 +304,7 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
         heightRule = heightRule || w.rule == missions::FlightRule::Height;
         h.warnings.push_back({w.message, w.broken ? HudLevel::Warning : HudLevel::Caution});
     }
-    if (h.altitudeAgl.level == HudLevel::Warning && !heightRule) {
+    if (aerial && h.altitudeAgl.level == HudLevel::Warning && !heightRule) {
         h.warnings.push_back({"ABOVE 120 m AGL", HudLevel::Warning});
     }
     buildMissionHud(s.mission, pos, o, h);

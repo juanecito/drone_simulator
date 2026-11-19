@@ -24,7 +24,9 @@ astronomically correct day/night sky.
 > with a briefing, objectives on the HUD, flight rules, scoring with stars, a debrief and your
 > progress saved per user. The **Items** tab places gates, obstacles, pads and zones in the
 > free-flight scene. The **ground drone** (a 4WD skid-steer RC rover) can already be driven in
-> free mode (milestone M6 in progress: its HUD, missions and the parking zone are next). Real
+> free mode, with its own HUD (pitch, roll and a rollover warning, slope, wheel slip,
+odometer) and headlights that light the way at night (milestone M6 in progress: missions and
+the parking zone are next). Real
 > terrain and weather arrive in milestones M4 and M7–M8 (see the specification).
 
 ## Quick start
@@ -72,7 +74,8 @@ rules, prints its errors and exits (0 = valid); see [docs/MISSIONS.md](docs/MISS
 | `A` / `D` or left / right arrows | Steer left / right |
 | `Space` (held) | Brake |
 | `1` `2` / `3` `4` | Manual / Speed control (the drive key sets the cruise speed) |
-| `L`, `C`, `P`, `R` | Lights, camera, pause, reset (as when flying) |
+| `L` | Headlights (they light the terrain and objects ahead) |
+| `C`, `P`, `R` | Camera, pause, reset (as when flying) |
 
 `Enter` also arms the aerial drone. `F5`–`F8` are *Start*, *Pause*, *Step* and *Reset* in the
 Simulation menu. In the **free camera**:

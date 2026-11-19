@@ -207,6 +207,7 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     frame.resetExposure = scene_->takeExposureReset();
     if (sim != nullptr) {
         frame.objects = sim->drawItems();
+        frame.lights = sim->lights();
     }
     renderer_->renderFrame(target, frame);
     if (sim != nullptr && chaseInsetRects()) {

@@ -177,6 +177,16 @@ struct ShadowUniforms {
 };
 static_assert(sizeof(ShadowUniforms) == 3 * 64 + 4 * 16);
 
+// std140 mirror of LightUniforms in assets/shaders/lighting.glsl.
+struct LightUniforms {
+    glm::vec4 count;
+    std::array<glm::vec4, kMaxSpotLights> posRange;
+    std::array<glm::vec4, kMaxSpotLights> dirCos;
+    std::array<glm::vec4, kMaxSpotLights> colorCd;
+    std::array<glm::vec4, kMaxSpotLights> cosInner;
+};
+static_assert(sizeof(LightUniforms) == 16 + 4 * kMaxSpotLights * 16);
+
 // Lowest elevation (sine) at which the Sun or the Moon casts shadows.
 constexpr float kMinShadowLightY = 0.02F;
 
@@ -371,6 +381,7 @@ struct Renderer::Impl {
 
     // Shadows.
     gl::Buffer shadowUbo;
+    gl::Buffer lightUbo;
     gl::Texture shadowMap;
     std::array<gl::Framebuffer, kShadowCascades> shadowFbos;
     int shadowSize = 0;
@@ -578,6 +589,7 @@ common::Result<void> Renderer::loadResources(const RendererResources& resources)
         }
     }
     impl->shadowUbo = gl::createBuffer(sizeof(ShadowUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
+    impl->lightUbo = gl::createBuffer(sizeof(LightUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
     impl->ensureShadowMap(1);  // A valid (lit) map until shadows are first rendered.
 
     impl->transmittance = gl::createTexture2D(GL_RGBA32F, kTransmittanceW, kTransmittanceH);
@@ -722,6 +734,27 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, r.frameUbo.id());
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, r.atmosphereUbo.id());
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, r.exposureSsbo.id());
+
+    // Local spot lights (FR-GFX-08d), camera-relative.
+    {
+        LightUniforms lu{};
+        const std::size_t count = std::min(input.lights.size(), kMaxSpotLights);
+        for (std::size_t i = 0; i < count; ++i) {
+            const SpotLight& l = input.lights[i];
+            lu.posRange[i] =
+                glm::vec4(glm::vec3(l.position - camera.position), static_cast<float>(l.rangeM));
+            lu.dirCos[i] = glm::vec4(glm::vec3(glm::normalize(l.direction)),
+                                     static_cast<float>(std::cos(l.outerAngleRad)));
+            lu.colorCd[i] = glm::vec4(l.color, static_cast<float>(l.intensityCd));
+            lu.cosInner[i] = glm::vec4(static_cast<float>(std::cos(l.innerAngleRad)), 0, 0, 0);
+        }
+        lu.count.x = static_cast<float>(count);
+        if (mainView) {
+            stats_.spotLights = static_cast<int>(count);
+        }
+        glNamedBufferSubData(r.lightUbo.id(), 0, sizeof(lu), &lu);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 3, r.lightUbo.id());
+    }
 
     // --- Atmosphere -------------------------------------------------------------------------
     r.updateAtmosphere(input.visibilityM, stats_);

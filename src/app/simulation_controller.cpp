@@ -1069,6 +1069,11 @@ void SimulationController::updateFrame(double dt, double aspect) {
     if (cameraMode_ != graphics::CameraMode::Fpv) {
         appendVehicleItems(s);
     }
+    // Headlights light the scene from every camera, the vehicle's own included.
+    lights_.clear();
+    if (rover_ && s.telemetry.type == physics::VehicleType::Ground) {
+        rover_->appendLights(roverState(s), lights_);
+    }
 
     sim::HudOptions options;
     if (settings_ != nullptr) {
@@ -1121,21 +1126,25 @@ void SimulationController::buildModel() {
     }
 }
 
+graphics::RoverVisualState SimulationController::roverState(const sim::WorldSnapshot& s) const {
+    const physics::GroundTelemetry& g = s.telemetry.ground;
+    graphics::RoverVisualState v;
+    v.position = pose_.position;
+    v.orientation = pose_.orientation;
+    const std::size_t wheels =
+        std::min<std::size_t>(static_cast<std::size_t>(g.wheelCount), graphics::kRoverMaxWheels);
+    for (std::size_t i = 0; i < wheels; ++i) {
+        v.wheelAngle[i] = g.wheelAngle[i];
+        v.compression[i] = g.compression[i];
+    }
+    v.lights = s.controls.lights;
+    v.braking = g.braking && s.telemetry.armed;
+    return v;
+}
+
 void SimulationController::appendVehicleItems(const sim::WorldSnapshot& s) {
     if (rover_ && s.telemetry.type == physics::VehicleType::Ground) {
-        const physics::GroundTelemetry& g = s.telemetry.ground;
-        graphics::RoverVisualState v;
-        v.position = pose_.position;
-        v.orientation = pose_.orientation;
-        const std::size_t wheels = std::min<std::size_t>(static_cast<std::size_t>(g.wheelCount),
-                                                         graphics::kRoverMaxWheels);
-        for (std::size_t i = 0; i < wheels; ++i) {
-            v.wheelAngle[i] = g.wheelAngle[i];
-            v.compression[i] = g.compression[i];
-        }
-        v.lights = s.controls.lights;
-        v.braking = g.braking && s.telemetry.armed;
-        rover_->appendDrawItems(v, items_);
+        rover_->appendDrawItems(roverState(s), items_);
         return;
     }
     if (!model_ || s.telemetry.type != physics::VehicleType::Aerial) {

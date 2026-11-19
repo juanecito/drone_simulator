@@ -91,6 +91,29 @@ glm::dvec3 RoverModel::hubAt(std::size_t index, double compressionM) const {
     return hub;
 }
 
+glm::dvec3 RoverModel::headlightAt(double side) const {
+    const glm::dvec3 size = shape_.bodySize;
+    return {0.5 * size.x + 0.003, side * 0.3 * size.y, shape_.bodyBottomM - 0.55 * size.z};
+}
+
+void RoverModel::appendLights(const RoverVisualState& state, std::vector<SpotLight>& out) const {
+    if (!state.lights) {
+        return;
+    }
+    const double down = kHeadlightDownDeg * std::numbers::pi / 180.0;
+    // Body frame: x forward, z down.
+    const glm::dvec3 axis = state.orientation * glm::dvec3(std::cos(down), 0.0, std::sin(down));
+    for (const double side : {-1.0, 1.0}) {
+        out.push_back({.position = state.position + state.orientation * headlightAt(side),
+                       .direction = axis,
+                       .color = headlightColor(),
+                       .intensityCd = kHeadlightCd,
+                       .innerAngleRad = kHeadlightInnerDeg * std::numbers::pi / 180.0,
+                       .outerAngleRad = kHeadlightOuterDeg * std::numbers::pi / 180.0,
+                       .rangeM = kHeadlightRangeM});
+    }
+}
+
 void RoverModel::appendDrawItems(const RoverVisualState& state, std::vector<DrawItem>& out) const {
     const glm::dquat& q = state.orientation;
     out.push_back({.mesh = body_, .position = state.position, .orientation = q});
@@ -107,8 +130,7 @@ void RoverModel::appendDrawItems(const RoverVisualState& state, std::vector<Draw
     const float on = state.lights ? 1.0F : 0.0F;
     for (const double side : {-1.0, 1.0}) {
         out.push_back({.mesh = headlight_,
-                       .position = state.position +
-                                   q * glm::dvec3(0.5 * size.x + 0.003, side * 0.3 * size.y, z),
+                       .position = state.position + q * headlightAt(side),
                        .orientation = q,
                        .emissiveScale = on,
                        .castsShadow = false});

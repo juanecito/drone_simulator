@@ -1818,11 +1818,30 @@ so Markdown pages appear in the generated site.
     HUD shows the drive mode and the drive command (or BRAKE); the Simulation tab shows
     drive/steering bars and ground telemetry (speed and odometry, pitch, roll, slope and
     surface, wheel slip, motor commands).
-- **Next steps:** ground visuals finished (lights that illuminate the scene, steering of
-  Ackermann layouts later) and the ground HUD (heading, pitch/roll with the rollover warning
-  from the load transfer, slope, wheel slip indicator); ramps and bridges as driving
-  surfaces; the parking-zone item and objective; at least four ground missions; calibration
-  wizard for ground mappings.
+- **Step 3 — Ground HUD and headlights (done):**
+  - *Ground HUD (FR-GFX-20):* for ground drones the altitude column is replaced by `PITCH`,
+    `ROLL` and `SLOPE` (degrees and surface material), followed by a load-transfer bar
+    ((N_right − N_left) / ΣN; amber zone from 0.6, red from 0.85, where the inner wheels are
+    about to lift) and a top view of the wheels coloured by their combined slip (green, amber
+    from 0.2 past the tyre's peak grip, red from 0.5 when spinning or locked, grey off the
+    ground). The right column shows the forward speed (`R` prefix when reversing), the
+    largest slip (`SLIP 8%`), the wheel odometer (`ODO 123 m`), home and pilot distances and
+    the wind. Heading, battery and the drive mode stay where they are for aerial drones; in
+    Speed control the mode shows the cruise set speed. Warnings: `ROLLOVER RISK` (amber/red
+    with the load transfer), `ROLLED OVER — PRESS R TO RESET` (`ROLLED OVER` in a mission),
+    `IN WATER` or the water depth, `STUCK` after 2 s without progress, `RC LINK LOST —
+    STOPPED` and `BATTERY CRITICAL`; the 120 m AGL rule is aerial-only.
+  - *Local lights (FR-GFX-08d):* `graphics::SpotLight` (position, beam axis, colour,
+    intensity in candela, inner/outer cone half-angles, range) — the renderer takes up to 8
+    per frame (`FrameInput::lights`, std140 UBO binding 3) and adds their illuminance
+    (inverse-square, Lambert, smooth cone edge, windowed to 0 at the range) to the terrain,
+    objects and the water body. The rover's two headlights are 400 cd LED beams (≈ 16 lux at
+    5 m) with 10°/25° half-angles aimed 4° down, warm white (≈ 5000 K), switched with `L`;
+    they light the scene from every camera, FPV included. `graphics::spotIlluminance()` is the
+    CPU mirror used by the tests. Spot lights do not cast shadows yet.
+- **Next steps:** ramps and bridges as driving surfaces; the parking-zone item and objective;
+  at least four ground missions; calibration wizard for ground mappings; shadows of the
+  headlights and lights on items (FR-GFX-08d, S) later; steering of Ackermann layouts.
 
 ---
 

@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
 // SPDX-License-Identifier: MIT
 //
-// Terrain: material splatting with procedural detail, sun/moon/sky lighting and aerial
-// perspective, with cascaded shadows of the Sun or the Moon (FR-GFX-10).
+// Terrain: material splatting with procedural detail, sun/moon/sky lighting, local spot
+// lights (headlights) and aerial perspective, with cascaded shadows of the Sun or the Moon
+// (FR-GFX-10).
 
 #include "common.glsl"
 #include "atmosphere.glsl"
@@ -33,6 +34,8 @@ void main() {
     vec3 albedo = w.x * kGrass + w.y * kRock + w.z * kSand + w.w * kSnow;
     albedo *= 0.8 + 0.4 * detail;
     float visibility = shadowVisibility(v_rel, n);
-    vec3 luminance = albedo / PI * surfaceIrradianceShadowed(surfaceRadius(v_rel.y), n, visibility);
+    vec3 irradiance = surfaceIrradianceShadowed(surfaceRadius(v_rel.y), n, visibility) +
+                      spotIrradiance(v_rel, n);
+    vec3 luminance = albedo / PI * irradiance;
     o_color = finishSurface(luminance, v_rel);
 }

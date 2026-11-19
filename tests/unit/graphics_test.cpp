@@ -16,6 +16,7 @@
 #include "ds/graphics/drone_model.hpp"
 #include "ds/graphics/exposure.hpp"
 #include "ds/graphics/image.hpp"
+#include "ds/graphics/light.hpp"
 #include "ds/graphics/mesh.hpp"
 #include "ds/graphics/rover_model.hpp"
 #include "ds/graphics/shader_source.hpp"
@@ -530,6 +531,58 @@ TEST(RoverModel, WheelsTurnAndFollowTheSuspension) {
         const glm::dvec3 forward = levelNorth() * glm::dvec3(1, 0, 0);
         EXPECT_GT(glm::dot(top - topBefore, forward), 0.0);
     }
+}
+
+TEST(SpotLight, PhotometryConeAndRange) {
+    SpotLight l;
+    l.position = {0.0, 0.0, 0.0};
+    l.direction = {0.0, 0.0, -1.0};
+    l.intensityCd = 400.0;
+    l.innerAngleRad = 10.0 * std::numbers::pi / 180.0;
+    l.outerAngleRad = 25.0 * std::numbers::pi / 180.0;
+    l.rangeM = 60.0;
+    const glm::dvec3 facing(0.0, 0.0, 1.0);
+    // Inverse-square law on the axis (the range window is ≈ 1 this close).
+    EXPECT_NEAR(spotIlluminance(l, {0.0, 0.0, -5.0}, facing), 16.0, 0.01);
+    EXPECT_NEAR(spotIlluminance(l, {0.0, 0.0, -10.0}, facing), 4.0, 0.01);
+    // Lambert: a surface tilted by 60° gets half.
+    const glm::dvec3 tilted(0.0, std::sin(std::numbers::pi / 3.0), 0.5);
+    EXPECT_NEAR(spotIlluminance(l, {0.0, 0.0, -5.0}, tilted), 8.0, 0.01);
+    // Facing away, behind the lamp, outside the cone, past the range: nothing.
+    EXPECT_DOUBLE_EQ(spotIlluminance(l, {0.0, 0.0, -5.0}, -facing), 0.0);
+    EXPECT_DOUBLE_EQ(spotIlluminance(l, {0.0, 0.0, 5.0}, -facing), 0.0);
+    const double off = 30.0 * std::numbers::pi / 180.0;
+    EXPECT_DOUBLE_EQ(spotIlluminance(l, {5.0 * std::sin(off), 0.0, -5.0 * std::cos(off)}, facing),
+                     0.0);
+    const double half = 17.5 * std::numbers::pi / 180.0;
+    const double edge =
+        spotIlluminance(l, {5.0 * std::sin(half), 0.0, -5.0 * std::cos(half)}, facing);
+    EXPECT_GT(edge, 0.5);  // Soft edge between the inner and outer angles.
+    EXPECT_LT(edge, 16.0 * std::cos(half));
+    EXPECT_DOUBLE_EQ(spotIlluminance(l, {0.0, 0.0, -61.0}, facing), 0.0);
+    EXPECT_NEAR(glm::dot(headlightColor(), glm::vec3(0.2126F, 0.7152F, 0.0722F)), 1.0F, 1e-5F);
+}
+
+TEST(RoverModel, HeadlightsAimForwardAndSlightlyDown) {
+    const RoverModel model = rover();
+    RoverVisualState state;
+    state.orientation = levelNorth();
+    state.position = {10.0, 5.0, 20.0};
+    state.lights = false;
+    std::vector<SpotLight> lights;
+    model.appendLights(state, lights);
+    EXPECT_TRUE(lights.empty());
+    state.lights = true;
+    model.appendLights(state, lights);
+    ASSERT_EQ(lights.size(), 2U);
+    const glm::dvec3 north(0.0, 0.0, -1.0);
+    for (const SpotLight& l : lights) {
+        EXPECT_GT(glm::dot(l.direction, north), 0.99);
+        EXPECT_LT(l.direction.y, 0.0);
+        EXPECT_GT(glm::dot(l.position - state.position, north), 0.19);  // At the nose.
+        EXPECT_DOUBLE_EQ(l.intensityCd, RoverModel::kHeadlightCd);
+    }
+    EXPECT_LT(lights[0].position.x, lights[1].position.x);  // Left, then right.
 }
 
 TEST(RoverModel, LightsAndBrakeLights) {
