@@ -144,6 +144,21 @@ TEST(MissionLoader, DependenciesAndReferences) {
     m["items"][0]["widthM"] = 3;
     EXPECT_NE(errorsOf(m).find("items[0].widthM: does not apply to a landingPad"),
               std::string::npos);
+    // Ramps and bridges (FR-ITM-13): the bridge's own properties are checked.
+    m = fixture("precision-landing-01.mission.json");
+    m["items"].push_back(
+        {{"type", "ramp"}, {"id", "ramp"}, {"local", {5, 0, 0}}, {"sizeM", {1.0, 0.25, 1.5}}});
+    m["items"].push_back({{"type", "bridge"},
+                          {"id", "bridge"},
+                          {"local", {-5, 0, 0}},
+                          {"sizeM", {1.0, 0.5, 3.0}},
+                          {"rampLengthM", 2.0},
+                          {"kerbs", false}});
+    EXPECT_EQ(errorsOf(m), "");
+    m["items"][1]["kerbs"] = true;
+    m["items"][1]["rampLengthM"] = 2.0;
+    EXPECT_NE(errorsOf(m).find("rampLengthM: does not apply to a ramp"), std::string::npos);
+    EXPECT_NE(errorsOf(m).find("kerbs: does not apply to a ramp"), std::string::npos);
 }
 
 TEST(MissionLoader, PlacementAndReachability) {

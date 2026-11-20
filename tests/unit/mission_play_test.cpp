@@ -156,6 +156,29 @@ TEST(ItemVisuals, PhysicalItemsAlwaysDrawnMarkersOnlyWhenShown) {
                      ->transparent);
 }
 
+TEST(ItemVisuals, RampsAndBridgesAreDrawnAsTheyCollide) {
+    // FR-ITM-13: every face of the wedge faces out of the solid, so lighting and culling see
+    // it from outside; the top of a ramp faces up and towards its low end.
+    using items::ItemType;
+    const auto ramp = sim::ItemVisuals::meshFor(item(ItemType::Ramp), false);
+    ASSERT_NE(ramp, nullptr);
+    EXPECT_EQ(ramp->indices.size(), 3U * (2 + 2 + 2 + 1 + 1));  // 3 quads, 2 triangles.
+    const glm::vec3 inside(0.0F, 0.05F, 0.2F);                  // Low part of the wedge.
+    for (std::size_t i = 0; i < ramp->indices.size(); i += 3) {
+        const auto& v = ramp->vertices[ramp->indices[i]];
+        EXPECT_GE(glm::dot(v.normal, v.position - inside), 0.0F) << "triangle " << i / 3;
+    }
+    bool slope = false;
+    for (const auto& v : ramp->vertices) {
+        slope = slope || (v.normal.y > 0.9F && v.normal.y < 0.999F && v.normal.z > 0.1F);
+    }
+    EXPECT_TRUE(slope);
+    // Bridge: deck, two ramps and two kerbs.
+    const auto bridge = sim::ItemVisuals::meshFor(item(ItemType::Bridge), false);
+    ASSERT_NE(bridge, nullptr);
+    EXPECT_EQ(bridge->indices.size(), 3U * (12 + 2 * 8 + 2 * 12));
+}
+
 TEST(ItemVisuals, HighlightedTargetsGlow) {
     items::ItemRegistry registry;
     ASSERT_TRUE(registry.add(item(items::ItemType::Waypoint)).has_value());

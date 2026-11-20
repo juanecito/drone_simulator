@@ -129,6 +129,11 @@ public:
     /// @brief Apparent sun elevation at the origin, degrees (updated every simulated second).
     [[nodiscard]] double sunElevationDeg() const noexcept { return sunElevationDeg_; }
 
+    /// @brief Surface a vehicle point at @p point stands on (FR-GND-03, FR-ITM-13): the terrain,
+    /// or the top of a ramp or bridge deck under the point that is not above it (by more than
+    /// 2 cm). Decks are paved.
+    [[nodiscard]] physics::GroundSample surfaceAt(const physics::Vec3& point) const;
+
     /// @brief Fills @p snapshot (allocation-free for a reused snapshot).
     void fillSnapshot(WorldSnapshot& snapshot) const;
     /// @brief Event bus (handlers run on the simulation thread).
@@ -164,6 +169,7 @@ public:
 
 private:
     physics::EnvironmentSample sampleEnvironment(const physics::Vec3& position) const;
+    [[nodiscard]] const items::ItemRegistry& activeItems() const noexcept;
     void restartWind();
     void publishVehicleEvents();
     void resolveObstacles();
@@ -174,6 +180,7 @@ private:
     std::unique_ptr<physics::Vehicle> vehicle_;
     physics::WindModel wind_;
     physics::EnvironmentSample env_;
+    physics::SurfaceQuery surfaceQuery_;  ///< surfaceAt(), for the vehicle's contacts.
     EventBus events_;
     double time_ = 0.0;
     std::uint64_t ticks_ = 0;

@@ -122,6 +122,9 @@ struct SolidPart {
         Sphere,    ///< `radiusM` around `centreM`.
         Gable,     ///< Gable roof: base `2·halfExtentsM.x` × `2·halfExtentsM.z` centred on
                    ///< `centreM`, rising `heightM` to a ridge along the local z axis.
+        Wedge,     ///< Ramp: base `2·halfExtentsM.x` × `2·halfExtentsM.z` centred on `centreM`,
+                   ///< its top rising linearly by `heightM` towards local −z (towards +z
+                   ///< when `flipped`), with a vertical face at the high end.
     };
     Kind kind = Kind::Box;                   ///< Kind.
     Vec3 centreM{0.0};                       ///< See @ref Kind.
@@ -129,6 +132,7 @@ struct SolidPart {
     double radiusM = 0.0;                    ///< Cylinder / sphere radius.
     double heightM = 0.0;                    ///< Cylinder height; gable rise.
     Material material = Material::Concrete;  ///< What it is made of.
+    bool flipped = false;                    ///< Wedge rising towards local +z.
 
     /// @brief Volume in m³.
     [[nodiscard]] double volumeM3() const noexcept;
@@ -264,11 +268,39 @@ struct SurfaceContact {
 /// - `cow`: `sizeM` 0.8 × 1.5 × 2.4 m; body, head and four legs;
 /// - `man`: `heightM` 1.75 m (the rest scales with it); legs, torso, arms, neck and head.
 ///
+/// Ground-drone items (FR-ITM-13), heading = the direction of travel up or across them:
+/// - `ramp`: `sizeM` 1 × 0.25 × 1.5 m (width × height × length), a wooden wedge rising
+///   towards the heading, with its vertical face at the far end;
+/// - `bridge`: `sizeM` 1 × 0.5 × 3 m: a 0.3 m thick concrete deck whose top is `height` above
+///   the origin over `length`, with approach ramps of `rampLengthM` (default: a 12° slope) at
+///   both ends and, unless `kerbs` is false, kerbs along both sides of the deck. Below a deck
+///   higher than its thickness there is room to pass.
+///
 /// Polygon vertices are offsets from the item position. Invalid properties are ignored (the
 /// mission validator reports them).
 [[nodiscard]] Shape defaultShape(ItemType type, const common::Json& properties);
 /// @brief True for types that block movement and sight by default (obstacles, ramps, bridges).
 [[nodiscard]] bool isSolidType(ItemType type) noexcept;
+/// @brief True for types a ground drone can drive on (ramps and bridges, FR-ITM-13).
+[[nodiscard]] bool isDrivableType(ItemType type) noexcept;
+
+/// @brief Default slope of a bridge's approach ramps, degrees.
+inline constexpr double kBridgeRampSlopeDeg = 12.0;
+
+/// @brief The top of a drivable item at a horizontal position.
+struct DriveSurface {
+    double heightM = 0.0;                    ///< World height of the top.
+    Vec3 normal{0.0, 1.0, 0.0};              ///< Upward unit normal, world.
+    Material material = Material::Concrete;  ///< What the top is made of.
+};
+
+/// @brief Highest top of @p item's drivable parts (boxes and wedges of ramps and bridges)
+/// over the world position (@p x, @p z) that is not higher than @p maxHeightM, or nullopt.
+/// @details A wheel or a body point at height `h` stands on the top found with
+/// `maxHeightM = h`: tops above it are walls or decks overhead, which the obstacle contacts
+/// handle. Assumes the item is rotated about the vertical only (its heading).
+[[nodiscard]] std::optional<DriveSurface> driveSurfaceAt(const Item& item, double x, double z,
+                                                         double maxHeightM);
 
 /// @brief Typical mass of an obstacle figure (`shape`) of the size given by @p shape, kg:
 /// its volume times the bulk density of the figure (house 250 kg/m³ of its bounding box, a

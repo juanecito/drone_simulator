@@ -1171,7 +1171,7 @@
             "type": "number",
             "exclusiveMinimum": 0
           },
-          "description": "[width, length] or [width, height, length] in metres."
+          "description": "[width, length] or [width, height, length] in metres. Ramps rise by the height towards their heading; a bridge's deck top is the height above its position, over the length."
         },
         "polygon": {
           "$ref": "#/$defs/polygon"
@@ -1202,6 +1202,15 @@
         "order": {
           "type": "integer",
           "minimum": 0
+        },
+        "rampLengthM": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Bridges: length of each approach ramp (default: a 12° slope up to the deck)."
+        },
+        "kerbs": {
+          "type": "boolean",
+          "description": "Bridges: kerbs along both sides of the deck (default true)."
         }
       },
       "patternProperties": {
