@@ -278,14 +278,15 @@ constexpr int kMultiScatterSize = 32;
 constexpr int kSkyViewW = 192;
 constexpr int kSkyViewH = 108;
 
-// Koschmieder: visibility V ⇔ extinction 3.912 / V at ground level; Rayleigh at 550 nm
-// contributes 0.0116 /km, aerosols (Mie) the rest.
+// Koschmieder: visibility V ⇔ extinction 3.912 / V at ground level; Rayleigh contributes
+// its share at 550 nm, aerosols (Mie) the rest (aerosolExtinctionPerKm()).
 AtmosphereUniforms atmosphereFor(double visibilityM) {
-    const double v = std::clamp(visibilityM, 50.0, 400'000.0) / 1000.0;
-    const auto mieExt = static_cast<float>(std::max(3.912 / v - 0.0116, 4.4e-3));
+    const auto mieExt = static_cast<float>(aerosolExtinctionPerKm(visibilityM));
     const float mieScat = mieExt * 0.9F;
     AtmosphereUniforms a{};
-    a.rayleigh = {5.802e-3F, 13.558e-3F, 33.1e-3F, 8.0F};
+    a.rayleigh = {static_cast<float>(kRayleighExtinctionPerKm.x),
+                  static_cast<float>(kRayleighExtinctionPerKm.y),
+                  static_cast<float>(kRayleighExtinctionPerKm.z), 8.0F};
     a.mie = {mieScat, mieScat, mieScat, 1.2F};
     a.mieExt = {mieExt, mieExt, mieExt, 0.8F};
     a.ozone = {0.650e-3F, 1.881e-3F, 0.085e-3F, 25.0F};

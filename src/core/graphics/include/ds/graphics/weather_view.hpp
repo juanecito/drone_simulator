@@ -86,6 +86,16 @@ inline constexpr double kPrecipitationBoxM = 24.0;
                                           const weather::GroundCover& ground, double groundY,
                                           double windSpeedMs, double timeS);
 
+/// @brief Rayleigh extinction of air at sea level at 680, 550 and 440 nm (red, green, blue),
+/// 1/km — the atmosphere model's values (`assets/shaders/atmosphere.glsl`).
+inline constexpr glm::dvec3 kRayleighExtinctionPerKm{5.802e-3, 13.558e-3, 33.1e-3};
+
+/// @brief Aerosol (Mie) extinction at ground level for a visibility of @p visibilityM, 1/km:
+/// with the Rayleigh extinction at 550 nm it gives the Koschmieder extinction 3.912 / V
+/// (a dark object is just distinguishable, at 2 % contrast, at V). Clamped to 50 m … 400 km;
+/// at least 4.4·10⁻³ /km (the clearest air, ≈ 220 km visibility).
+[[nodiscard]] double aerosolExtinctionPerKm(double visibilityM) noexcept;
+
 /// @brief The cloud-shape noise at @p q (fractal value noise, 5 octaves, about 0–1): the CPU
 /// mirror of `cloudNoise()` in `weather.glsl`.
 [[nodiscard]] double cloudNoise(glm::dvec2 q) noexcept;

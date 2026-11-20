@@ -42,6 +42,9 @@ public:
 private:
     EstimatedState state_;
     Vec3 gyroBias_{0.0};
+    double stationaryS_ = 0.0;      // Time at rest (gyro calibration).
+    Vec3 accelFilteredWorld_{0.0};  // Low-passed accelerometer, world frame (attitude).
+    bool accelFilterValid_ = false;
     double accelBiasUp_ = 0.0;
     double lastBaro_ = 0.0;
     bool baroValid_ = false;

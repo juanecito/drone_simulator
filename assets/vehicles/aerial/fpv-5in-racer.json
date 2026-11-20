@@ -11,8 +11,8 @@
     "inertiaXxKgM2": 0.0016,
     "inertiaYyKgM2": 0.0018,
     "inertiaZzKgM2": 0.003,
-    "dragAreaForwardM2": 0.022,
-    "dragAreaSideM2": 0.007,
+    "dragAreaForwardM2": 0.011,
+    "dragAreaSideM2": 0.0035,
     "dragAreaVerticalM2": 0.04,
     "propHeightM": 0.02,
     "gearHeightM": 0.03,
@@ -34,7 +34,7 @@
     "thrustCoefficient": 0.185,
     "torqueCoefficient": 0.025,
     "zeroThrustAdvanceRatio": 0.9,
-    "rotorDragCoefficient": 0.5
+    "rotorDragCoefficient": 1.5
   },
   "battery": {
     "chemistry": "lipo",

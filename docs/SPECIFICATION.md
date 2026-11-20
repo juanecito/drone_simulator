@@ -1964,7 +1964,7 @@ so Markdown pages appear in the generated site.
     on real quadrotors (0.1–0.6 s⁻¹). After a hard bank in Angle mode without a GPS fix the
     true attitude drifts by ≈ 0.5°/s with the estimate level. The Angle-mode test now checks
     the self-levelling 1 s after centring; the drift is left for the NFR-REAL step (8), since
-    changing the rotor drag moves every validated flight figure.
+    changing the rotor drag moves every validated flight figure. (Resolved in step 8.)
 - **Step 3 — Weather rendering (done, FR-WX-09 M and the S items marked, FR-GFX-09):**
   - *Data path:* `graphics::makeWeatherView()` turns the snapshot's `WeatherConditions`, cloud
     drift and `GroundCover` into a `WeatherView` (`FrameInput::weather`), with heights measured
@@ -2161,6 +2161,43 @@ so Markdown pages appear in the generated site.
   - *Not done:* ghost replay of the personal best next to the live vehicle (FR-MIS-15, C),
     seeking inside a replay (restart it instead), and replaying a session recorded with an
     older replay format (none exists yet).
+- **Step 8 — NFR-REAL validation (done, except the M4-dependent items):**
+  - *Rotor drag (from step 2):* `rotorDragCoefficient` goes from 0.5 to 1.5 in the three aerial
+    profiles, about 0.2–0.3 s⁻¹ of linear drag at hover, as measured on real quadrotors. The
+    body drag areas were re-fitted so the top speeds stay within ±10 % of the references
+    (30.8 / 16.6 / 18.4 m/s against 30 / 16 / 18). Maximum wind: 30.8 / 15.1 / 16.1 m/s, so the
+    maximum wind levels are unchanged (8 / 5 / 5).
+  - *Estimator:* the Angle-mode drift without a GPS fix came mostly from motor vibration
+    starving the accelerometer correction (trust ≈ 0.2), not from the drag. The fix:
+    - the accelerometer is low-passed at 2 Hz in the world frame;
+    - the trust window is ±0.1 g (was ±0.05 g);
+    - the rest calibration of the gyro is a running mean;
+    - in-flight bias learning is 10× slower.
+
+    After a full bank the drone now leans at most 7° while braking and settles level within
+    about 25 s.
+  - *Checks added:*
+    - NFR-REAL-04: Angle-mode self-levelling without a GPS fix.
+    - NFR-REAL-08: closed-loop Position hold in a steady wind; tilt and power within ±10 %
+      of `windHoldState()`, measured 0.3° and 2.3 %.
+    - NFR-REAL-09: braking distance per surface, within ±10 % of `v²/(2μg)`.
+    - NFR-REAL-09: tilt-table rollover angle, within ±2° of the rigid-body value with
+      near-rigid springs, and of the value corrected for the suspension lean with the
+      profile's springs.
+    - NFR-REAL-11: Koschmieder fog. The renderer's extinction, fog plus aerosol plus Rayleigh
+      at 550 nm, puts 2 % contrast at the weather's visibility. Its Rayleigh share is now the
+      green coefficient.
+
+    The figures are in `docs/FLIGHT_MODEL.md` §9–10 (with a status table per requirement)
+    and `docs/GROUND_MODEL.md` §8.
+  - *Test changes:* the position-hold test now checks "blown away" at the first level whose
+    mean wind is 20 % beyond the limit, measured from the take-off spot. Brief gusts above
+    the limit only nudge a drone with mostly linear drag. When the thrust runs out, the
+    drone sinks into the weaker wind near the ground and holds there.
+  - *Not done:*
+    - NFR-REAL-05 and NFR-REAL-12 need the M4 GDAL / PDAL work.
+    - The battery temperature curves of NFR-REAL-11 are still representative, not taken from
+      a datasheet.
 
 ---
 

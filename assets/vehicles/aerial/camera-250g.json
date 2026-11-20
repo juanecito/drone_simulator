@@ -11,8 +11,8 @@
     "inertiaXxKgM2": 0.0004,
     "inertiaYyKgM2": 0.0005,
     "inertiaZzKgM2": 0.00075,
-    "dragAreaForwardM2": 0.01,
-    "dragAreaSideM2": 0.007,
+    "dragAreaForwardM2": 0.005,
+    "dragAreaSideM2": 0.0035,
     "dragAreaVerticalM2": 0.02,
     "propHeightM": 0.015,
     "gearHeightM": 0.04,
@@ -34,7 +34,7 @@
     "thrustCoefficient": 0.13,
     "torqueCoefficient": 0.0095,
     "zeroThrustAdvanceRatio": 0.6,
-    "rotorDragCoefficient": 0.5
+    "rotorDragCoefficient": 1.5
   },
   "battery": {
     "chemistry": "liion",

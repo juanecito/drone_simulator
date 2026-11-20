@@ -66,7 +66,11 @@ four times per step.
 - **Static thrust and torque:** `T = C_T·ρ·n²·D⁴` and `Q = C_Q·ρ·n²·D⁵` (n in rev/s).
 - **Forward flight:** both coefficients fall with the advance ratio `J = V/(n·D)`; thrust
   falls linearly to zero at `J₀` (`zeroThrustAdvanceRatio`).
-- **H-force (rotor drag):** `H = −k·T·μ` in the rotor plane, with `μ = V∥/(ω·R)`.
+- **H-force (rotor drag):** `H = −k·T·μ` in the rotor plane, with `μ = V∥/(ω·R)`. At hover
+  it acts as a linear drag `d ≈ k·g/(ω·R)` on the velocity. The reference profiles use
+  `k = 1.5` (`rotorDragCoefficient`), so `d` ≈ 0.2–0.3 s⁻¹, inside the 0.1–0.6 s⁻¹ measured
+  on real quadrotors (Faessler 2018, Svacha 2017). The body drag areas are fitted so that,
+  together with the rotor drag, the top speeds match the references (§9).
 - **Ground effect:** `T / (1 − (R/4z)²)` (Cheeseman–Bennett), capped.
 - **Vortex ring state:** up to 25 % thrust loss when descending at about the hover induced
   velocity `v_h = √(T/(2ρA))`. There is no loss below `0.3·v_h` or above `2·v_h`.
@@ -148,22 +152,24 @@ four times per step.
 ### Estimator
 
 - **Attitude:** a complementary filter. It integrates the gyro and corrects towards gravity
-  with gain 0.25 s⁻¹.
-- **Accelerometer trust:** the accelerometer is trusted only while `|a + g·up|` stays within
-  0.05 g of the expected value. With a GPS fix, the GPS-derived acceleration (smoothed,
-  at most 0.5 s old) is removed from the reference first, so steady turns and acceleration
-  do not tilt the horizon.
+  with gain 0.25 s⁻¹. In flight it also learns the gyro bias slowly (integral gain 0.002).
+- **Accelerometer filter and trust:** the accelerometer is low-passed at 2 Hz (in the world
+  frame, so that rotating the body does not lag it), as flight controllers do. Without the
+  filter, motor vibration fails the magnitude check most of the time. The accelerometer is
+  then trusted fully when `|a|` equals the expected magnitude, falling to zero at ±0.1 g
+  (ArduPilot's DCM: ±0.5 g). With a GPS fix, the GPS-derived acceleration (smoothed, at
+  most 0.5 s old) is removed from the reference first, so steady turns and acceleration do
+  not tilt the horizon.
 - **Gyro calibration:** while the vehicle is disarmed, still and on the ground, the gyro bias
-  is learned (τ = 0.5 s).
+  is the running mean of the readings since it came to rest (later, the mean of the last
+  2 s), as flight controllers calibrate before arming.
 - **Altitude and climb rate:** from the barometer, plus the GPS position and velocity once
   there is a fix.
-- **Known limitation:** without a GPS fix, long accelerating manoeuvres slowly drift the
-  attitude estimate, as on a real flight controller. The accelerometer of a multirotor reads
-  mostly thrust, so it sees the tilt only through the drag that grows with airspeed. The rotor
-  drag of the reference profiles (`rotorDragCoefficient` 0.5, about 0.04 s⁻¹ of velocity) is
-  weaker than measured on real quadrotors (≈ 0.1–0.6 s⁻¹), so after a hard bank in Angle mode
-  without a fix the true attitude keeps drifting by about 0.5°/s while the estimate stays
-  level. To be revisited with the NFR-REAL validation of M7.
+- **Without a GPS fix:** the accelerometer of a multirotor reads mostly thrust, so it sees
+  the tilt only through the rotor drag on the velocity. While the drone brakes, that drag
+  reads as tilt, as on a real flight controller. After a full bank in Angle mode the drone
+  leans a few degrees against its motion (at most 7°, the racer from 12 m/s), then settles
+  level within about 25 s, with no sustained oscillation or drift (NFR-REAL-04, §10).
 
 ## 7. Flight controller (`flight_controller.hpp`)
 
@@ -233,12 +239,17 @@ that they agree with the references to within NFR-REAL-01 tolerances.
 
 | Profile | Mass | Battery | Prop | Hover throttle (model / ref.) | T/W | Hover time | Top speed | Max wind level |
 |---|---|---|---|---|---|---|---|---|
-| `fpv-5in-racer` | 650 g | 6S 1100 mAh LiPo | 5.1″ tri-blade, 1900 Kv | 0.237 / 0.24 | 8.45 / 8.5 | 8.3 / 8.0 min | 30.7 / 30 m/s | 8 |
-| `camera-250g` | 249 g | 2S 2000 mAh Li-ion | 4.7″, 2700 Kv | 0.477 / 0.47 | 2.94 / 2.9 | 24.8 / 24 min | 16.3 / 16 m/s | 5 |
-| `survey-1500g` | 1.5 kg | 4S 5000 mAh LiPo | 10″, 740 Kv | 0.527 / 0.52 | 2.60 / 2.6 | 20.2 / 20 min | 18.1 / 18 m/s | 5 |
+| `fpv-5in-racer` | 650 g | 6S 1100 mAh LiPo | 5.1″ tri-blade, 1900 Kv | 0.237 / 0.24 | 8.45 / 8.5 | 8.3 / 8.0 min | 30.8 / 30 m/s | 8 |
+| `camera-250g` | 249 g | 2S 2000 mAh Li-ion | 4.7″, 2700 Kv | 0.477 / 0.47 | 2.94 / 2.9 | 24.8 / 24 min | 16.6 / 16 m/s | 5 |
+| `survey-1500g` | 1.5 kg | 4S 5000 mAh LiPo | 10″, 740 Kv | 0.527 / 0.52 | 2.60 / 2.6 | 20.2 / 20 min | 18.4 / 18 m/s | 5 |
 
+- **Drag:** rotor drag `k = 1.5` on all three. Body drag areas (front / side): racer
+  0.011 / 0.0035 m², camera 0.005 / 0.0035 m², survey 0.02 / 0.011 m².
 - **Top speed:** the level speed at the profile's tilt limit, computed in steady state. In
-  simulated flight (altitude hold, with a GPS fix) the drones reach 31.9, 16.7 and 18.5 m/s.
+  simulated flight (altitude hold, with a GPS fix) the drones reach 31.1, 17.2 and 18.7 m/s.
+- **Maximum wind:** the strongest steady wind each drone holds position in, nose into the
+  wind (tilt limit and 85 % of full command): 30.8, 15.1 and 16.1 m/s (the Vehicle tab shows
+  the tilt it takes). The side drag areas are smaller, so side-on the drones need less tilt.
 - **Max wind level:** the highest level whose gust peak the drone can still hold position
   against within its tilt limit and 85 % of full command (FR-WIND-07).
 
@@ -251,13 +262,44 @@ The checks run in `ctest`. The most relevant tests:
 | Free fall and drag (NFR-REAL-02) | `physics_test.cpp` |
 | ISA atmosphere (NFR-REAL-03) | `physics_test.cpp` |
 | Reference figures (NFR-REAL-01) | `flight_test.cpp`: static and dynamic hover throttle and current, test-stand thrust-to-weight, top speed in flight |
-| Holding against wind (NFR-REAL-08) | `flight_test.cpp`: the drone leans into the wind and stays in place |
+| Holding against wind (NFR-REAL-08) | `flight_test.cpp`: forces balance on a pinned test stand at the analytical tilt and command; in closed-loop Position hold in a steady wind, the mean tilt and power match `windHoldState()` within ±10 % (table below) |
 | Wind statistics | `wind_test.cpp`: 60 s mean speed per level, Dryden σ, gust occurrence, determinism |
 | Battery in the cold (NFR-REAL-11) | `physics_test.cpp`: delivered capacity and mid-discharge voltage vs. temperature |
+| Fog and visibility (NFR-REAL-11) | `graphics_test.cpp`: near the ground, the renderer's fog, aerosol and Rayleigh extinction bring a dark object to 2 % contrast at the weather's visibility, within ±10 % (Koschmieder), for every weather preset |
 | Rain (FR-WX-06) | `flight_test.cpp`: water film mass, drop momentum |
-| Controller | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Angle-mode limits, Acro step response |
+| Controller (NFR-REAL-04) | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Acro step response (overshoot < 30 %, no sustained oscillation); Angle mode holds its tilt limit and self-levels without a GPS fix: at most 10° while braking, within 1.5° of level and below 1.5 m/s after 25 s |
 | Failure injection (FR-PHY-15) | `flight_test.cpp`, `ground_test.cpp`: injector timing, sensor faults in the readings, GPS loss and drift in position hold, degraded and dead motors, cell fault, compass and baro errors, RC loss; `mission_flight_test.cpp`: scheduled failures reach the vehicle |
-| Position hold and RTH (FR-PHY-13, FR-WIND-06) | `flight_test.cpp`: hold within 2 m (estimate) up to each profile's wind limit and blown away 3 levels above it, stick speed and braking, RTH climb → return → land within the GPS error of home, failsafe RTH, GPS pre-arm checks |
+| Position hold and RTH (FR-PHY-13, FR-WIND-06) | `flight_test.cpp`: hold within 2 m (estimate) up to each profile's wind limit and blown away (more than 20 m from the take-off point) at the first level whose mean wind is 20 % beyond the limit, stick speed and braking, RTH climb → return → land within the GPS error of home, failsafe RTH, GPS pre-arm checks |
+
+### Holding position in a steady wind (NFR-REAL-08)
+
+Position hold for 25 s in a steady wind, nose into the wind, then averaged over 10 s.
+"Model" is `windHoldState()`, the analytical drag balance the Vehicle tab shows.
+
+| Profile | Wind | Tilt (sim / model) | Battery power (sim / model) |
+|---|---|---|---|
+| FPV | 5.0 m/s | 7.9° / 8.0° | 188 / 188 W |
+| FPV | 24.7 m/s | 45.2° / 45.4° | 944 / 965 W |
+| camera | 5.0 m/s | 9.6° / 9.7° | 36.2 / 36.4 W |
+| camera | 12.1 m/s | 24.0° / 24.2° | 58.7 / 59.4 W |
+| survey | 5.0 m/s | 7.8° / 7.8° | 239 / 239 W |
+| survey | 12.9 m/s | 20.7° / 20.8° | 384 / 386 W |
+
+### Validation status (M7)
+
+| Requirement | Status |
+|---|---|
+| NFR-REAL-01 reference figures | Checked: hover throttle, T/W, hover time and top speed within ±10 % (§9) |
+| NFR-REAL-02 free fall | Checked |
+| NFR-REAL-03 thrust at altitude | Checked |
+| NFR-REAL-04 attitude control | Checked: Acro step table below; Angle-mode self-levelling |
+| NFR-REAL-05 online terrain heights | Deferred to M4 (needs the GDAL elevation pipeline) |
+| NFR-REAL-06 / 07 geo and UTM | Checked (`geo_test.cpp`) |
+| NFR-REAL-08 wind balance | Checked: open- and closed-loop, table above |
+| NFR-REAL-09 ground drone | Checked (`docs/GROUND_MODEL.md` §8) |
+| NFR-REAL-10 astronomy | Checked (`astro_test.cpp`) |
+| NFR-REAL-11 battery and fog | Checked. Open item: the battery temperature curves are representative, not taken from a cell datasheet |
+| NFR-REAL-12 lidar DTM | Deferred to M4 (needs PDAL) |
 
 ### Acro step response
 

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <numbers>
 
 #include "ds/common/json.hpp"
@@ -472,6 +473,85 @@ TEST(GroundVehicle, LeansOnASideSlopeAndRollsOverWhenTippedPastItsLimit) {
         EXPECT_EQ(world.vehicle().telemetry().armBlock, physics::ArmBlock::RolledOver);
         world.reset();
         EXPECT_FALSE(world.vehicle().telemetry().ground.rolledOver);
+    }
+}
+
+TEST(GroundVehicle, StaticRolloverAngleMatchesTheAnalyticalValue) {
+    // NFR-REAL-09, tilt-table test: standing across a side slope of θ (tyres that cannot slide,
+    // so the slope is not limited by the grip), the rover stays on its wheels below its static
+    // rollover angle and rolls over beyond it; the tipping angle is found by bisection.
+    // - With near-rigid springs it matches the rigid-body value atan(track / (2 · CoG height))
+    //   within ±2°.
+    // - With the profile's springs the body leans on the loaded downhill springs (all the
+    //   weight on them at the tipping point) and it tips earlier by that lean, as real
+    //   vehicles do on a tilt table: within ±2° of the rigid value minus the lean
+    //   atan((m g cos θ / 2) / k / track).
+    const GroundProfile base = rover();
+    const double rigidDeg = physics::computeGroundStats(base).rolloverSideDeg;
+    const auto tippingAngle = [&](const GroundProfile& p) {
+        const auto rollsOver = [&](double slopeDeg) {
+            sim::WorldConfig config = roverWorld(plane(slopeDeg, SurfaceMaterial::Paved, true));
+            config.profile = p;
+            sim::World world(std::move(config));
+            Driver d{world};
+            d.run(3.0);
+            return world.vehicle().telemetry().ground.rolledOver;
+        };
+        double lo = rigidDeg - 10.0;
+        double hi = rigidDeg + 6.0;
+        EXPECT_FALSE(rollsOver(lo));
+        EXPECT_TRUE(rollsOver(hi));
+        for (int i = 0; i < 7; ++i) {  // 0.13° resolution.
+            const double mid = 0.5 * (lo + hi);
+            (rollsOver(mid) ? hi : lo) = mid;
+        }
+        return 0.5 * (lo + hi);
+    };
+    GroundProfile p = base;
+    p.tyre.gripScale = 4.0;
+    GroundProfile stiff = p;
+    stiff.suspension.stiffnessNPerM *= 25.0;
+    stiff.suspension.dampingNsPerM *= 5.0;
+    EXPECT_NEAR(tippingAngle(stiff), rigidDeg, 2.0);
+
+    double compliantDeg = rigidDeg;
+    for (int i = 0; i < 10; ++i) {
+        const double perWheel =
+            p.chassis.massKg * physics::kGravity * std::cos(common::degToRad(compliantDeg)) / 2.0;
+        const double lean =
+            std::atan(perWheel / p.suspension.stiffnessNPerM / p.wheels.trackWidthM);
+        compliantDeg = rigidDeg - common::radToDeg(lean);
+    }
+    EXPECT_NEAR(tippingAngle(p), compliantDeg, 2.0);
+}
+
+TEST(GroundVehicle, BrakingDistanceOnEachMaterial) {
+    // NFR-REAL-09: from full speed, the brake locks the wheels (its torque exceeds the grip on
+    // every material) and the rover slides to a stop within ±10 % of v² / (2 μ g), μ the
+    // surface's peak friction. The locked tyre slides at the Magic Formula's value at full
+    // slip, sin(C · atan B) ≈ 0.91 of the peak, so the distance is a little longer: within
+    // 5 % of v² / (2 μ_slide g).
+    const GroundProfile p = rover();
+    for (const SurfaceMaterial m : physics::allSurfaceMaterials()) {
+        sim::World world(roverWorld(plane(0.0, m)));
+        Driver d{world};
+        d.arm();
+        d.controls.drive = 1.0;
+        d.run(4.0);
+        const double v0 = world.vehicle().telemetry().ground.speedMs;
+        const Vec3 p0 = world.vehicle().bodyState().position;
+        d.controls.drive = 0.0;
+        d.controls.brake = true;
+        d.run(3.0);
+        const std::string name(physics::surfaceMaterialName(m));
+        EXPECT_LT(std::abs(world.vehicle().telemetry().ground.speedMs), 0.01) << name;
+        const double distance = glm::length(world.vehicle().bodyState().position - p0);
+        const double mu = physics::surfaceProperties(m).peakFriction * p.tyre.gripScale;
+        const double muSlide = mu * std::sin(p.tyre.shapeC * std::atan(p.tyre.stiffnessB));
+        const double peakDistance = v0 * v0 / (2.0 * mu * physics::kGravity);
+        const double slideDistance = v0 * v0 / (2.0 * muSlide * physics::kGravity);
+        EXPECT_NEAR(distance, peakDistance, 0.1 * peakDistance) << name;
+        EXPECT_NEAR(distance, slideDistance, 0.05 * slideDistance) << name;
     }
 }
 

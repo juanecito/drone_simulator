@@ -975,6 +975,31 @@ TEST(WeatherView, FogAndPrecipitationLowerTheVisibilityNearTheGround) {
     EXPECT_DOUBLE_EQ(snow.snowDepthM, 0.12);
 }
 
+TEST(WeatherView, ADarkObjectIsJustVisibleAtTheVisibilityDistance) {
+    // NFR-REAL-11 (Koschmieder): near the ground, the extinction the renderer applies — the
+    // fog layer's plus the atmosphere's aerosol and Rayleigh (550 nm) — brings a dark object's
+    // contrast against the horizon down to the 2 % threshold, exp(−σ·d) = 0.02, at a distance
+    // d within ±10 % of the weather's visibility.
+    for (const char* preset : {"clear", "overcast", "mist", "fog", "drizzle", "light-rain",
+                               "heavy-rain", "heavy-snow", "thunderstorm"}) {
+        const auto conditions = presetConditions(preset);
+        const WeatherView v = makeWeatherView(conditions, {}, {}, 0.0, 2.0, 0.0);
+        const double sigma =
+            v.fogExtinctionPerM + (ds::graphics::aerosolExtinctionPerKm(v.aerosolVisibilityM) +
+                                   ds::graphics::kRayleighExtinctionPerKm.y) /
+                                      1000.0;
+        const double threshold = std::log(1.0 / 0.02) / sigma;
+        EXPECT_NEAR(threshold, conditions.visibilityM, 0.1 * conditions.visibilityM) << preset;
+    }
+    // The aerosol alone, across the range a weather can set.
+    for (const double visibility : {50.0, 200.0, 1000.0, 5000.0, 20'000.0, 60'000.0, 100'000.0}) {
+        const double sigma = (ds::graphics::aerosolExtinctionPerKm(visibility) +
+                              ds::graphics::kRayleighExtinctionPerKm.y) /
+                             1000.0;
+        EXPECT_NEAR(3.912 / sigma, visibility, 0.1 * visibility) << visibility;
+    }
+}
+
 TEST(WeatherView, LightningFlashes) {
     // About two flashes a minute: count the starts over an hour.
     int flashes = 0;

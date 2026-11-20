@@ -217,7 +217,7 @@ simulation does with the same profile:
 | 0 → 90 % of top speed, paved | 0.42 s | within ±30 % (test) |
 | Stall torque per wheel | 1.11 N·m | — |
 | Steepest climb: paved / dirt / grass / sand / mud / snow | 42° / 33° / 29° / 27° / 19° / 17° (traction) | paved: climbs 35°, not 40°; grass: 25°, not 30°; snow: not 20° |
-| Static rollover angle, sideways / front–back | 53.7° / 49.8° | stays up on a 30° side slope |
+| Static rollover angle, sideways / front–back | 53.7° / 49.8° (rigid body) | tilt table: 52.3° with near-rigid springs; 49.7° with the profile's springs (rigid value less the 3.0° lean on the loaded springs: 50.8°) |
 | Load transfer on a 30° side slope | 0.42 (rigid body) | 0.44 (body rolls on its springs) |
 | Cruise (70 % of the grass top speed) | 1.48 m/s at 1.9 A | — |
 | Range / driving time at that speed, grass | 7.3 km / 82 min | — |
@@ -228,11 +228,34 @@ wheels spin, the grip drops towards its sliding value and the rover slides back.
 torque limit (`sin θ + C_rr·cos θ = n·T/(m·g·r)` at a crawl) is not reached by this profile on
 any surface.
 
+**Braking (NFR-REAL-09).** The holding brake (0.8 N·m a wheel) is stronger than the grip on
+every surface, so braking from full speed locks the wheels and the rover slides. A locked tyre
+slides at the Magic Formula's value at full slip, `sin(C·atan B)` ≈ 0.91 of the peak friction,
+so the distances come out 6–9 % longer than `v²/(2μg)` with the peak μ, and within 2.5 % of
+`v²/(2μ_slide·g)`:
+
+| Surface | From | Stops in | `v²/(2μg)` | `v²/(2μ_slide·g)` |
+|---|---:|---:|---:|---:|
+| paved | 2.23 m/s | 0.299 m | 0.281 m | 0.311 m |
+| grass | 2.17 m/s | 0.478 m | 0.438 m | 0.483 m |
+| dirt | 2.20 m/s | 0.415 m | 0.381 m | 0.420 m |
+| sand | 2.08 m/s | 0.483 m | 0.443 m | 0.489 m |
+| snow | 2.16 m/s | 0.868 m | 0.795 m | 0.877 m |
+| mud | 2.10 m/s | 0.704 m | 0.644 m | 0.711 m |
+
+**Rollover (NFR-REAL-09).** The test stands the rover across a side slope with tyres that
+cannot slide, and finds the tipping angle by bisection. With near-rigid springs it tips within
+±2° of the rigid-body value `atan(track / (2·h))`. With its own springs the body leans on the
+downhill springs, which carry all the weight at the tipping point
+(`atan((m·g·cos θ/2)/k/track)` ≈ 3°), and it tips that much earlier. Real vehicles behave the
+same on a tilt table: their tipping angle is below the rigid-body figure.
+
 Unit tests (`tests/unit/ground_test.cpp`) check: profile loading, round trip and validation
 messages; the derived figures; the arcade mix, arming checks and failsafe; resting on the
 suspension (wheel loads sum to `m·g`, static compression); top speed and acceleration against
 the derived figures; braking distance and holding; turning on the spot and arcing in the right
-direction; speed control holding its set speed; climbing within the limit and sliding back
+direction; braking distance per surface against `v²/(2μg)`; the tilt-table rollover angle;
+speed control holding its set speed; climbing within the limit and sliding back
 beyond it; parking on a slope with and without a holding brake; the side-slope load transfer;
 rollover and its arming block; stuck detection against a wall; drowning in water; softer
 ground being slower; failsafe; determinism and tick-rate independence; collisions with an

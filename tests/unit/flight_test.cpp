@@ -267,6 +267,64 @@ TEST(AerialVehicleFlight, SteadyWindBalanceMatchesDragModel) {
     }
 }
 
+TEST(AerialVehicleFlight, PositionHoldInSteadyWindMatchesDragBalance) {
+    // NFR-REAL-08 in closed loop: hovering in Position hold in a steady wind, the mean tilt and
+    // battery power match windHoldState() within ±10 % (the figures of docs/FLIGHT_MODEL.md),
+    // at a light wind and at 80 % of the profile's maximum.
+    for (const char* key : kProfiles) {
+        AerialProfile p = loadProfile(key);
+        p.sensors.gpsAcquisitionS = 1.0;
+        const double limit = computeAerialStats(p).maxWindMs;
+        for (const double wind : {5.0, 0.8 * limit}) {
+            AerialVehicle vehicle(p, 3);
+            EnvironmentSample env = stillAir();
+            // Nose into the wind (heading west), as windHoldState() assumes: the frontal and side
+            // drag areas differ.
+            vehicle.reset(Vec3(0.0), -90.0 * kDeg, env);
+            PilotCommand cmd;
+            cmd.mode = FlightMode::AltitudeHold;
+            cmd.throttle = 0.5;
+            const auto fly = [&](double seconds, const auto& each) {
+                for (int i = 0; i < static_cast<int>(std::lround(seconds / kDt)); ++i) {
+                    env.air = isaAir(vehicle.bodyState().position.y);  // The barometer.
+                    vehicle.updateSensors(env, kDt);
+                    vehicle.updateController(cmd, kDt);
+                    vehicle.integrate(env, kDt);
+                    vehicle.resolveCollisions(env, kDt);
+                    each();
+                }
+            };
+            const auto nothing = [] {};
+            fly(1.0, nothing);
+            cmd.arm = true;
+            fly(0.5, nothing);
+            cmd.throttle = 1.0;
+            fly(4.0, nothing);  // Climb to ≈ 12 m, well out of ground effect.
+            cmd.throttle = 0.5;
+            cmd.mode = FlightMode::PositionHold;
+            env.wind = Vec3(wind, 0.0, 0.0);  // Steady, from the west.
+            fly(25.0, nothing);
+            ASSERT_EQ(vehicle.telemetry().mode, FlightMode::PositionHold) << key;
+            double tilt = 0.0;
+            double power = 0.0;
+            int n = 0;
+            fly(10.0, [&] {
+                tilt += tiltAngle(vehicle.bodyState().orientation);
+                power += vehicle.battery().voltage() * vehicle.battery().current();
+                ++n;
+            });
+            tilt /= n;
+            power /= n;
+            const WindHoldState hold =
+                windHoldState(p, wind, env.air.densityKgM3, vehicle.battery().stateOfCharge());
+            EXPECT_NEAR(tilt / kDeg, hold.tiltDeg, 0.1 * hold.tiltDeg) << key << " wind " << wind;
+            EXPECT_NEAR(power, hold.powerW, 0.1 * hold.powerW) << key << " wind " << wind;
+            const Vec3 v = vehicle.bodyState().velocity;
+            EXPECT_LT(std::hypot(v.x, v.z), 0.5) << key << " wind " << wind;
+        }
+    }
+}
+
 // --- Vehicle ---------------------------------------------------------------------------------
 
 TEST(AerialVehicle, IdealFreeFall) {
@@ -665,17 +723,26 @@ TEST(PositionHold, HoldsInWindUpToTheProfileLimitAndDriftsBeyond) {
                 << key << " level " << level;
             EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
         }
-        // Three levels above the limit the gusts win: the drone is blown away.
-        sim::World world = gpsWorld(key, std::min(maxLevel + 3, 10));
+        // Where the mean wind itself is 20 % beyond the limit, the drone is blown away (the
+        // gusts alone are brief: with mostly linear rotor drag, a gust peak above the limit
+        // only nudges the drone).
+        int beyond = maxLevel + 1;
+        while (beyond <= 10 &&
+               table.level(beyond).meanSpeedMs < 1.2 * computeAerialStats(p).maxWindMs) {
+            ++beyond;
+        }
+        if (beyond > 10) {
+            continue;  // The racer resists every level.
+        }
+        // (Measured from the take-off spot: the drone is blown downwind while it climbs, then
+        // sinks into the weaker wind near the ground when the thrust runs out.)
+        sim::World world = gpsWorld(key, beyond);
+        const Vec3 start = world.vehicle().bodyState().position;
         input::ControlInputs c = takeOff(world);
         c.flightMode = 3;
-        run(world, c, 10.0);
-        const Vec3 start = world.vehicle().bodyState().position;
         run(world, c, 30.0);
         const Vec3 d = world.vehicle().bodyState().position - start;
-        if (maxLevel + 3 <= 10) {
-            EXPECT_GT(std::hypot(d.x, d.z), 5.0) << key;
-        }
+        EXPECT_GT(std::hypot(d.x, d.z), 20.0) << key << " level " << beyond;
     }
 }
 
@@ -998,24 +1065,42 @@ TEST(FlightController, GpsModesNeedAFix) {
     EXPECT_FALSE(h.fc.gpsModeUnavailable());
 }
 
-TEST(FlightController, AngleModeLimitsTilt) {
+TEST(FlightController, AngleModeLimitsTiltAndSelfLevels) {
+    // NFR-REAL-04 (self-levelling modes): full stick holds the profile's maximum angle;
+    // centring the stick levels the drone without a sustained oscillation or drift — also
+    // without a GPS fix (none here), where the attitude rests on the accelerometer alone. While
+    // the drone brakes from the bank, rotor drag reads as tilt (as on real flight controllers):
+    // the drone leans a few degrees against its motion, then settles within ≈ 25 s to the
+    // sensor biases. Flown in altitude hold (Angle + throttle hold) so the bank costs no height.
     for (const char* key : kProfiles) {
-        const AerialProfile p = loadProfile(key);
+        AerialProfile p = loadProfile(key);
+        p.sensors.gpsAcquisitionS = 1e6;
         sim::World world = makeWorld(p);
-        input::ControlInputs c = takeOff(world);
-        c.flightMode = 1;  // Angle.
+        input::ControlInputs c = takeOff(world, 4.0);
         c.roll = 1.0;
         run(world, c, 1.5);
-        const Euler e = eulerFromOrientation(world.vehicle().bodyState().orientation);
-        EXPECT_NEAR(e.roll / kDeg, p.controller.maxAngleDeg, 3.0) << key;
-        c.roll = 0.0;
-        // The self-levelling response, 1 s after centring. Later the true attitude drifts
-        // slowly (≈ 0.5°/s) without a GPS fix: the accelerometer reads mostly thrust and cannot
-        // see the bank (known limitation, M7 notes in SPECIFICATION.md).
-        run(world, c, 1.0);
-        EXPECT_LT(std::abs(eulerFromOrientation(world.vehicle().bodyState().orientation).roll),
-                  3.0 * kDeg)
+        EXPECT_NEAR(eulerFromOrientation(world.vehicle().bodyState().orientation).roll / kDeg,
+                    p.controller.maxAngleDeg, 3.0)
             << key;
+        c.roll = 0.0;
+        double peak = 0.0;
+        double late = 0.0;
+        for (int i = 0; i < 30 * 500; ++i) {
+            world.tick(c, kDt);
+            const double tilt = tiltAngle(world.vehicle().bodyState().orientation);
+            if (i >= 2 * 500) {
+                peak = std::max(peak, tilt);
+            }
+            if (i >= 25 * 500) {
+                late = std::max(late, tilt);
+            }
+        }
+        const RigidBodyState& b = world.vehicle().bodyState();
+        EXPECT_LT(peak, 10.0 * kDeg) << key;  // Braking from 5–12 m/s.
+        EXPECT_LT(late, 1.5 * kDeg) << key;
+        EXPECT_LT(std::hypot(b.velocity.x, b.velocity.z), 1.5) << key;
+        EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+        EXPECT_FALSE(world.vehicle().telemetry().estimate.positionValid) << key;
     }
 }
 

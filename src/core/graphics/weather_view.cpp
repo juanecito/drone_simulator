@@ -103,6 +103,11 @@ double meanDensity(double threshold, double softness) {
 
 }  // namespace
 
+double aerosolExtinctionPerKm(double visibilityM) noexcept {
+    const double v = std::clamp(visibilityM, 50.0, 400'000.0) / 1000.0;
+    return std::max(kKoschmieder / v - kRayleighExtinctionPerKm.y, 4.4e-3);
+}
+
 double cloudNoise(glm::dvec2 q) noexcept {
     // Five octaves; each is rotated by about 37° (and shifted) to hide the lattice.
     auto x = static_cast<float>(q.x);

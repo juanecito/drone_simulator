@@ -12,10 +12,12 @@ namespace ds::physics {
 namespace {
 
 constexpr double kAccelGain = 0.25;  // Attitude correction from gravity, 1/s.
-constexpr double kAccelTrustWindow =
-    0.05;  // Accelerometer trust falls to 0 at ±0.05 g from the expected.
-constexpr double kAccelBiasGain = 0.02;
-constexpr double kGyroCalibrationTauS = 0.5;  // Bias learning while stationary.
+// Accelerometer trust falls to 0 at ±0.1 g from the expected magnitude (ArduPilot's DCM: ±0.5 g;
+// narrower keeps braking without a GPS fix from being taken for tilt).
+constexpr double kAccelTrustWindow = 0.1;
+constexpr double kAccelFilterHz = 2.0;    // Low-pass of the accelerometer for the attitude.
+constexpr double kAccelBiasGain = 0.002;  // In-flight gyro bias learning (the bias walk is slow).
+constexpr double kGyroCalibrationWindowS = 2.0;  // Averaging window of the rest calibration.
 constexpr double kMagGain = 0.5;              // Heading correction, 1/s.
 constexpr double kBaroOmega = 1.5;            // Altitude filter bandwidth, rad/s.
 constexpr double kGpsPositionGain = 1.0;
@@ -31,6 +33,7 @@ void StateEstimator::reset(double headingRad, double altitudeM) {
     state_.euler = eulerFromOrientation(state_.attitude);
     state_.altitudeM = altitudeM;
     gyroBias_ = Vec3(0.0);
+    stationaryS_ = 0.0;
     accelBiasUp_ = 0.0;
     lastBaro_ = altitudeM;
     baroValid_ = false;
@@ -38,12 +41,21 @@ void StateEstimator::reset(double headingRad, double altitudeM) {
     lastGpsVelocity_ = Vec3(0.0);
     gpsAge_ = 0.0;
     gpsAccelValid_ = false;
+    accelFilteredWorld_ = Vec3(0.0);
+    accelFilterValid_ = false;
 }
 
 const EstimatedState& StateEstimator::update(const SensorReadings& s, double dt, bool stationary) {
-    // Gyro calibration at rest: the bias converges to the mean reading.
+    // Gyro calibration at rest: the running mean of the readings since the vehicle came to
+    // rest (then a moving average over the last 2 s), as flight controllers calibrate before
+    // arming. An exponential filter would still carry part of the turn-on bias after a short
+    // rest and the attitude would drift by that much in flight.
     if (stationary) {
-        gyroBias_ += (1.0 - std::exp(-dt / kGyroCalibrationTauS)) * (s.imu.gyro - gyroBias_);
+        stationaryS_ += dt;
+        const double weight = std::max(dt / stationaryS_, dt / kGyroCalibrationWindowS);
+        gyroBias_ += std::min(weight, 1.0) * (s.imu.gyro - gyroBias_);
+    } else {
+        stationaryS_ = 0.0;
     }
 
     // --- Acceleration from the GPS velocity (compensates the accelerometer in turns). ---
@@ -66,15 +78,26 @@ const EstimatedState& StateEstimator::update(const SensorReadings& s, double dt,
     // The accelerometer measures the specific force a − g; with the vehicle's acceleration a
     // known from GPS, the expected reading points along a + g·up rather than straight up (a
     // sustained bank would otherwise be taken for level flight).
+    // The accelerometer is low-passed first, as flight controllers do: motor vibration on the
+    // raw samples would fail the magnitude check most of the time and starve the correction.
+    // It is filtered in the world frame so that rotating the body does not lag the reading.
+    const Vec3 accelWorldNow = state_.attitude * s.imu.accel;
+    if (!accelFilterValid_) {
+        accelFilteredWorld_ = accelWorldNow;
+        accelFilterValid_ = true;
+    }
+    accelFilteredWorld_ += (1.0 - std::exp(-dt * common::kTwoPi * kAccelFilterHz)) *
+                           (accelWorldNow - accelFilteredWorld_);
+    const Vec3 accelFiltered = worldToBody(state_.attitude, accelFilteredWorld_);
     Vec3 correction(0.0);
-    const double accelNorm = glm::length(s.imu.accel);
+    const double accelNorm = glm::length(accelFiltered);
     const Vec3 expectedWorld = gpsAccel_ + Vec3(0.0, kGravity, 0.0);
     const double expectedNorm = glm::length(expectedWorld);
     if (accelNorm > 1e-3 && expectedNorm > 1e-3) {
         // Trust the accelerometer only when it agrees in magnitude (not during manoeuvres).
         const double trust = std::clamp(
             1.0 - std::abs(accelNorm - expectedNorm) / (kAccelTrustWindow * kGravity), 0.0, 1.0);
-        const Vec3 measuredUp = s.imu.accel / accelNorm;
+        const Vec3 measuredUp = accelFiltered / accelNorm;
         const Vec3 estimatedUp = worldToBody(state_.attitude, expectedWorld / expectedNorm);
         const Vec3 error = glm::cross(measuredUp, estimatedUp);
         correction += kAccelGain * trust * error;
