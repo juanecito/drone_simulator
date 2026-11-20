@@ -1395,11 +1395,12 @@ manager hands the focus back and forth).
 | `docs` | custom | Doxygen |
 
 - System dependencies (`find_package`): Qt6 (`Core`, `Sql`, `Gui`, `Widgets`,
-  `OpenGLWidgets`, `Test`), OpenGL, **GDAL ≥ 3.6** (brings PROJ), **PDAL ≥ 2.6**, **libcurl**, **SDL3**;
+  `OpenGLWidgets`, `Test`), OpenGL, **GDAL ≥ 3.6** (brings PROJ), **PDAL ≥ 2.6**, **libcurl**, **SDL3**,
+  **Assimp ≥ 5.2** (glTF 2.0 / OBJ model files, FR-GFX-12);
   QtKeychain (app layer, for the OS keyring).
   SQLite comes with Qt's `QSQLITE` driver plugin. glm, GoogleTest and nlohmann/json via
   `FetchContent` if not found; cpp-httplib (tests only, mock provider server); glad vendored in `third_party/`.
-  Debian 13 packages: `qt6-base-dev libgdal-dev libpdal-dev libcurl4-openssl-dev libsdl3-dev qtkeychain-qt6-dev`.
+  Debian 13 packages: `qt6-base-dev libgdal-dev libpdal-dev libcurl4-openssl-dev libsdl3-dev libassimp-dev qtkeychain-qt6-dev`.
 - Shaders, models, reference vehicles, missions and provider presets are copied next to the
   binary at build time and installed under `<prefix>/share/` (see §7.1).
 - `cmake --install` produces a relocatable layout: the app finds its data relative to its
@@ -1574,8 +1575,7 @@ so Markdown pages appear in the generated site.
   validation figures, step responses and wind limits).
 - **Vehicle visuals:** the drone is a procedural model built from the profile (frame, motors,
   propellers, FPV camera, landing feet, navigation lights); propellers become translucent
-  blur discs above 15 % of maximum speed. glTF models are deferred (M6, with the ground
-  drone). The navigation lights are emissive but do not light the scene (deferred to M7).
+  blur discs above 15 % of maximum speed. Model files (glTF/OBJ) came in M6 (step 7). The navigation lights are emissive but do not light the scene (deferred to M7).
 - **Shadows (FR-GFX-10):** three cascades (25 / 120 / 600 m, 2048² by default, texel-snapped)
   from the Sun, or from the Moon when the Sun is below the horizon; terrain and vehicles cast
   and receive. Translucent blur discs do not cast.
@@ -1760,7 +1760,7 @@ so Markdown pages appear in the generated site.
   launch, abort, stored attempts, debrief choices, the Retry menu entry, import, the
   free-rules setting and the Items tab; a GL test rendering a mission in flight.
 
-**M6 implementation notes** (in progress; deliberate scope decisions):
+**M6 implementation notes** (done; deliberate scope decisions):
 
 - **Step 1 — Ground vehicle core (done):** the `Vehicle` interface now carries everything the
   loop, missions and statistics need (armed state, battery, mass, camera, sensors, obstacle
@@ -1879,9 +1879,30 @@ so Markdown pages appear in the generated site.
   are cleared, switches, deadzones and expo kept. Steering on a trigger is refused. The
   Controls tab enables *Calibrate…* for both types (ground needs 2 axes) and names its button
   *Drive With This* for ground mappings.
-- **Next steps:** mesh loading for vehicles and items (FR-GFX-12, deferred here from M3);
-  shadows of the headlights and lights on items (FR-GFX-08d, S) later; steering of Ackermann
-  layouts.
+- **Step 7 — Model files for vehicles and items (done, FR-GFX-12 M, deferred here from M3):**
+  - *Loader:* `graphics::loadMesh()` reads glTF 2.0 (`.gltf`, `.glb`) and Wavefront OBJ
+    (`.obj` + `.mtl`) with Assimp (Debian `libassimp-dev`): triangles only, node transforms
+    baked in, normals generated where missing (smoothed across bends under 60°). Materials
+    give the colour only — base colour (OBJ: diffuse) × vertex colours, opacity (translucent
+    meshes are drawn blended) and emission (shown in the emitted colour, 300 cd/m² at factor 1,
+    times `KHR_materials_emissive_strength`); **texture maps are ignored**. At most 2 million
+    vertices. Models use the glTF axes (metres, +Y up, front towards +Z).
+  - *Placement:* the mesh is turned into the vehicle body frame or the item frame and fitted
+    — scaled uniformly to fit the procedural body (vehicles) or the item's shape (obstacles),
+    centred, resting on its bottom — so any model can be used without editing its units or
+    origin. Wheels, propellers and lights stay procedural (they move); collision shapes do not
+    change.
+  - *Where models are named:* `modelFile` in a vehicle profile (Vehicle tab › *Model:*
+    *Choose…* / *Built-in*, then *Apply*; an absolute path, or a name looked for in
+    `~/.drone_simulation/models/` and then `<share>/models/`) and the `model` property of
+    obstacle items in missions (looked for first in the mission's folder; no `..`). A file that
+    cannot be read is reported (status bar and log) and the procedural model is drawn.
+  - *Built-in:* `models/crate.obj`, a 1 m wooden crate (original, MIT).
+- **M6 is complete.** Left for later, all S/C priority: shadows of the headlights and lights on
+  items (FR-GFX-08d); 6WD rocker-bogie, Ackermann crawler and tracked layouts and their
+  reference profiles (FR-GND-01/12); Heading hold, traction control, regenerative braking (S)
+  and the waypoint autopilot (C) (FR-GND-05/11); texture maps on model files; choosing item
+  models in the Items tab.
 
 ---
 

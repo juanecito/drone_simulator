@@ -8,6 +8,8 @@
 #include <functional>
 #include <numbers>
 
+#include "ds/common/log.hpp"
+
 namespace ds::sim {
 namespace {
 
@@ -573,9 +575,34 @@ std::shared_ptr<const Mesh> ItemVisuals::meshFor(const items::Item& item, bool s
     return nullptr;
 }
 
-ItemVisuals::ItemVisuals(const items::ItemRegistry& registry, bool showMarkers) {
+std::shared_ptr<const graphics::Mesh> ItemVisuals::modelMeshFor(
+    const items::Item& item, const graphics::Mesh& procedural, graphics::ModelLibrary& models,
+    const std::filesystem::path& modelDir) {
+    const std::string file = propertyString(item.properties, "model", "");
+    if (item.type != ItemType::Obstacle || file.empty() || procedural.vertices.empty()) {
+        return nullptr;
+    }
+    auto loaded = models.load(file, modelDir);
+    if (!loaded) {
+        log::warn("Item {}: {}; drawn as its shape", item.key, loaded.error().message);
+        return nullptr;
+    }
+    auto mesh = std::make_shared<graphics::Mesh>(**loaded);
+    graphics::gltfToItemFrame(*mesh);
+    graphics::fitMesh(*mesh, graphics::meshBounds(procedural), 1, -1.0F);
+    return mesh;
+}
+
+ItemVisuals::ItemVisuals(const items::ItemRegistry& registry, bool showMarkers,
+                         graphics::ModelLibrary* models, const std::filesystem::path& modelDir) {
     for (const items::Item* item : registry.items()) {
-        if (auto mesh = meshFor(*item, showMarkers); mesh && !mesh->indices.empty()) {
+        auto mesh = meshFor(*item, showMarkers);
+        if (mesh && models != nullptr) {
+            if (auto model = modelMeshFor(*item, *mesh, *models, modelDir)) {
+                mesh = std::move(model);
+            }
+        }
+        if (mesh && !mesh->indices.empty()) {
             parts_.push_back({.key = item->key,
                               .mesh = std::move(mesh),
                               .position = item->transform.position,

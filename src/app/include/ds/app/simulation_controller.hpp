@@ -20,6 +20,7 @@
 #include "ds/graphics/camera.hpp"
 #include "ds/graphics/camera_rig.hpp"
 #include "ds/graphics/drone_model.hpp"
+#include "ds/graphics/mesh_loader.hpp"
 #include "ds/graphics/rover_model.hpp"
 #include "ds/input/input_selector.hpp"
 #include "ds/input/joystick_service.hpp"
@@ -167,8 +168,10 @@ public:
     /// places the vehicle at the spawn point and enters PreFlight (the mission starts when the
     /// vehicle is armed). Mission rules apply until endMission(): time scale 1×, no free
     /// camera, no resets, the profile locked, the keyboard only if `allowKeyboard`.
+    /// @p missionDir (the mission file's folder) is searched first for item model files.
     common::Result<void> startMission(const missions::MissionDefinition& mission,
-                                      const physics::VehicleProfile& profile);
+                                      const physics::VehicleProfile& profile,
+                                      const std::filesystem::path& missionDir = {});
     /// @brief Starts the attempt again from a clean state (vehicle back at the spawn point).
     void retryMission();
     /// @brief Ends the running attempt as Aborted.
@@ -283,6 +286,8 @@ signals:
 
 private:
     void loadWindTable(const std::filesystem::path& assets);
+    /// Replaces the procedural body by the profile's model file, if it has one.
+    void applyModelFile();
     void loadBuiltInProfiles(const std::filesystem::path& assets);
     void syncBuiltInProfiles();
     void reloadProfiles();
@@ -317,6 +322,8 @@ private:
     bool modified_ = false;
     std::unique_ptr<graphics::DroneModel> model_;
     std::unique_ptr<graphics::RoverModel> rover_;
+    /// Model files (FR-GFX-12): `~/.drone_simulation/models`, then `<assets>/models`.
+    std::unique_ptr<graphics::ModelLibrary> models_;
 
     std::unique_ptr<input::JoystickService> joysticks_;
     std::unique_ptr<input::InputSelector> selector_;

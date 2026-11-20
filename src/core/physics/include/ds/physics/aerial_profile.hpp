@@ -128,6 +128,9 @@ struct AerialProfile {
     SensorParams sensors;                       ///< Sensors.
     ControllerParams controller;                ///< Flight controller.
     CameraParams camera;                        ///< FPV camera.
+    /// Model file drawn instead of the procedural body (FR-GFX-12): `.gltf`, `.glb` or `.obj`,
+    /// a name in the model folders or an absolute path; fitted to the body. Empty = procedural.
+    std::string modelFile;
     std::optional<ReferenceFigures> reference;  ///< Built-in profiles only.
 
     /// @brief Number of motors.

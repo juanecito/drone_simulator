@@ -5,6 +5,7 @@
 
 #include <QWidget>
 
+#include <string>
 #include <vector>
 
 class QComboBox;
@@ -45,6 +46,8 @@ private:
     void saveAs();
     void remove();
     void showError(const QString& message);
+    void chooseModel();
+    void setModelFile(const std::string& file, bool edited);
 
     SimulationController* simulation_;
     QComboBox* type_ = nullptr;
@@ -60,6 +63,9 @@ private:
     QWidget* groundEditor_ = nullptr;
     std::vector<QDoubleSpinBox*> params_;        // In aerialParameters() order.
     std::vector<QDoubleSpinBox*> groundParams_;  // In groundParameters() order.
+    QLabel* model_ = nullptr;
+    QPushButton* builtInModel_ = nullptr;
+    std::string modelFile_;  // Model file of the edited profile ("" = procedural).
     bool edited_ = false;
 };
 

@@ -11,6 +11,7 @@
 | OpenGL headers | — | `libgl-dev`, `libegl-dev` |
 | GLM | any | `libglm-dev` |
 | SDL 3 | ≥ 3.2 (joystick subsystem only) | `libsdl3-dev` |
+| Assimp | ≥ 5.2 (glTF 2.0 / OBJ model files) | `libassimp-dev` |
 | libcurl | ≥ 7.85 (HTTPS to data providers) | `libcurl4-openssl-dev` |
 | nlohmann/json | ≥ 3.11 (header-only; optional, see below) | `nlohmann-json3-dev` |
 | Doxygen (+ Graphviz) | optional, for `docs` | `doxygen`, `graphviz` |

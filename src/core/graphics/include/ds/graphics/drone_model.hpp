@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ds/graphics/mesh.hpp"
+#include "ds/graphics/mesh_loader.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -65,9 +66,17 @@ public:
     /// @brief The shape.
     [[nodiscard]] const DroneShape& shape() const noexcept { return shape_; }
 
+    /// @brief Bounds of the procedural frame (body, arms, motors, feet), body frame: where a
+    /// model file is fitted.
+    [[nodiscard]] MeshBounds frameBounds() const;
+    /// @brief Draws @p mesh (body frame) instead of the procedural frame; the propellers and
+    /// the navigation lights stay. Null restores the procedural frame.
+    void setFrameMesh(std::shared_ptr<const Mesh> mesh);
+
 private:
     DroneShape shape_;
     std::shared_ptr<const Mesh> frame_;
+    std::shared_ptr<const Mesh> customFrame_;
     std::array<std::shared_ptr<const Mesh>, 2> blades_;  // Front (orange), rear (dark).
     std::shared_ptr<const Mesh> blur_;
     std::shared_ptr<const Mesh> ledRed_;

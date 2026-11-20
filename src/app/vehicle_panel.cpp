@@ -5,6 +5,8 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -122,6 +124,25 @@ void VehiclePanel::buildUi() {
     description_->setObjectName(QStringLiteral("ProfileDescription"));
     description_->setWordWrap(true);
     profileLayout->addWidget(description_);
+    // Model file drawn instead of the built-in body (FR-GFX-12).
+    auto* modelRow = new QHBoxLayout;
+    modelRow->addWidget(new QLabel(tr("Model:")));
+    model_ = new QLabel;
+    model_->setObjectName(QStringLiteral("ModelFileLabel"));
+    model_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    modelRow->addWidget(model_, 1);
+    auto* chooseModel = new QPushButton(tr("Choose…"));
+    chooseModel->setObjectName(QStringLiteral("ChooseModelButton"));
+    chooseModel->setToolTip(
+        tr("Draw the body from a glTF 2.0 (.gltf, .glb) or OBJ file, fitted "
+           "to the built-in body; wheels, propellers and lights stay."));
+    builtInModel_ = new QPushButton(tr("Built-in"));
+    builtInModel_->setObjectName(QStringLiteral("BuiltInModelButton"));
+    modelRow->addWidget(chooseModel);
+    modelRow->addWidget(builtInModel_);
+    connect(chooseModel, &QPushButton::clicked, this, &VehiclePanel::chooseModel);
+    connect(builtInModel_, &QPushButton::clicked, this, [this] { setModelFile({}, true); });
+    profileLayout->addLayout(modelRow);
     auto* profileButtons = new QHBoxLayout;
     saveAs_ = new QPushButton(tr("Save As…"));
     saveAs_->setObjectName(QStringLiteral("SaveProfileButton"));
@@ -213,6 +234,7 @@ void VehiclePanel::loadParameters() {
     groundEditor_->setVisible(ground);
     if (const physics::AerialProfile* p = simulation_->aerialProfile()) {
         description_->setText(QString::fromStdString(p->description));
+        setModelFile(p->modelFile, false);
         const auto descriptors = physics::aerialParameters();
         for (std::size_t i = 0; i < params_.size(); ++i) {
             const QSignalBlocker block(params_[i]);
@@ -220,6 +242,7 @@ void VehiclePanel::loadParameters() {
         }
     } else if (const physics::GroundProfile* g = simulation_->groundProfile()) {
         description_->setText(QString::fromStdString(g->description));
+        setModelFile(g->modelFile, false);
         const auto descriptors = physics::groundParameters();
         for (std::size_t i = 0; i < groundParams_.size(); ++i) {
             const QSignalBlocker block(groundParams_[i]);
@@ -319,6 +342,7 @@ void VehiclePanel::apply() {
         for (std::size_t i = 0; i < params_.size(); ++i) {
             descriptors[i].set(p, params_[i]->value());
         }
+        p.modelFile = modelFile_;
         applied = simulation_->applyProfile(p);
     } else if (const physics::GroundProfile* g = simulation_->groundProfile()) {
         physics::GroundProfile p = *g;
@@ -326,6 +350,7 @@ void VehiclePanel::apply() {
         for (std::size_t i = 0; i < groundParams_.size(); ++i) {
             descriptors[i].set(p, groundParams_[i]->value());
         }
+        p.modelFile = modelFile_;
         applied = simulation_->applyProfile(p);
     }
     if (!applied) {
@@ -358,6 +383,26 @@ void VehiclePanel::remove() {
     }
     if (auto removed = simulation_->deleteProfile(key); !removed) {
         showError(QString::fromStdString(removed.error().message));
+    }
+}
+
+void VehiclePanel::chooseModel() {
+    const QString file = QFileDialog::getOpenFileName(this, tr("Vehicle Model"), QString(),
+                                                      tr("3D models (*.gltf *.glb *.obj)"));
+    if (!file.isEmpty()) {
+        setModelFile(file.toStdString(), true);
+    }
+}
+
+void VehiclePanel::setModelFile(const std::string& file, bool edited) {
+    modelFile_ = file;
+    const QString name = QString::fromStdString(file);
+    model_->setText(file.empty() ? tr("built-in") : QFileInfo(name).fileName());
+    model_->setToolTip(name);
+    builtInModel_->setEnabled(!file.empty());
+    if (edited) {
+        edited_ = true;
+        updateButtons();
     }
 }
 

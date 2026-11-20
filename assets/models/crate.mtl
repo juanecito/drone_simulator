@@ -1,0 +1,8 @@
+# Materials of crate.obj (linear albedo).
+newmtl boards
+Kd 0.42 0.30 0.17
+d 1.0
+
+newmtl frame
+Kd 0.20 0.13 0.07
+d 1.0

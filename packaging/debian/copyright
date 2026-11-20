@@ -54,8 +54,9 @@ Comment: The binary also contains code instantiated from the GLM headers
  libglm-dev) and from the nlohmann/json headers (JSON for Modern C++ 3.11,
  Copyright 2013-2022 Niels Lohmann, Debian package nlohmann-json3-dev), both
  used under the MIT license printed below. SDL 3 (zlib license) is used as a
- shared library from the Debian package libsdl3-0, and libcurl (curl license)
- as a shared library from the Debian package libcurl4t64.
+ shared library from the Debian package libsdl3-0, libcurl (curl license)
+ as a shared library from the Debian package libcurl4t64, and Assimp (BSD
+ 3-Clause license) as a shared library from the Debian package libassimp5.
 
 Files: third_party/glad/src/* third_party/glad/include/glad/*
 Copyright: David Herberth and the glad contributors (generator)

@@ -161,6 +161,24 @@ TEST(MissionLoader, DependenciesAndReferences) {
     EXPECT_NE(errorsOf(m).find("kerbs: does not apply to a ramp"), std::string::npos);
 }
 
+TEST(MissionLoader, ObstacleModelFiles) {
+    // FR-GFX-12: an obstacle may be drawn from a mesh file, kept inside the model folders.
+    Json m = fixture("precision-landing-01.mission.json");
+    m["items"].push_back({{"type", "obstacle"},
+                          {"id", "crate"},
+                          {"local", {5, 0, 0}},
+                          {"sizeM", {1.0, 1.0, 1.0}},
+                          {"model", "props/crate.glb"}});
+    EXPECT_EQ(errorsOf(m), "");
+    m["items"][1]["model"] = "props/../../secret.glb";
+    EXPECT_NE(errorsOf(m).find("items[1].model: must not leave the model folders"),
+              std::string::npos);
+    m["items"][1]["model"] = "crate.glb";
+    m["items"][0]["model"] = "pad.glb";
+    EXPECT_NE(errorsOf(m).find("items[0].model: does not apply to a landingPad"),
+              std::string::npos);
+}
+
 TEST(MissionLoader, PlacementAndReachability) {
     Json m = fixture("precision-landing-01.mission.json");
     m["items"].push_back({{"type", "waypoint"}, {"id", "w"}, {"local", {2000, 5, 0}}});

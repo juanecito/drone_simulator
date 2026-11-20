@@ -230,6 +230,7 @@ common::Result<GroundProfile> groundProfileFromJson(const Json& json) {
     p.key = root.string("key");
     p.name = root.string("name");
     p.description = root.string("description", "");
+    p.modelFile = root.string("modelFile", "");
     if (root.has("layout")) {
         p.layout = root.choice("layout", {"skid-steer-4wd", "skid-steer-6wd"}) == "skid-steer-6wd"
                        ? DriveLayout::SkidSteer6
@@ -317,6 +318,9 @@ Json groundProfileToJson(const GroundProfile& p) {
     j["key"] = p.key;
     j["name"] = p.name;
     j["description"] = p.description;
+    if (!p.modelFile.empty()) {
+        j["modelFile"] = p.modelFile;
+    }
     for (const GroundParamDescriptor& d : descriptors()) {
         const Json::json_pointer ptr{std::string(d.pointer)};
         if (d.kind == ParamKind::Integer) {

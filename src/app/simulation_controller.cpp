@@ -19,6 +19,7 @@
 #include "ds/common/log.hpp"
 #include "ds/common/math.hpp"
 #include "ds/missions/mission_runner.hpp"
+#include "ds/storage/data_location.hpp"
 #include "ds/storage/input_profile_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/storage_service.hpp"
@@ -107,6 +108,12 @@ SimulationController::SimulationController(SceneController& scene, SettingsContr
                                            const std::filesystem::path& assetDirectory,
                                            bool joysticks, QObject* parent)
     : QObject(parent), scene_(&scene), settings_(settings) {
+    std::vector<std::filesystem::path> modelDirs;
+    if (settings_ != nullptr) {
+        modelDirs.push_back(storage::homeDirectory() / storage::kDataDirectoryName / "models");
+    }
+    modelDirs.push_back(assetDirectory / "models");
+    models_ = std::make_unique<graphics::ModelLibrary>(std::move(modelDirs));
     loadWindTable(assetDirectory);
     loadBuiltInProfiles(assetDirectory);
     syncBuiltInProfiles();
@@ -681,7 +688,8 @@ common::Result<void> SimulationController::setTimeScale(double scale) {
 // --- Missions -------------------------------------------------------------------------------
 
 common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
-                                                        const physics::VehicleProfile& profile) {
+                                                        const physics::VehicleProfile& profile,
+                                                        const std::filesystem::path& missionDir) {
     if (auto reason = unplayableReason(m)) {
         return common::makeError(*reason);
     }
@@ -724,7 +732,8 @@ common::Result<void> SimulationController::startMission(const missions::MissionD
         }
         return common::makeError(runner.error().message);
     }
-    itemVisuals_ = std::make_unique<sim::ItemVisuals>((*runner)->items(), m.rules.showMarkers);
+    itemVisuals_ = std::make_unique<sim::ItemVisuals>((*runner)->items(), m.rules.showMarkers,
+                                                      models_.get(), missionDir);
     highlighted_.clear();
     missionSpawn_ = (*runner)->spawnPosition();
     missionHeadingRad_ = common::degToRad((*runner)->spawnHeadingDeg());
@@ -810,8 +819,9 @@ void SimulationController::setFreeItems(const std::vector<items::Item>& freeItem
     for (const items::Item& item : freeItems) {
         (void)registry.add(item);
     }
-    freeVisuals_ = registry.size() > 0 ? std::make_unique<sim::ItemVisuals>(registry, true)
-                                       : nullptr;
+    freeVisuals_ = registry.size() > 0
+                       ? std::make_unique<sim::ItemVisuals>(registry, true, models_.get())
+                       : nullptr;
     loop_->post([freeItems](sim::World& w) { w.setFreeItems(freeItems); });
 }
 
@@ -1123,6 +1133,34 @@ void SimulationController::buildModel() {
         rover_ = std::make_unique<graphics::RoverModel>(std::move(shape));
         rig_.setChaseDistance(std::clamp(kChaseRoverLengths * g->chassis.lengthM,
                                          kMinChaseDistanceM, kMaxChaseDistanceM));
+    }
+    applyModelFile();
+}
+
+void SimulationController::applyModelFile() {
+    const physics::AerialProfile* a = aerialProfile();
+    const physics::GroundProfile* g = groundProfile();
+    const std::string& file = a != nullptr ? a->modelFile : g != nullptr ? g->modelFile : "";
+    if (file.empty()) {
+        return;
+    }
+    auto loaded = models_->load(file);
+    if (!loaded) {
+        const QString text = tr("Vehicle model: %1. The built-in model is drawn.")
+                                 .arg(QString::fromStdString(loaded.error().message));
+        log::warn("{}", text.toStdString());
+        emit simulationEvent(text);
+        return;
+    }
+    // Fitted to the procedural body, resting on its underside (body z points down).
+    auto mesh = std::make_shared<graphics::Mesh>(**loaded);
+    graphics::gltfToBodyFrame(*mesh);
+    if (model_) {
+        graphics::fitMesh(*mesh, model_->frameBounds(), 2, 1.0F);
+        model_->setFrameMesh(std::move(mesh));
+    } else if (rover_) {
+        graphics::fitMesh(*mesh, rover_->bodyBounds(), 2, 1.0F);
+        rover_->setBodyMesh(std::move(mesh));
     }
 }
 

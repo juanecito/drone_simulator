@@ -127,9 +127,15 @@ DroneModel::DroneModel(const DroneShape& shape) : shape_(shape) {
     ledWhite_ = ledMesh(glm::vec3(1.0F), led);
 }
 
+MeshBounds DroneModel::frameBounds() const { return meshBounds(*frame_); }
+
+void DroneModel::setFrameMesh(std::shared_ptr<const Mesh> mesh) { customFrame_ = std::move(mesh); }
+
 void DroneModel::appendDrawItems(const DroneVisualState& state, std::vector<DrawItem>& out) const {
     const glm::dquat& q = state.orientation;
-    out.push_back({.mesh = frame_, .position = state.position, .orientation = q});
+    out.push_back({.mesh = customFrame_ ? customFrame_ : frame_,
+                   .position = state.position,
+                   .orientation = q});
     const double armHalfWidth = 0.5 * shape_.armWidthM;
     const double propZ = -0.3 * armHalfWidth - 1.1 * shape_.motorRadiusM - 0.004;
     for (std::size_t i = 0; i < 4; ++i) {

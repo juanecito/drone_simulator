@@ -526,7 +526,8 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
     if (!profile) {
         return std::unexpected(profile.error());
     }
-    if (auto started = simulation_->startMission(mission, *profile); !started) {
+    const std::filesystem::path missionDir = missions_->entry(*row).load.file.parent_path();
+    if (auto started = simulation_->startMission(mission, *profile, missionDir); !started) {
         return started;
     }
     missionKey_ = key;
