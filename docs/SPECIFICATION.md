@@ -2003,7 +2003,21 @@ so Markdown pages appear in the generated site.
     lit by the surroundings and by the headlights. Sleet mixes both.
   - *Ground (S):* wet ground is darker and reflects the sky with a Fresnel sheen; lying snow
     from 3 mm (full at 4 cm) whitens slopes up to about 35°, fading out by 55°.
-  - *Not done:* raindrops on the FPV lens (S), lightning (C).
+  - *Raindrops on the FPV lens (S):* in rain, drizzle or sleet the FPV lens gets wet (τ 8 s;
+    up to fully wet from 4 mm/h) and dries in about a minute after; the tone-mapping pass then
+    draws out-of-focus drops on a grid of cells that appear, run down a little and vanish,
+    each showing a small upside-down image of the scene with a darker rim.
+  - *Lightning (C):* in a thunderstorm about two flashes a minute (seeded by the weather
+    clock, one to three strokes of tens of milliseconds) add 0.3–10 lux of diffuse light
+    that lights the clouds from within and the ground: invisible by day, a bright flash at
+    night. No bolts are drawn.
+  - *White balance:* the tone mapper adapts (Bradford) a 6000 K white — midday sun plus sky —
+    to sRGB's D65, like a camera's daylight preset. Without it, everything lit by daylight
+    was slightly warm and pink, most visibly grey overcast; sunsets, headlights and twilight
+    keep their colour relative to daylight.
+  - *Cost:* the cloud-cover thresholds come from a per-type table (64 steps, built when a
+    cloud type first appears); the exact bisection takes milliseconds and the view is rebuilt
+    every frame.
   - *Simplifications:* the World's visibility rule (60 m inside a layer of ≥ 4 oktas) does
     not follow the drawn cloud gaps; heights are flat above the take-off ground (terrain
     following and spatial variation, FR-WX-04, are not modelled).

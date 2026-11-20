@@ -156,6 +156,7 @@ protected:
         input.terrain.waterLevelM = -40.0;
         input.exposure = exposure_;
         input.weather = weather_;
+        input.lensWetness = lensWetness_;
         input.objects = objects;
         input.lights = lights;
 
@@ -203,6 +204,7 @@ protected:
     graphics::SkyModel sky_;
     graphics::ExposureSettings exposure_;
     graphics::WeatherView weather_;
+    double lensWetness_ = 0.0;
     terrain::ChunkLayout layout_;
     common::WorkerPool pool_{4};
     std::shared_ptr<const terrain::ProceduralSource> source_;
@@ -473,7 +475,8 @@ TEST_F(SceneRenderTest, OvercastSkyIsGreyAndTheGroundDarker) {
     const Luma skyClear = average(clear, 0.0, 0.0, 1.0, 0.15);
     const Luma sky = average(overcast, 0.0, 0.0, 1.0, 0.15);
     EXPECT_GT(skyClear.b, skyClear.r + 10);
-    EXPECT_LT(std::abs(sky.b - sky.r), 12.0) << "an overcast sky is grey";
+    EXPECT_LT(std::abs(sky.b - sky.r), 6.0) << "an overcast sky is grey";
+    EXPECT_LT(std::abs(sky.g - sky.r), 6.0) << "an overcast sky is grey";
     const Luma groundClear = average(clear, 0.0, 0.85, 1.0, 1.0);
     const Luma ground = average(overcast, 0.0, 0.85, 1.0, 1.0);
     EXPECT_LT(ground.mean, 0.6 * groundClear.mean)
@@ -612,6 +615,54 @@ TEST_F(SceneRenderTest, SnowCoverWhitensAndRainDarkensTheGround) {
     const double snow = average(snowy, 0, 0, 1, 1).mean;
     EXPECT_LT(wet, dry) << "wet ground is darker";
     EXPECT_GT(snow, dry + 40.0) << "snow is white";
+}
+
+TEST_F(SceneRenderTest, RaindropsOnTheLens) {
+    graphics::Camera camera;
+    camera.position = {0.0, source_->height(0.0, 0.0) + 20.0, 0.0};
+    camera.pitchRad = 0.1;  // Sky above, ground below: the drops show both, upside down.
+    weather_ = weatherPreset("light-rain");
+    weather_.particles = 0;
+    const QImage dry = renderScene("2026-06-21T12:00:00Z", camera, {});
+    lensWetness_ = 1.0;
+    const QImage wet = renderScene("2026-06-21T12:00:00Z", camera, {});
+    lensWetness_ = 0.0;
+    save(wet, "lens_drops.png");
+    int changed = 0;
+    for (int y = 0; y < kHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+            changed += std::abs(qGray(dry.pixel(x, y)) - qGray(wet.pixel(x, y))) > 8 ? 1 : 0;
+        }
+    }
+    EXPECT_GT(changed, kWidth * kHeight / 50) << "drops on the lens";
+    EXPECT_LT(changed, kWidth * kHeight / 2) << "the view stays mostly clear";
+}
+
+TEST_F(SceneRenderTest, LightningLightsTheStormAtNight) {
+    // A moonless night under a thunderstorm: dark between flashes, lit during one.
+    weather_ = weatherPreset("thunderstorm");
+    double flashTime = -1.0;
+    double darkTime = -1.0;
+    for (double t = 0.0; t < 600.0 && (flashTime < 0.0 || darkTime < 0.0); t += 0.01) {
+        const double lux = graphics::lightningLux(t);
+        if (flashTime < 0.0 && lux > 4.0) {
+            flashTime = t;
+        }
+        if (darkTime < 0.0 && t > 1.0 && lux == 0.0) {
+            darkTime = t;
+        }
+    }
+    ASSERT_GE(flashTime, 0.0);
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 3.0};
+    weather_.lightningLux = graphics::lightningLux(darkTime);
+    const QImage dark = render("2026-08-12T23:30:00Z", 0.0, 10.0);
+    weather_.lightningLux = graphics::lightningLux(flashTime);
+    const QImage flash = render("2026-08-12T23:30:00Z", 0.0, 10.0);
+    save(flash, "lightning.png");
+    const double before = average(dark, 0, 0, 1, 1).mean;
+    const double during = average(flash, 0, 0, 1, 1).mean;
+    EXPECT_LT(before, 30.0);
+    EXPECT_GT(during, before + 40.0) << "dark " << before << " flash " << during;
 }
 
 TEST_F(SceneRenderTest, ManualExposureIsApplied) {

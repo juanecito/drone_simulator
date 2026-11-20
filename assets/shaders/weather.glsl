@@ -20,7 +20,7 @@ layout(std140, binding = 4) uniform WeatherUniforms {
     vec4 w_fog;             // x: fog top; y: fog extinction (1/m, 0 = none); z: aerosol
                             // visibility (m).
     vec4 w_wind;            // xy: wind direction (x, z), unit; z: speed (m/s).
-    vec4 w_surface;         // x: ground wetness 0–1; y: snow depth (m).
+    vec4 w_surface;         // x: ground wetness 0–1; y: snow depth (m); z: lightning (lux).
     vec4 w_precip;          // x: type (0 none, 1 drizzle, 2 rain, 3 snow, 4 sleet); y: rate
                             // (mm/h); z: box size (m); w: particle count.
     vec4 w_precipOffset;    // xyz: offset of the particle field (m); w: time (s, wrapped).
@@ -83,6 +83,9 @@ void lightUnderClouds(float y, out float sky, out float clear) {
     }
 }
 
+// Diffuse light of a lightning flash (thunderstorms), lux; slightly blue-white.
+vec3 lightningIrradiance() { return w_surface.z * vec3(0.9, 0.95, 1.1); }
+
 float atmosphereRadius(float relY) {
     return bottomRadius() + max(u_camera.z + u_camera.x + relY, 0.0) * 0.001;
 }
@@ -101,7 +104,8 @@ vec3 ambientLuminance(float relY) {
     float sky;
     float clear;
     lightUnderClouds(relY, sky, clear);
-    return (horizontal * (clear + max(sky - clear, 0.0)) + e_skyIrradiance.rgb * sky) / PI;
+    return (horizontal * (clear + max(sky - clear, 0.0)) + e_skyIrradiance.rgb * sky +
+            lightningIrradiance()) / PI;
 }
 
 // Share of the sky above height relY hidden by the clouds (1 − clear fraction).
@@ -156,7 +160,8 @@ vec3 cloudSource(int i, vec3 p, float hn, float d, vec3 dir) {
     float inside = mix(td, 1.0, pow(hn, 0.7));
     // Convective clouds catch low sunlight on their sides.
     float side = (type == 0 || type == 4) ? 0.35 : 0.0;
-    vec3 total = e_skyIrradiance.rgb * sky * inside / PI;
+    // A lightning flash lights the cloud from within.
+    vec3 total = (e_skyIrradiance.rgb * sky * inside + 2.0 * lightningIrradiance()) / PI;
     for (int k = 0; k < 2; ++k) {
         vec4 dirLux = k == 0 ? u_sunDirLux : u_moonDirLux;
         vec4 colorRadius = k == 0 ? u_sunColorRadius : u_moonColorRadius;

@@ -239,7 +239,8 @@ WeatherUniforms weatherUniforms(const WeatherView& w, const glm::dvec3& camera,
         windSpeed > 1e-6 ? glm::dvec2(w.windMs.x, w.windMs.z) / windSpeed : glm::dvec2(0.0);
     u.wind = {static_cast<float>(windDir.x), static_cast<float>(windDir.y),
               static_cast<float>(windSpeed), 0.0F};
-    u.surface = {static_cast<float>(w.wetness), static_cast<float>(w.snowDepthM), 0.0F, 0.0F};
+    u.surface = {static_cast<float>(w.wetness), static_cast<float>(w.snowDepthM),
+                 static_cast<float>(w.lightningLux), 0.0F};
     u.precip = {precipitationCode(w.precipitation), static_cast<float>(w.rateMmH),
                 static_cast<float>(kPrecipitationBoxM), static_cast<float>(w.particles)};
     // The particles move with the fall speed and the wind; wrapping the offset (in double)
@@ -1158,6 +1159,11 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
     glDisable(GL_FRAMEBUFFER_SRGB);
     const GLuint tonemap = r.shaders.program(kTonemap);
     glProgramUniform2i(tonemap, 0, view.x, glY);
+    static const glm::mat3 kWhiteBalance =
+        whiteBalanceMatrix(glm::dvec3(blackbodyColor(kDaylightWhiteK)));
+    glProgramUniformMatrix3fv(tonemap, 1, 1, GL_FALSE, &kWhiteBalance[0][0]);
+    glProgramUniform2f(tonemap, 2, static_cast<float>(std::clamp(input.lensWetness, 0.0, 1.0)),
+                       static_cast<float>(std::fmod(input.timeSeconds, 3600.0)));
     glUseProgram(tonemap);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     ++stats_.drawCalls;

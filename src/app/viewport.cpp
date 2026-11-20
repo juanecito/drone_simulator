@@ -204,6 +204,7 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     if (sim != nullptr) {
         frame.weather = sim->weatherView();
         frame.cameraVelocity = vehicleView ? sim->cameraVelocity() : glm::dvec3(0.0);
+        frame.lensWetness = vehicleView ? sim->lensWetness() : 0.0;
     } else {
         frame.weather.aerosolVisibilityM = env.visibilityM;
     }

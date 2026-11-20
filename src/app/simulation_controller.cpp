@@ -1028,6 +1028,28 @@ void SimulationController::recordSession(const sim::SessionStats& stats,
     (void)pending;
 }
 
+void SimulationController::updateLens() {
+    // Weather time: the lens neither wets nor dries while paused; a restart dries it.
+    const double now = weather_.timeS;
+    const double dt = lensTimeS_ ? now - *lensTimeS_ : 0.0;
+    lensTimeS_ = now;
+    if (dt < 0.0) {
+        lensWetness_ = 0.0;
+        return;
+    }
+    double target = 0.0;
+    switch (weather_.precipitation) {
+        case weather::PrecipitationType::Drizzle: target = 0.4; break;
+        case weather::PrecipitationType::Rain:
+        case weather::PrecipitationType::Sleet:
+            target = std::clamp(0.3 + weather_.rateMmH / 6.0, 0.0, 1.0);
+            break;
+        default: break;
+    }
+    const double tau = target > lensWetness_ ? 8.0 : 60.0;
+    lensWetness_ += (target - lensWetness_) * (1.0 - std::exp(-std::min(dt, 1.0) / tau));
+}
+
 glm::dvec3 SimulationController::cameraVelocity() const noexcept {
     return cameraMode_ == graphics::CameraMode::Fpv || cameraMode_ == graphics::CameraMode::Chase
                ? pose_.velocity
@@ -1099,6 +1121,7 @@ void SimulationController::updateFrame(double dt, double aspect) {
     }
     weather_ = graphics::makeWeatherView(s.weather, s.cloudDrift, s.groundCover, weatherGroundY_,
                                          s.windMeanSpeedMs, s.weatherTimeS + ahead);
+    updateLens();
 
     if (!model_ && !rover_) {
         buildModel();

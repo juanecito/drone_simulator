@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 #include "ds/common/math.hpp"
@@ -72,7 +73,7 @@ float valueNoise(float px, float py) noexcept {
 // Sorted samples of cloudNoise() over a large area (its distribution).
 const std::vector<double>& noiseSamples() {
     static const std::vector<double> samples = [] {
-        constexpr int kCount = 1 << 14;
+        constexpr int kCount = 1 << 12;
         std::vector<double> v;
         v.reserve(kCount);
         std::uint64_t state = 0x9E3779B97F4A7C15ULL;
@@ -121,6 +122,42 @@ double cloudNoise(glm::dvec2 q) noexcept {
     return static_cast<double>(sum / total);
 }
 
+namespace {
+
+// Thresholds per cloud type at cover k / kCoverSteps, computed once: the exact bisection
+// costs milliseconds, and the view is rebuilt every frame.
+constexpr int kCoverSteps = 64;
+constexpr std::array kCloudTypes{weather::CloudType::Cumulus, weather::CloudType::Stratocumulus,
+                                 weather::CloudType::Stratus, weather::CloudType::Cirrus,
+                                 weather::CloudType::Cumulonimbus};
+
+double tabulatedThreshold(weather::CloudType type, double cover) {
+    using Row = std::array<double, kCoverSteps + 1>;
+    static std::array<Row, kCloudTypes.size()> table{};
+    static std::array<std::once_flag, kCloudTypes.size()> built;
+    if (cover <= 0.0 || cover >= 1.0) {
+        return cloudCoverThreshold(cover, lookOf(type).softness);
+    }
+    const auto index = static_cast<std::size_t>(type);
+    // Each type's row is built when a layer of that type first appears.
+    std::call_once(built.at(index), [index] {
+        for (int k = 0; k <= kCoverSteps; ++k) {
+            table.at(index)[static_cast<std::size_t>(k)] = cloudCoverThreshold(
+                static_cast<double>(k) / kCoverSteps, lookOf(kCloudTypes.at(index)).softness);
+        }
+    });
+    const Row& row = table.at(index);
+    const double x = cover * kCoverSteps;
+    const auto k = std::min(static_cast<std::size_t>(x), static_cast<std::size_t>(kCoverSteps - 1));
+    const double f = x - static_cast<double>(k);
+    // The ends are out of the noise's range (±1): interpolate inside it only.
+    const double a = k == 0 ? row[1] + (row[1] - row[2]) : row[k];
+    const double b = k + 1 == kCoverSteps ? row[k] + (row[k] - row[k - 1]) : row[k + 1];
+    return a + (b - a) * f;
+}
+
+}  // namespace
+
 double cloudCoverThreshold(double cover, double softness) {
     // The noise is a weighted mean of values in [0, 1]: a threshold of 1 hides every cloud,
     // one below −softness (and the cumulus taper, 0.12) fills the sky.
@@ -136,7 +173,7 @@ double cloudCoverThreshold(double cover, double softness) {
     // The mean density falls as the threshold rises.
     double lo = lo0;
     double hi = hi0;
-    for (int i = 0; i < 40; ++i) {
+    for (int i = 0; i < 24; ++i) {  // ≈ 1e-7 of the noise range.
         const double mid = 0.5 * (lo + hi);
         if (meanDensity(mid, softness) > cover) {
             lo = mid;
@@ -149,6 +186,43 @@ double cloudCoverThreshold(double cover, double softness) {
 
 double cloudDiffuseTransmittance(double opticalDepth) noexcept {
     return 1.0 / (1.0 + 0.75 * (1.0 - kCloudAsymmetry) * std::max(opticalDepth, 0.0));
+}
+
+double lightningLux(double timeS) noexcept {
+    // One window of 30 s may hold a flash (70 %), at a random time inside it; the flash
+    // before it may still be glowing, so the previous window counts too.
+    constexpr double kWindowS = 30.0;
+    const auto unit = [](std::uint64_t key, std::uint64_t salt) {
+        std::uint64_t z = key * 0x9E3779B97F4A7C15ULL + salt * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        z ^= z >> 31;
+        return static_cast<double>(z >> 11) / static_cast<double>(1ULL << 53);
+    };
+    const double window = std::floor(timeS / kWindowS);
+    double lux = 0.0;
+    for (double w = window - 1.0; w <= window; w += 1.0) {
+        if (w < 0.0) {
+            continue;
+        }
+        const auto key = static_cast<std::uint64_t>(w);
+        if (unit(key, 1) > 0.7) {
+            continue;
+        }
+        const double start = w * kWindowS + unit(key, 2) * (kWindowS - 1.0);
+        // From 0.3 lux (far away) to 10 lux (close), log-uniform.
+        const double peak = 0.3 * std::exp(std::log(10.0 / 0.3) * unit(key, 3));
+        const int strokes = 1 + static_cast<int>(unit(key, 4) * 3.0);
+        double at = start;
+        for (int k = 0; k < strokes; ++k) {
+            const double dt = timeS - at;
+            if (dt >= 0.0) {
+                lux += peak * (k == 0 ? 1.0 : 0.6) * std::exp(-dt / 0.03);
+            }
+            at += 0.05 + 0.1 * unit(key, 10 + static_cast<std::uint64_t>(k));
+        }
+    }
+    return lux;
 }
 
 int precipitationParticles(weather::PrecipitationType type, double rateMmH) noexcept {
@@ -191,7 +265,7 @@ WeatherView makeWeatherView(const weather::WeatherConditions& c,
         l.extinctionPerM = look.extinctionPerM;
         l.frequency = 1.0 / look.featureM;
         l.softness = look.softness;
-        l.threshold = cloudCoverThreshold(cover, look.softness);
+        l.threshold = tabulatedThreshold(layer.type, cover);
         l.diffuseTransmittance =
             cloudDiffuseTransmittance(look.extinctionPerM * (layer.topM - layer.baseM));
         if (i < drift.size()) {
@@ -243,6 +317,7 @@ WeatherView makeWeatherView(const weather::WeatherConditions& c,
     v.particles = precipitationParticles(c.precipitation.type, c.precipitation.rateMmH);
     const double towards = common::degToRad(c.windFromDeg + 180.0);
     v.windMs = glm::dvec3(std::sin(towards), 0.0, -std::cos(towards)) * std::max(windSpeedMs, 0.0);
+    v.lightningLux = c.thunderstorm ? lightningLux(timeS) : 0.0;
     v.wetness = std::clamp(ground.wetness, 0.0, 1.0);
     v.snowDepthM = std::max(ground.snowDepthM, 0.0);
     return v;

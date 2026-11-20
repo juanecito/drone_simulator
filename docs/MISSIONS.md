@@ -265,7 +265,9 @@ starts on wet ground; one that starts in snow at ≤ 1 °C starts with snow on t
 The 3D view draws the weather: the cloud layers drift with the wind and cast moving shadows;
 an overcast greys the sky and takes the shadows away; fog and low visibility hide the
 distance; rain streaks and snowflakes fall around the camera; wet ground looks darker and
-shiny and lying snow turns it white. At night the clouds hide the moon and the stars.
+shiny and lying snow turns it white. At night the clouds hide the moon and the stars. In the
+FPV view, rain leaves drops on the lens until it dries; thunderstorms light the clouds with
+flashes of lightning.
 
 The **briefing** summarises the weather at the start, e.g. *Wind 270° level 4 (24 km/h,
 gusts 34) · broken clouds at 900 m · light rain · visibility 6.0 km · 12 °C · QNH 1009*. The

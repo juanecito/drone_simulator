@@ -59,6 +59,9 @@ struct WeatherView {
     double wetness = 0.0;      ///< Ground wetness 0–1.
     double snowDepthM = 0.0;   ///< Snow lying on the ground.
     double timeS = 0.0;        ///< Weather clock (animates the precipitation).
+    /// Diffuse illuminance of a lightning flash now (thunderstorms), lux; lights the clouds
+    /// and the ground (FR-WX-09).
+    double lightningLux = 0.0;
     /// Share of the clear-sky diffuse light that reaches the ground (clouds dim it).
     double skyFactor = 1.0;
     /// Share of the horizontal direct light that reaches the ground as diffuse light, after
@@ -95,6 +98,12 @@ inline constexpr double kPrecipitationBoxM = 24.0;
 /// @brief Diffuse transmittance of a cloud of vertical optical depth @p opticalDepth
 /// (two-stream approximation with asymmetry 0.85).
 [[nodiscard]] double cloudDiffuseTransmittance(double opticalDepth) noexcept;
+
+/// @brief Diffuse illuminance (lux) of the lightning of a thunderstorm at weather time
+/// @p timeS: on average about two flashes a minute at random times, each of one to three
+/// strokes a few tens of milliseconds long, from about 0.3 lux (distant) to 10 lux (close).
+/// Deterministic: the same time gives the same flash.
+[[nodiscard]] double lightningLux(double timeS) noexcept;
 
 /// @brief Number of drops or flakes drawn around the camera for @p type at @p rateMmH.
 [[nodiscard]] int precipitationParticles(weather::PrecipitationType type, double rateMmH) noexcept;

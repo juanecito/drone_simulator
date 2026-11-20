@@ -268,6 +268,11 @@ public:
     /// @brief Velocity of the vehicle camera (FPV and Chase follow the vehicle; the others
     /// stand still), world frame.
     [[nodiscard]] glm::dvec3 cameraVelocity() const noexcept;
+    /// @brief Wetness of the FPV camera's lens 0–1 (raindrops, FR-WX-09): it gets wet in rain,
+    /// drizzle or sleet and dries in a minute or two after; 0 for the other cameras.
+    [[nodiscard]] double lensWetness() const noexcept {
+        return cameraMode_ == graphics::CameraMode::Fpv ? lensWetness_ : 0.0;
+    }
     /// @brief The loop (tests).
     [[nodiscard]] sim::SimulationLoop& loop() noexcept { return *loop_; }
 
@@ -346,10 +351,13 @@ private:
     double homeHeadingRad_ = 0.0;
     EnvironmentConfig lastEnvironment_;
 
+    void updateLens();
     graphics::CameraMode cameraMode_ = graphics::CameraMode::Free;
     graphics::WeatherView weather_;
     std::optional<glm::dvec2> weatherGroundAt_;  // Where weatherGroundY_ was sampled.
     double weatherGroundY_ = 0.0;
+    double lensWetness_ = 0.0;
+    std::optional<double> lensTimeS_;  // Weather time of the last lens update.
     graphics::CameraRig rig_;
     graphics::VehiclePose pose_;
     graphics::Camera camera_;

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <glm/glm.hpp>
+
 /// @file
 /// @brief Photographic exposure for HDR rendering (FR-GFX-08c). The GPU auto-exposure in
 /// `assets/shaders/exposure.comp` uses the same formulas.
@@ -44,6 +46,16 @@ inline constexpr double kMaxEv100 = 18.0;
 
 /// @brief Target EV100 of the automatic exposure for average luminance @p luminance.
 [[nodiscard]] double autoExposureEv100(double luminance, double compensationEv) noexcept;
+
+/// @brief Colour temperature the renderer treats as white, K: midday daylight (sun plus
+/// sky), like a camera's "daylight" white balance. Lower temperatures (sunset, headlights)
+/// look warm, the shade and twilight look blue.
+inline constexpr double kDaylightWhiteK = 6000.0;
+
+/// @brief Chromatic adaptation (Bradford, von Kries in cone space) in linear sRGB that turns
+/// the illuminant of linear sRGB colour @p sourceWhite into neutral grey of the same
+/// luminance; sRGB's own white (D65) is the target.
+[[nodiscard]] glm::mat3 whiteBalanceMatrix(const glm::dvec3& sourceWhite) noexcept;
 
 /// @brief Moves @p current towards @p target over @p dtSeconds (faster when the scene gets
 /// brighter, like the eye: ≈ 0.6 s up, 2.5 s down).

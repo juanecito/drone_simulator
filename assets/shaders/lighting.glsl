@@ -54,7 +54,9 @@ vec3 diffuseIrradiance(vec3 p, float r, vec3 n) {
     vec3 up = vec3(0.0, 1.0, 0.0);
     vec3 horizontal = directLight(r, up, u_sunDirLux, u_sunColorRadius) +
                       directLight(r, up, u_moonDirLux, u_moonColorRadius);
-    return (e_skyIrradiance.rgb * sky + horizontal * max(sky - clear, 0.0)) * (0.5 + 0.5 * n.y);
+    return (e_skyIrradiance.rgb * sky + horizontal * max(sky - clear, 0.0) +
+            lightningIrradiance()) *
+           (0.5 + 0.5 * n.y);
 }
 
 // Total irradiance (lux) on a Lambertian surface at camera-relative p with normal n; the

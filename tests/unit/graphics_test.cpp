@@ -874,6 +874,17 @@ TEST(WeatherView, CloudCoverMatchesTheOktas) {
     EXPECT_GT(hi, 0.7);
 }
 
+TEST(WeatherView, LayerThresholdsComeFromATableThatMatchesTheExactOnes) {
+    for (const double oktas : {1.0, 3.0, 5.0, 7.0}) {
+        ds::weather::WeatherConditions c;
+        c.clouds = {{.type = ds::weather::CloudType::Cumulus, .coverOktas = oktas}};
+        const WeatherView v = makeWeatherView(c, {}, {}, 0.0, 0.0, 0.0);
+        ASSERT_EQ(v.layerCount, 1U);
+        EXPECT_NEAR(v.layers[0].threshold, cloudCoverThreshold(oktas / 8.0, v.layers[0].softness),
+                    0.005);
+    }
+}
+
 TEST(WeatherView, DiffuseTransmittanceAndParticles) {
     EXPECT_DOUBLE_EQ(cloudDiffuseTransmittance(0.0), 1.0);
     EXPECT_GT(cloudDiffuseTransmittance(10.0), cloudDiffuseTransmittance(40.0));
@@ -962,6 +973,58 @@ TEST(WeatherView, FogAndPrecipitationLowerTheVisibilityNearTheGround) {
     EXPECT_DOUBLE_EQ(snow.fallSpeedMs, 1.0);
     EXPECT_DOUBLE_EQ(snow.wetness, 0.4);
     EXPECT_DOUBLE_EQ(snow.snowDepthM, 0.12);
+}
+
+TEST(WeatherView, LightningFlashes) {
+    // About two flashes a minute: count the starts over an hour.
+    int flashes = 0;
+    bool inFlash = false;
+    double peak = 0.0;
+    for (double t = 0.0; t < 3600.0; t += 0.005) {
+        const double lux = lightningLux(t);
+        peak = std::max(peak, lux);
+        if (!inFlash && lux > 0.2) {
+            ++flashes;
+        }
+        inFlash = lux > 0.02;
+    }
+    EXPECT_GT(flashes, 60);
+    EXPECT_LT(flashes, 150);
+    EXPECT_GT(peak, 5.0);
+    EXPECT_LT(peak, 20.0);
+    EXPECT_DOUBLE_EQ(lightningLux(1234.5), lightningLux(1234.5));
+    // Only thunderstorms flash.
+    double maxClear = 0.0;
+    double maxStorm = 0.0;
+    ds::weather::WeatherConditions storm = presetConditions("thunderstorm");
+    for (double t = 0.0; t < 600.0; t += 0.01) {
+        maxClear =
+            std::max(maxClear,
+                     makeWeatherView(presetConditions("heavy-rain"), {}, {}, 0, 0, t).lightningLux);
+        maxStorm = std::max(maxStorm, makeWeatherView(storm, {}, {}, 0, 0, t).lightningLux);
+    }
+    EXPECT_DOUBLE_EQ(maxClear, 0.0);
+    EXPECT_GT(maxStorm, 0.3);
+}
+
+TEST(Exposure, DaylightWhiteBalance) {
+    // The daylight illuminant becomes neutral grey of the same luminance.
+    const glm::dvec3 daylight(blackbodyColor(kDaylightWhiteK));
+    const glm::dvec3 balanced = glm::dmat3(whiteBalanceMatrix(daylight)) * daylight;
+    EXPECT_NEAR(balanced.r, balanced.g, 1e-4);
+    EXPECT_NEAR(balanced.b, balanced.g, 1e-4);
+    EXPECT_NEAR(0.2126 * balanced.r + 0.7152 * balanced.g + 0.0722 * balanced.b, 1.0, 1e-3);
+    // D65 needs no correction.
+    const glm::dmat3 identity(whiteBalanceMatrix(glm::dvec3(1.0)));
+    for (int c = 0; c < 3; ++c) {
+        for (int r = 0; r < 3; ++r) {
+            EXPECT_NEAR(identity[c][r], c == r ? 1.0 : 0.0, 1e-3);
+        }
+    }
+    // A sunset (3000 K) stays warm after the daylight balance.
+    const glm::dvec3 sunset =
+        glm::dmat3(whiteBalanceMatrix(daylight)) * glm::dvec3(blackbodyColor(3000.0));
+    EXPECT_GT(sunset.r, 1.3 * sunset.b);
 }
 
 }  // namespace

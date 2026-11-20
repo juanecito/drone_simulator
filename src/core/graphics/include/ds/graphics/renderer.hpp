@@ -119,6 +119,8 @@ struct FrameInput {
     WeatherView weather;
     /// Camera velocity, world frame (m/s): rain streaks follow the drops' motion relative to it.
     glm::dvec3 cameraVelocity{0.0};
+    /// Wetness of the lens 0–1: raindrops on the FPV camera (FR-WX-09); 0 = dry.
+    double lensWetness = 0.0;
     /// Background night-sky luminance (airglow + unresolved stars), cd/m² (moonless night
     /// ≈ 0.001 lux on the ground, FR-GFX-08c).
     double nightSkyLuminance = 2.5e-4;
