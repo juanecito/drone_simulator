@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <numbers>
 #include <vector>
 
 #include "ds/items/item.hpp"
@@ -61,6 +63,85 @@ TEST(Items, ShapesContainPoints) {
     const Item bay = makeItem(ItemType::ParkingZone, "bay", Vec3(0), Json{{"sizeM", {2, 6}}}, 90.0);
     EXPECT_TRUE(bay.contains(Vec3(2.5, 0.2, 0.5)));
     EXPECT_FALSE(bay.contains(Vec3(0.5, 0.2, 2.5)));
+}
+
+TEST(Items, RampIsADrivableWedgeRisingTowardsItsHeading) {
+    // FR-ITM-13: 1 m wide, 0.25 m high, 1.5 m long, rising towards the east (heading 90°).
+    const Item ramp =
+        makeItem(ItemType::Ramp, "ramp", {10.0, 2.0, 0.0}, {{"sizeM", {1.0, 0.25, 1.5}}}, 90.0);
+    EXPECT_TRUE(ramp.solid);
+    EXPECT_TRUE(isDrivableType(ItemType::Ramp));
+    EXPECT_FALSE(isDrivableType(ItemType::Obstacle));
+    ASSERT_EQ(ramp.shape.parts.size(), 1U);
+    EXPECT_EQ(ramp.shape.parts[0].kind, SolidPart::Kind::Wedge);
+    EXPECT_NEAR(ramp.shape.parts[0].volumeM3(), 0.5 * 1.0 * 0.25 * 1.5, 1e-12);
+
+    // Top: 0 at the west (low) end, 0.125 m in the middle, 0.25 m at the east end.
+    const double slope = 0.25 / 1.5;
+    for (const double x : {9.26, 10.0, 10.74}) {
+        const auto top = driveSurfaceAt(ramp, x, 0.3, 10.0);
+        ASSERT_TRUE(top.has_value()) << x;
+        EXPECT_NEAR(top->heightM, 2.0 + (x - 9.25) * slope, 1e-9) << x;
+        EXPECT_NEAR(top->normal.y, 1.0 / std::hypot(1.0, slope), 1e-9);
+        EXPECT_NEAR(top->normal.x, -slope / std::hypot(1.0, slope), 1e-9);  // Faces downhill.
+        EXPECT_NEAR(top->normal.z, 0.0, 1e-9);
+        EXPECT_EQ(top->material, Material::Wood);
+    }
+    EXPECT_FALSE(driveSurfaceAt(ramp, 10.0, 0.6, 10.0).has_value());  // Beside it.
+    EXPECT_FALSE(driveSurfaceAt(ramp, 10.8, 0.0, 10.0).has_value());  // Past the high end.
+    EXPECT_FALSE(driveSurfaceAt(ramp, 10.0, 0.0, 2.1).has_value());   // Above the point.
+
+    // Solid: a point just under the slope is pushed out through it; one at the high end's
+    // foot is pushed back east out of the vertical face.
+    auto c = obstacleContact(ramp, {10.0, 2.12, 0.0});
+    ASSERT_TRUE(c.has_value());
+    EXPECT_GT(c->normal.y, 0.95);
+    EXPECT_LT(c->normal.x, 0.0);
+    EXPECT_NEAR(c->depthM, 0.005 / std::hypot(1.0, slope), 1e-9);
+    c = obstacleContact(ramp, {10.74, 2.05, 0.0});
+    ASSERT_TRUE(c.has_value());
+    EXPECT_NEAR(c->normal.x, 1.0, 1e-9);
+    EXPECT_FALSE(obstacleContact(ramp, {10.0, 2.13, 0.0}).has_value());
+}
+
+TEST(Items, BridgeHasADeckApproachRampsAndKerbs) {
+    // Deck top 1 m up over 4 m along z (heading 0), 1.2 m wide; ramps 2 m long.
+    const Item bridge = makeItem(ItemType::Bridge, "bridge", {0.0, 0.0, 0.0},
+                                 {{"sizeM", {1.2, 1.0, 4.0}}, {"rampLengthM", 2.0}});
+    ASSERT_EQ(bridge.shape.parts.size(), 5U);  // Deck, two ramps, two kerbs.
+    Vec3 lo;
+    Vec3 hi;
+    bridge.worldBounds(lo, hi);
+    EXPECT_NEAR(lo.z, -4.0, 1e-9);
+    EXPECT_NEAR(hi.z, 4.0, 1e-9);
+
+    // On the deck and half-way up either ramp.
+    EXPECT_NEAR(driveSurfaceAt(bridge, 0.0, 1.5, 5.0)->heightM, 1.0, 1e-9);
+    EXPECT_NEAR(driveSurfaceAt(bridge, 0.0, 3.0, 5.0)->heightM, 0.5, 1e-9);
+    EXPECT_NEAR(driveSurfaceAt(bridge, 0.0, -3.0, 5.0)->heightM, 0.5, 1e-9);
+    EXPECT_GT(driveSurfaceAt(bridge, 0.0, 3.0, 5.0)->normal.z, 0.0);  // Downhill: south.
+    EXPECT_LT(driveSurfaceAt(bridge, 0.0, -3.0, 5.0)->normal.z, 0.0);
+    // Under the deck there is nothing to stand on (the deck is 0.3 m thick) and room to pass.
+    EXPECT_FALSE(driveSurfaceAt(bridge, 0.0, 0.0, 0.5).has_value());
+    EXPECT_FALSE(obstacleContact(bridge, {0.0, 0.5, 0.0}).has_value());
+    EXPECT_TRUE(obstacleContact(bridge, {0.0, 0.8, 0.0}).has_value());
+    // The kerbs stand above the deck and stop a wheel at the edge.
+    const auto kerb = obstacleContact(bridge, {0.58, 1.05, 0.0});
+    ASSERT_TRUE(kerb.has_value());
+    EXPECT_NEAR(std::abs(kerb->normal.x), 1.0, 1e-9);
+    EXPECT_NEAR(driveSurfaceAt(bridge, 0.58, 0.0, 1.05)->heightM, 1.0, 1e-9);  // Not on it.
+
+    const Item plain = makeItem(ItemType::Bridge, "plain", {0.0, 0.0, 0.0},
+                                {{"sizeM", {1.0, 0.5, 3.0}}, {"kerbs", false}});
+    ASSERT_EQ(plain.shape.parts.size(), 3U);
+    // Default approach ramps: 12° slopes.
+    Vec3 plo;
+    Vec3 phi;
+    plain.worldBounds(plo, phi);
+    EXPECT_NEAR(phi.z, 1.5 + 0.5 / std::tan(kBridgeRampSlopeDeg * std::numbers::pi / 180.0), 1e-9);
+    Item off = plain;
+    off.enabled = false;
+    EXPECT_FALSE(driveSurfaceAt(off, 0.0, 0.0, 5.0).has_value());
 }
 
 TEST(ItemRegistry, GenerationalIdsGoStale) {

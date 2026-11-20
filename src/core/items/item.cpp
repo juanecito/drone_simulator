@@ -137,6 +137,10 @@ bool isSolidType(ItemType type) noexcept {
     return type == ItemType::Obstacle || type == ItemType::Ramp || type == ItemType::Bridge;
 }
 
+bool isDrivableType(ItemType type) noexcept {
+    return type == ItemType::Ramp || type == ItemType::Bridge;
+}
+
 Shape Shape::sphere(double r) {
     Shape s;
     s.kind = Kind::Sphere;
@@ -303,7 +307,8 @@ double SolidPart::volumeM3() const noexcept {
         case Kind::Box: return 8.0 * halfExtentsM.x * halfExtentsM.y * halfExtentsM.z;
         case Kind::Cylinder: return std::numbers::pi * radiusM * radiusM * heightM;
         case Kind::Sphere: return 4.0 / 3.0 * std::numbers::pi * radiusM * radiusM * radiusM;
-        case Kind::Gable: return 2.0 * halfExtentsM.x * heightM * halfExtentsM.z;
+        case Kind::Gable:
+        case Kind::Wedge: return 2.0 * halfExtentsM.x * heightM * halfExtentsM.z;
     }
     return 0.0;
 }
@@ -394,6 +399,37 @@ std::vector<SolidPart> manParts(double h) {
     return parts;
 }
 
+// Wedge of width w and length l rising by h towards −z (+z when flipped), base centred on c.
+SolidPart wedgePart(const Vec3& c, double w, double h, double l, bool flipped, Material material) {
+    return {.kind = SolidPart::Kind::Wedge,
+            .centreM = c,
+            .halfExtentsM = Vec3(0.5 * w, 0.0, 0.5 * l),
+            .heightM = h,
+            .material = material,
+            .flipped = flipped};
+}
+
+// Bridge along z: deck of width w, top at h over the length l, approach ramps of length r at
+// both ends, kerbs along the deck.
+std::vector<SolidPart> bridgeParts(double w, double h, double l, double r, bool kerbs) {
+    const double thickness = std::min(0.3, h);
+    std::vector<SolidPart> parts{
+        boxPart(Vec3(0.0, h - 0.5 * thickness, 0.0), Vec3(0.5 * w, 0.5 * thickness, 0.5 * l),
+                Material::Concrete),
+        wedgePart(Vec3(0.0, 0.0, 0.5 * (l + r)), w, h, r, false, Material::Concrete),
+        wedgePart(Vec3(0.0, 0.0, -0.5 * (l + r)), w, h, r, true, Material::Concrete),
+    };
+    if (kerbs) {
+        const double kerbW = std::clamp(0.05 * w, 0.04, 0.2);
+        const double kerbH = std::clamp(0.1 * w, 0.08, 0.25);
+        for (const double side : {-1.0, 1.0}) {
+            parts.push_back(boxPart(Vec3(side * 0.5 * (w - kerbW), h + 0.5 * kerbH, 0.0),
+                                    Vec3(0.5 * kerbW, 0.5 * kerbH, 0.5 * l), Material::Concrete));
+        }
+    }
+    return parts;
+}
+
 // Bounding box of @p parts, as a shape that keeps them.
 Shape compound(std::vector<SolidPart> parts) {
     Vec3 lo(kBig);
@@ -415,6 +451,7 @@ Shape compound(std::vector<SolidPart> parts) {
                 b = part.centreM + Vec3(part.radiusM);
                 break;
             case SolidPart::Kind::Gable:
+            case SolidPart::Kind::Wedge:
                 a = part.centreM - Vec3(part.halfExtentsM.x, 0.0, part.halfExtentsM.z);
                 b = part.centreM + Vec3(part.halfExtentsM.x, part.heightM, part.halfExtentsM.z);
                 break;
@@ -529,10 +566,25 @@ Shape defaultShape(ItemType type, const common::Json& p) {
         case ItemType::Gate:
             return Shape::gate(positive(p, "widthM", 2.0), positive(p, "heightM", 2.0));
         case ItemType::Payload: return Shape::box(Vec3(0.15));
-        case ItemType::Obstacle:
         case ItemType::Ramp:
         case ItemType::Bridge: {
-            Shape shape = obstacleShape(type == ItemType::Obstacle ? obstacleKind(p) : "box", p);
+            // `sizeM` [width, height, length] or [width, length] with `heightM`.
+            const bool ramp = type == ItemType::Ramp;
+            Vec3 s = size3(p).value_or(ramp ? Vec3(1.0, 0.25, 1.5) : Vec3(1.0, 0.5, 3.0));
+            if (std::isnan(s.y)) {
+                s.y = positive(p, "heightM", ramp ? 0.25 : 0.5);
+            }
+            if (ramp) {
+                return compound({wedgePart(Vec3(0.0), s.x, s.y, s.z, false, Material::Wood)});
+            }
+            const double slope = kBridgeRampSlopeDeg * std::numbers::pi / 180.0;
+            const double rampLength = positive(p, "rampLengthM", s.y / std::tan(slope));
+            const bool kerbs = !(p.is_object() && p.contains("kerbs") && p["kerbs"].is_boolean() &&
+                                 !p["kerbs"].get<bool>());
+            return compound(bridgeParts(s.x, s.y, s.z, rampLength, kerbs));
+        }
+        case ItemType::Obstacle: {
+            Shape shape = obstacleShape(obstacleKind(p), p);
             if (const double e = num(p, "restitution", -1.0); e >= 0.0) {
                 shape.restitution = std::min(e, 1.0);
             }
@@ -629,6 +681,38 @@ std::optional<SurfaceContact> gableContact(const Vec3& q, const Vec3& base, doub
     return c;
 }
 
+// Wedge: base centred on @p base, top rising by @p rise towards −z (+z when flipped).
+std::optional<SurfaceContact> wedgeContact(const Vec3& q, const SolidPart& part) {
+    const Vec3 d = q - part.centreM;
+    const double hx = part.halfExtentsM.x;
+    const double hz = part.halfExtentsM.z;
+    const double rise = part.heightM;
+    const double sign = part.flipped ? -1.0 : 1.0;
+    const double top = rise * (hz - sign * d.z) / (2.0 * hz);
+    if (d.y < 0.0 || d.y > top || std::abs(d.x) > hx || std::abs(d.z) > hz) {
+        return std::nullopt;
+    }
+    // Slope plane: y = top(z); its upward normal leans towards the low end.
+    const Vec3 gradient(0.0, 1.0, sign * rise / (2.0 * hz));
+    const double len = glm::length(gradient);
+    SurfaceContact c;
+    c.depthM = (top - d.y) / len;
+    c.normal = gradient / len;
+    if (d.y < c.depthM) {
+        c.normal = Vec3(0.0, -1.0, 0.0);
+        c.depthM = d.y;
+    }
+    if (const double side = hx - std::abs(d.x); side < c.depthM) {
+        c.normal = Vec3(d.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+        c.depthM = side;
+    }
+    if (const double end = hz + sign * d.z; end < c.depthM) {  // The vertical high end.
+        c.normal = Vec3(0.0, 0.0, -sign);
+        c.depthM = end;
+    }
+    return c;
+}
+
 std::optional<SurfaceContact> partContact(const Vec3& q, const SolidPart& part) {
     switch (part.kind) {
         case SolidPart::Kind::Box: return boxContact(q, part.centreM, part.halfExtentsM);
@@ -638,6 +722,7 @@ std::optional<SurfaceContact> partContact(const Vec3& q, const SolidPart& part) 
         case SolidPart::Kind::Gable:
             return gableContact(q, part.centreM, part.halfExtentsM.x, part.heightM,
                                 part.halfExtentsM.z);
+        case SolidPart::Kind::Wedge: return wedgeContact(q, part);
     }
     return std::nullopt;
 }
@@ -726,6 +811,43 @@ std::optional<SurfaceContact> obstacleContact(const Item& item, const Vec3& p) {
     c.normal = n / len;
     c.depthM = local->depthM * len;
     return c;
+}
+
+std::optional<DriveSurface> driveSurfaceAt(const Item& item, double x, double z,
+                                           double maxHeightM) {
+    if (!item.enabled || !isDrivableType(item.type)) {
+        return std::nullopt;
+    }
+    const Transform& t = item.transform;
+    const Vec3 q = t.toLocal(Vec3(x, t.position.y, z));
+    std::optional<DriveSurface> best;
+    for (const SolidPart& part : item.shape.parts) {
+        const Vec3 d = q - part.centreM;
+        const double hx = part.halfExtentsM.x;
+        const double hz = part.halfExtentsM.z;
+        if (std::abs(d.x) > hx || std::abs(d.z) > hz) {
+            continue;
+        }
+        double top = 0.0;
+        Vec3 normal(0.0, 1.0, 0.0);
+        if (part.kind == SolidPart::Kind::Box) {
+            top = part.centreM.y + part.halfExtentsM.y;
+        } else if (part.kind == SolidPart::Kind::Wedge) {
+            const double sign = part.flipped ? -1.0 : 1.0;
+            top = part.centreM.y + part.heightM * (hz - sign * d.z) / (2.0 * hz);
+            normal = Vec3(0.0, 1.0, sign * part.heightM / (2.0 * hz));
+        } else {
+            continue;
+        }
+        const double height = t.toWorld(Vec3(q.x, top, q.z)).y;
+        if (height > maxHeightM || (best && height <= best->heightM)) {
+            continue;
+        }
+        best = DriveSurface{.heightM = height,
+                            .normal = glm::normalize(t.rotation * (normal / t.scale)),
+                            .material = part.material};
+    }
+    return best;
 }
 
 // --- Mass ----------------------------------------------------------------------------------------

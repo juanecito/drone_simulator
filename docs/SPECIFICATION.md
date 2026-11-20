@@ -1839,9 +1839,27 @@ so Markdown pages appear in the generated site.
     5 m) with 10°/25° half-angles aimed 4° down, warm white (≈ 5000 K), switched with `L`;
     they light the scene from every camera, FPV included. `graphics::spotIlluminance()` is the
     CPU mirror used by the tests. Spot lights do not cast shadows yet.
-- **Next steps:** ramps and bridges as driving surfaces; the parking-zone item and objective;
-  at least four ground missions; calibration wizard for ground mappings; shadows of the
-  headlights and lights on items (FR-GFX-08d, S) later; steering of Ackermann layouts.
+- **Step 4 — Ramps and bridges as driving surfaces (done, FR-ITM-13 S, FR-GND-03):**
+  - *Shapes:* a new solid part, the wedge (`SolidPart::Kind::Wedge`), rises linearly
+    towards local −z (or +z) with a vertical high end. A `ramp` is one wooden wedge,
+    `sizeM` [w, h, l] (1 × 0.25 × 1.5 m) rising towards its heading. A `bridge` is a 0.3 m
+    thick concrete deck whose top is `h` above its position over `l` (1 × 0.5 × 3 m), approach
+    ramps of `rampLengthM` (default a 12° slope) at both ends and yellow kerbs along the deck
+    (`kerbs: false` removes them); a deck higher than its thickness leaves room to pass under.
+    Both stay solid for aerial drones (and block the line of sight).
+  - *Drive surfaces:* `items::driveSurfaceAt()` gives the highest top of a ramp or bridge at
+    a horizontal position that is not above a given height. `World::surfaceAt(point)` takes
+    the highest of the terrain and those tops (paved); the ground drone samples it for every
+    wheel (at the hub at full extension) and body point through the new
+    `EnvironmentSample::surfaceQuery`, and the environment, snapshot and HUD use it under the
+    vehicle (slope, surface, water depth — a rover on a bridge over water stays dry; an
+    aerial drone lands on a deck).
+  - *Editing and missions:* the Items tab palette has *Ramp* and *Bridge* (width, height,
+    length); the mission schema and validator accept `rampLengthM` and `kerbs` on bridges.
+    Items are drawn as they collide (wedge faces wound outwards).
+- **Next steps:** the parking-zone item and objective; at least four ground missions;
+  calibration wizard for ground mappings; shadows of the headlights and lights on items
+  (FR-GFX-08d, S) later; steering of Ackermann layouts.
 
 ---
 

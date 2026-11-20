@@ -69,6 +69,17 @@ the terrain like the aerial drone's points (penalty spring–damper, ω = 120 ra
 with sliding friction `0.5·μ_surface`. A rover high-centred on a crest rests on its belly and
 can get stuck. A body hit faster than `crashSpeedMs` is a crash.
 
+**Ramps and bridges (FR-ITM-13).** The surface under a wheel or body point is the highest of
+the terrain and the tops of nearby ramps and bridge decks that are not above the point (2 cm
+tolerance at the joins): the world's `surfaceAt()`, passed to the vehicle as
+`EnvironmentSample::surfaceQuery`. The hub at full extension is the wheel's query point, so a
+wheel climbs onto a deck lower than its hub and a deck overhead (a bridge to drive under) is
+ignored. Ramp and bridge tops are paved. Their sides, high ends, the underside of decks and
+the kerbs are solid like other obstacles, so a rover driving into a ramp's high
+end, off a deck's edge or under a deck too low for it hits them. Jumps follow from the same
+contacts: driving slowly off a 25 cm ledge, this short rover pivots on its rear wheels for
+about 0.2 s and nose-dives — as a real one does.
+
 ## 4. Tyres and surfaces (FR-GND-04, `surface.hpp`)
 
 **Slip.** In the contact plane, with `f` the wheel's forward direction, `l = n × f`, `v_c`

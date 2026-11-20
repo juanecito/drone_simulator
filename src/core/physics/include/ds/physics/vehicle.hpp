@@ -46,6 +46,11 @@ struct GroundSample {
 /// @brief Terrain lookup at world (x, z). Must be thread-safe.
 using GroundQuery = std::function<GroundSample(double x, double z)>;
 
+/// @brief Drivable surface under a world point: the highest of the terrain and the tops of
+/// items (ramps, bridge decks) that are not above the point. A point under a bridge gets
+/// the terrain; a point on the deck gets the deck.
+using SurfaceQuery = std::function<GroundSample(const Vec3& point)>;
+
 /// @brief Environment at the vehicle for one tick (computed once per tick by the world).
 struct EnvironmentSample {
     AirState air;                       ///< Air at the vehicle.
@@ -53,11 +58,14 @@ struct EnvironmentSample {
     double ambientC = 15.0;             ///< Air temperature, °C (battery cooling).
     Vec3 wind{0.0};                     ///< Wind velocity, world frame.
     Vec3 groundPoint{0.0};              ///< Terrain point under the vehicle (x, height, z).
-    GroundSample ground;                ///< Terrain under the vehicle (local plane for contacts).
+    GroundSample ground;  ///< Surface under the vehicle (terrain or a deck; local plane).
     std::optional<double> waterLevelM;  ///< World height of the water surface, if any.
     /// Terrain lookup for contacts away from the centre (the wheels of ground drones); null
     /// ⇒ the local plane @ref ground is used everywhere. Not owned.
     const GroundQuery* groundQuery = nullptr;
+    /// Surface lookup that also knows the drivable items (ramps, bridges); used instead of
+    /// @ref groundQuery when set. Not owned.
+    const SurfaceQuery* surfaceQuery = nullptr;
 };
 
 /// @brief A collision point inside an obstacle (see AerialVehicle::resolveObstacles()).

@@ -464,6 +464,8 @@ private:
             {"restitution", {Obstacle}},
             {"friction", {Obstacle}},
             {"order", {Gate, Waypoint}},
+            {"rampLengthM", {Bridge}},
+            {"kerbs", {Bridge}},
         };
         const auto it = kAllowed.find(key);
         return it == kAllowed.end() || std::ranges::find(it->second, t) != it->second.end();

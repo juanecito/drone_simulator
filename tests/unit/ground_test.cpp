@@ -7,11 +7,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <numbers>
 
 #include "ds/common/math.hpp"
+#include "ds/items/item.hpp"
 #include "ds/physics/drive_controller.hpp"
 #include "ds/physics/ground_profile.hpp"
 #include "ds/physics/ground_vehicle.hpp"
@@ -547,6 +549,121 @@ TEST(GroundVehicle, HitsAnObstacle) {
     EXPECT_GE(collisions, 1);
     EXPECT_GT(world.vehicle().bodyState().position.z, -2.0 + 0.2);  // Stopped by the wall.
     EXPECT_FALSE(world.vehicle().telemetry().crashed);              // 2 m/s < 4 m/s.
+}
+
+items::Item drivable(items::ItemType type, const Vec3& position, double headingDeg,
+                     const common::Json& properties) {
+    items::Item item;
+    item.type = type;
+    item.key = std::string(items::itemTypeName(type));
+    item.solid = true;
+    item.properties = properties;
+    item.transform.position = position;
+    item.transform.rotation = items::headingRotation(headingDeg);
+    item.shape = items::defaultShape(type, properties);
+    return item;
+}
+
+TEST(GroundVehicle, DrivesUpARampAndOffAKicker) {
+    // FR-GND-03, FR-ITM-13: a 0.25 m high, 1.5 m long (9.5°) ramp rising north, starting 1 m
+    // ahead of the rover. It drives up and parks near the top with the brake.
+    sim::World world(roverWorld(plane(0.0, SurfaceMaterial::Grass)));
+    world.setFreeItems({drivable(items::ItemType::Ramp, Vec3(0.0, 0.0, -1.75), 0.0,
+                                 {{"sizeM", {1.0, 0.25, 1.5}}})});
+    const double rest = world.vehicle().bodyState().position.y;
+    EXPECT_NEAR(world.surfaceAt(Vec3(0.0, 1.0, -2.5)).heightM, 0.25, 1e-3);
+    EXPECT_EQ(world.surfaceAt(Vec3(0.0, 1.0, -2.0)).material, SurfaceMaterial::Paved);
+    EXPECT_NEAR(world.surfaceAt(Vec3(0.0, 0.1, -2.4)).heightM, 0.0, 1e-9);  // Below its top.
+    Driver d{world};
+    d.arm();
+    d.controls.drive = 0.7;
+    for (int i = 0; i < 400 && world.vehicle().bodyState().position.z > -2.1; ++i) {
+        d.run(0.01);
+    }
+    d.controls.drive = 0.0;
+    d.controls.brake = true;
+    d.run(0.5);
+    const Vec3 parked = world.vehicle().bodyState().position;
+    const auto t = world.vehicle().telemetry();
+    EXPECT_NEAR(t.ground.slopeDeg, common::radToDeg(std::atan(0.25 / 1.5)), 1.0);
+    EXPECT_EQ(t.ground.surface, SurfaceMaterial::Paved);
+    EXPECT_GT(parked.y - rest, 0.15) << "on the ramp";
+    EXPECT_NEAR(std::abs(parked.x), 0.0, 0.1);
+    d.run(2.0);
+    EXPECT_NEAR(world.vehicle().bodyState().position.z, parked.z, 0.01) << "held by the brake";
+
+    // A 10 cm kicker: the rover drives over it and lands on its wheels. (Driving slowly off
+    // a 25 cm ledge makes this short rover nose-dive, as it would for real.)
+    sim::World kicker(roverWorld(plane(0.0, SurfaceMaterial::Grass)));
+    kicker.setFreeItems(
+        {drivable(items::ItemType::Ramp, Vec3(0.0, 0.0, -1.5), 0.0, {{"sizeM", {1.0, 0.1, 1.0}}})});
+    Driver k{kicker};
+    k.arm();
+    k.controls.drive = 0.7;
+    double highest = 0.0;
+    for (int i = 0; i < 100 && kicker.vehicle().bodyState().position.z > -4.0; ++i) {
+        k.run(0.05);
+        highest = std::max(highest, kicker.vehicle().bodyState().position.y - rest);
+    }
+    k.controls.drive = 0.0;
+    k.run(1.0);
+    EXPECT_GT(highest, 0.07);
+    EXPECT_LT(kicker.vehicle().bodyState().position.z, -3.0);
+    EXPECT_NEAR(kicker.vehicle().bodyState().position.y, rest, 0.03) << "back on the ground";
+    EXPECT_FALSE(kicker.vehicle().telemetry().ground.rolledOver);
+    EXPECT_FALSE(kicker.vehicle().telemetry().crashed);
+}
+
+TEST(GroundVehicle, CrossesABridgeOverWaterAndPassesUnderAHighOne) {
+    // A 3 m wide channel 1 m deep with water up to −0.5 m, crossing the rover's way north, and
+    // a 0.3 m high bridge over it (deck 4 m long, 1 m wide, 1.4 m approach ramps).
+    const sim::GroundFunction channel = [](double, double z) {
+        physics::GroundSample g;
+        g.heightM = z < -3.0 && z > -6.0 ? -1.0 : 0.0;
+        g.material = SurfaceMaterial::Grass;
+        return g;
+    };
+    sim::WorldConfig c = roverWorld(channel);
+    c.waterLevelM = -0.5;
+    sim::World world(c);
+    world.setFreeItems({drivable(items::ItemType::Bridge, Vec3(0.0, 0.0, -4.5), 0.0,
+                                 {{"sizeM", {1.0, 0.3, 4.0}}})});
+    EXPECT_NEAR(world.surfaceAt(Vec3(0.0, 1.0, -4.5)).heightM, 0.3, 1e-9);
+    EXPECT_NEAR(world.surfaceAt(Vec3(0.0, -0.8, -4.5)).heightM, -1.0, 1e-9);  // Under it.
+    int water = 0;
+    (void)world.events().subscribe<sim::WaterEnteredEvent>(
+        [&](const sim::WaterEnteredEvent&) { ++water; });
+    Driver d{world};
+    d.arm();
+    d.controls.drive = 0.7;
+    double highest = -1.0;
+    for (int i = 0; i < 200 && world.vehicle().bodyState().position.z > -10.0; ++i) {
+        d.run(0.1);
+        highest = std::max(highest, world.vehicle().bodyState().position.y);
+        EXPECT_FALSE(world.vehicle().telemetry().ground.inWater);
+    }
+    EXPECT_EQ(water, 0);
+    EXPECT_LT(world.vehicle().bodyState().position.z, -9.0) << "across the bridge";
+    EXPECT_GT(highest, 0.3) << "over the deck";
+    EXPECT_TRUE(world.vehicle().armed());
+
+    // A footbridge 1 m up (deck 0.7–1.0 m) across the way: the rover drives under it.
+    sim::World under(roverWorld(plane(0.0, SurfaceMaterial::Paved)));
+    under.setFreeItems({drivable(items::ItemType::Bridge, Vec3(0.0, 0.0, -3.0), 90.0,
+                                 {{"sizeM", {1.5, 1.0, 3.0}}})});
+    const double rest = under.vehicle().bodyState().position.y;
+    EXPECT_NEAR(under.surfaceAt(Vec3(0.0, rest, -3.0)).heightM, 0.0, 1e-9);
+    EXPECT_NEAR(under.surfaceAt(Vec3(0.0, 1.2, -3.0)).heightM, 1.0, 1e-9);
+    Driver u{under};
+    u.arm();
+    u.controls.drive = 0.7;
+    double top = 0.0;
+    for (int i = 0; i < 120 && under.vehicle().bodyState().position.z > -6.0; ++i) {
+        u.run(0.1);
+        top = std::max(top, under.vehicle().bodyState().position.y);
+    }
+    EXPECT_LT(under.vehicle().bodyState().position.z, -5.0);
+    EXPECT_LT(top, rest + 0.03);
 }
 
 // --- World integration -----------------------------------------------------------------------

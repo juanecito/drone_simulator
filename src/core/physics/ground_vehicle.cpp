@@ -307,7 +307,12 @@ void GroundVehicle::updateController(const PilotCommand& command, double dt) {
 void GroundVehicle::sampleTerrain(const EnvironmentSample& env) {
     const auto plane = [&env](const Vec3& p) {
         ContactPlane c;
-        if (env.groundQuery != nullptr && *env.groundQuery) {
+        if (env.surfaceQuery != nullptr && *env.surfaceQuery) {
+            const GroundSample g = (*env.surfaceQuery)(p);
+            c.point = Vec3(p.x, g.heightM, p.z);
+            c.normal = glm::normalize(g.normal);
+            c.material = g.material;
+        } else if (env.groundQuery != nullptr && *env.groundQuery) {
             const GroundSample g = (*env.groundQuery)(p.x, p.z);
             c.point = Vec3(p.x, g.heightM, p.z);
             c.normal = glm::normalize(g.normal);

@@ -131,6 +131,8 @@ World::World(WorldConfig config) : config_(std::move(config)) {
     if (!config_.ground) {
         config_.ground = flatGround();
     }
+    // World is neither copied nor moved: `this` stays valid.
+    surfaceQuery_ = [this](const physics::Vec3& p) { return surfaceAt(p); };
     vehicle_ = physics::makeVehicle(config_.profile, config_.seed);
     clockBase_ = config_.startUtc;
     clockBaseTime_ = 0.0;
@@ -218,12 +220,43 @@ void World::setUtc(astro::UtcTime utc) noexcept {
     sunUpdatedAtS_ = -1e9;
 }
 
+const items::ItemRegistry& World::activeItems() const noexcept {
+    return mission_ ? mission_->runner().items() : freeItems_;
+}
+
+physics::GroundSample World::surfaceAt(const physics::Vec3& point) const {
+    // A deck counts if its top is at most this far above the point (rounding at the joins).
+    constexpr double kClimbM = 0.02;
+    physics::GroundSample ground = config_.ground(point.x, point.z);
+    const items::ItemRegistry& registry = activeItems();
+    if (registry.size() == 0) {
+        return ground;
+    }
+    const double maxHeight = point.y + kClimbM;
+    for (const items::ItemId id : registry.queryBox(physics::Vec3(point.x, -1.0e7, point.z),
+                                                    physics::Vec3(point.x, maxHeight, point.z))) {
+        const items::Item* item = registry.get(id);
+        if (item == nullptr || !items::isDrivableType(item->type)) {
+            continue;
+        }
+        if (const auto deck = items::driveSurfaceAt(*item, point.x, point.z, maxHeight);
+            deck && deck->heightM > ground.heightM) {
+            ground.heightM = deck->heightM;
+            ground.normal = deck->normal;
+            ground.material = physics::SurfaceMaterial::Paved;  // Planks and concrete.
+            ground.friction = physics::surfaceProperties(ground.material).peakFriction;
+        }
+    }
+    return ground;
+}
+
 physics::EnvironmentSample World::sampleEnvironment(const physics::Vec3& position) const {
     physics::EnvironmentSample env;
-    env.ground = config_.ground(position.x, position.z);
+    env.ground = surfaceAt(position);
     env.groundPoint = physics::Vec3(position.x, env.ground.heightM, position.z);
     env.waterLevelM = config_.waterLevelM;
     env.groundQuery = &config_.ground;
+    env.surfaceQuery = &surfaceQuery_;
     env.air = physics::airAt(config_.originAltitudeM + position.y, config_.air,
                              config_.originAltitudeM + env.ground.heightM);
     env.qnhHpa = config_.air.pressureHpa;
@@ -352,7 +385,7 @@ void World::setFreeItems(const std::vector<items::Item>& freeItems) {
 }
 
 void World::resolveObstacles() {
-    const items::ItemRegistry& registry = mission_ ? mission_->runner().items() : freeItems_;
+    const items::ItemRegistry& registry = activeItems();
     if (registry.size() == 0) {
         return;
     }
@@ -447,7 +480,7 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.controls = controls_;
     s.attitude = physics::eulerFromOrientation(s.body.orientation);
     s.telemetry = v.telemetry();
-    const physics::GroundSample g = config_.ground(s.body.position.x, s.body.position.z);
+    const physics::GroundSample g = surfaceAt(s.body.position);
     s.groundHeightM = g.heightM;
     s.aglM = s.body.position.y - g.heightM - v.restHeightM();
     s.originAltitudeM = config_.originAltitudeM;

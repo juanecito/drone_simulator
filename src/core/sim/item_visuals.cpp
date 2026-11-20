@@ -37,6 +37,8 @@ constexpr glm::vec3 kConcrete{0.35F, 0.34F, 0.32F};
 constexpr glm::vec3 kWall{0.5F, 0.47F, 0.42F};
 constexpr glm::vec3 kRoof{0.25F, 0.12F, 0.08F};
 constexpr glm::vec3 kBark{0.18F, 0.11F, 0.05F};
+constexpr glm::vec3 kPlank{0.42F, 0.30F, 0.17F};
+constexpr glm::vec3 kKerb{0.75F, 0.60F, 0.10F};
 constexpr glm::vec3 kLeaves{0.05F, 0.22F, 0.04F};
 constexpr glm::vec3 kCardboard{0.4F, 0.24F, 0.1F};
 constexpr glm::vec3 kTargetColor{0.85F, 0.35F, 0.05F};
@@ -80,6 +82,43 @@ void addTriangle(Mesh& m, const glm::vec3& a, const glm::vec3& b, const glm::vec
         m.vertices.push_back(MeshVertex{p, n, color, mat.emissive});
     }
     m.indices.insert(m.indices.end(), {base, base + 1, base + 2});
+}
+
+// Quad / triangle whose front face looks along @p outward (the winding is chosen to match).
+void addQuadFacing(Mesh& m, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                   const glm::vec3& d, const glm::vec3& outward, const MeshMaterial& mat) {
+    if (glm::dot(glm::cross(b - a, d - a), outward) >= 0.0F) {
+        addQuad(m, a, b, c, d, mat);
+    } else {
+        addQuad(m, d, c, b, a, mat);
+    }
+}
+
+void addTriangleFacing(Mesh& m, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+                       const glm::vec3& outward, const MeshMaterial& mat) {
+    if (glm::dot(glm::cross(b - a, c - a), outward) >= 0.0F) {
+        addTriangle(m, a, b, c, mat);
+    } else {
+        addTriangle(m, c, b, a, mat);
+    }
+}
+
+// Wedge on the base centred on @p base (half sizes @p hx × @p hz), rising by @p rise towards
+// −z (+z when @p flipped): slope, high end, sides and underside.
+void appendWedge(Mesh& m, const glm::vec3& base, float hx, float rise, float hz, bool flipped,
+                 const MeshMaterial& mat) {
+    const float s = flipped ? -1.0F : 1.0F;
+    const glm::vec3 lowL = base + glm::vec3(-hx, 0.0F, s * hz);
+    const glm::vec3 lowR = base + glm::vec3(hx, 0.0F, s * hz);
+    const glm::vec3 highL = base + glm::vec3(-hx, 0.0F, -s * hz);
+    const glm::vec3 highR = base + glm::vec3(hx, 0.0F, -s * hz);
+    const glm::vec3 topL = highL + glm::vec3(0.0F, rise, 0.0F);
+    const glm::vec3 topR = highR + glm::vec3(0.0F, rise, 0.0F);
+    addQuadFacing(m, lowL, lowR, topR, topL, glm::vec3(0.0F, 1.0F, s * rise / (2.0F * hz)), mat);
+    addQuadFacing(m, highL, highR, topR, topL, glm::vec3(0.0F, 0.0F, -s), mat);
+    addQuadFacing(m, lowL, lowR, highR, highL, glm::vec3(0.0F, -1.0F, 0.0F), mat);
+    addTriangleFacing(m, lowL, highL, topL, glm::vec3(-1.0F, 0.0F, 0.0F), mat);
+    addTriangleFacing(m, lowR, highR, topR, glm::vec3(1.0F, 0.0F, 0.0F), mat);
 }
 
 // Gable roof on the base centred on @p base (half sizes @p hx × @p hz), ridge along z at
@@ -260,6 +299,10 @@ void appendParts(Mesh& m, const std::vector<items::SolidPart>& parts,
                 appendGable(m, c, static_cast<float>(part.halfExtentsM.x), h,
                             static_cast<float>(part.halfExtentsM.z), mat, {kWall});
                 break;
+            case Kind::Wedge:
+                appendWedge(m, c, static_cast<float>(part.halfExtentsM.x), h,
+                            static_cast<float>(part.halfExtentsM.z), part.flipped, mat);
+                break;
         }
     }
 }
@@ -340,6 +383,19 @@ std::shared_ptr<Mesh> obstacle(const items::Item& item) {
     auto m = std::make_shared<Mesh>();
     const Shape& s = item.shape;
     const std::string kind = propertyString(item.properties, "shape", "box");
+    if (item.type == ItemType::Ramp || item.type == ItemType::Bridge) {
+        // Wooden ramps; concrete bridges with yellow kerbs (the parts after the deck and its
+        // two approach ramps).
+        std::size_t index = 0;
+        appendParts(*m, s.parts, [&](const items::SolidPart& part) {
+            const std::size_t i = index++;
+            if (part.material == items::Material::Wood) {
+                return kPlank;
+            }
+            return item.type == ItemType::Bridge && i >= 3 ? kKerb : colourOf(part.material);
+        });
+        return m;
+    }
     if (!s.parts.empty()) {
         // Legs of a person below half its height: trousers.
         const double half = s.offsetM.y;

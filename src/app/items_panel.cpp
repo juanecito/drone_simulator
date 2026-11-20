@@ -59,6 +59,8 @@ QString typeText(ItemType type) {
         case ItemType::NoFlyZone: return ItemsPanel::tr("No-fly zone");
         case ItemType::Geofence: return ItemsPanel::tr("Geofence");
         case ItemType::PilotPosition: return ItemsPanel::tr("Pilot");
+        case ItemType::Ramp: return ItemsPanel::tr("Ramp");
+        case ItemType::Bridge: return ItemsPanel::tr("Bridge");
         default: return QString::fromUtf8(items::itemTypeName(type).data());
     }
 }
@@ -390,7 +392,8 @@ void ItemsPanel::updateFieldVisibility() {
     const bool round =
         obstacle && (shape == QLatin1String("cylinder") || shape == QLatin1String("tree"));
     const bool person = obstacle && shape == QLatin1String("man");  // Sized by height only.
-    const bool boxy = obstacle && !round && !person;
+    const bool drivable = items::isDrivableType(type);              // Ramps and bridges: w × h × l.
+    const bool boxy = (obstacle && !round && !person) || drivable;
     const bool hasRadius = round || type == ItemType::Waypoint || type == ItemType::LandingPad ||
                            type == ItemType::PickupZone || type == ItemType::DropZone ||
                            type == ItemType::NoFlyZone || type == ItemType::Geofence ||
@@ -400,7 +403,7 @@ void ItemsPanel::updateFieldVisibility() {
     form->setRowVisible(radius_, hasRadius);
     form->setRowVisible(width_, boxy || type == ItemType::Gate);
     form->setRowVisible(length_, boxy);
-    form->setRowVisible(height_, obstacle || type == ItemType::Gate ||
+    form->setRowVisible(height_, obstacle || drivable || type == ItemType::Gate ||
                                      type == ItemType::PickupZone || type == ItemType::DropZone);
     form->setRowVisible(mass_, obstacle);
 }

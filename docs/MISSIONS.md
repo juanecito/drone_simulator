@@ -122,7 +122,8 @@ Headings are degrees clockwise from true north.
 | `noFlyZone` | keep-out prism (`polygon`) or cylinder (`radiusM`), `bottomM`/`topM` optional | Entering it fails the mission. |
 | `geofence` | keep-in prism or cylinder | Leaving every geofence fails the mission. |
 | `obstacle` | `shape`: `box` (`sizeM` [w, h, l]), `cylinder`, `tree`, `building`, `powerLine`, `windTurbine`, `house`, `cow`, `man` (see below) | Solid: blocks flight and the pilot's line of sight. |
-| `ramp`, `bridge` | box `sizeM` | Ground drones (M6). |
+| `ramp` | wooden wedge `sizeM` [w, h, l] (1 × 0.25 × 1.5 m) rising towards `headingDeg`, vertical face at the high end | Drivable (ground drones drive up it and jump off the end); solid for aerial drones. |
+| `bridge` | concrete deck, top `h` above the position over `l` (`sizeM` 1 × 0.5 × 3 m, 0.3 m thick), approach ramps of `rampLengthM` (12° slope) at both ends along `headingDeg`, yellow kerbs unless `kerbs` is false | Drivable on the deck and ramps; room to pass under a deck higher than 0.3 m. |
 | `payload` | small box | |
 
 ### Obstacle figures
@@ -532,7 +533,7 @@ Seeded weather generator settings (§4.2.3).
 | `radiusM` | number |  | > 0 |  |
 | `widthM` | number |  | > 0 |  |
 | `heightM` | number |  | > 0 |  |
-| `sizeM` | array of number |  | min items 2, max items 3 | [width, length] or [width, height, length] in metres. |
+| `sizeM` | array of number |  | min items 2, max items 3 | [width, length] or [width, height, length] in metres. Ramps rise by the height towards their heading; a bridge's deck top is the height above its position, over the length. |
 | `polygon` | array of array[2] |  | min items 3, max items 256 | Outline as [x, z] offsets in metres from the item position (engine frame: x east, z south). |
 | `bottomM` | number |  |  |  |
 | `topM` | number |  |  |  |
@@ -540,6 +541,8 @@ Seeded weather generator settings (§4.2.3).
 | `restitution` | number |  | ≥ 0, ≤ 1 | Obstacles: fraction of the normal speed a drone keeps when it bounces off (default from the material: concrete 0.2, foliage 0.05, …). |
 | `friction` | number |  | ≥ 0, ≤ 2 | Obstacles: Coulomb friction coefficient against the drone (default from the material: concrete 0.5, foliage 0.9, …). |
 | `order` | integer |  | ≥ 0 |  |
+| `rampLengthM` | number |  | > 0 | Bridges: length of each approach ramp (default: a 12° slope up to the deck). |
+| `kerbs` | boolean |  |  | Bridges: kerbs along both sides of the deck (default true). |
 
 #### utm
 
