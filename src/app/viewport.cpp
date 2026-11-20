@@ -201,7 +201,12 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     frame.terrain.waterLevelM = scene_->source()->waterLevel();
     frame.terrain.waterBeyondExtent = terrainConfig.params.edge == terrain::EdgeMode::Water;
     frame.exposure = env.exposure;
-    frame.visibilityM = env.visibilityM;
+    if (sim != nullptr) {
+        frame.weather = sim->weatherView();
+        frame.cameraVelocity = vehicleView ? sim->cameraVelocity() : glm::dvec3(0.0);
+    } else {
+        frame.weather.aerosolVisibilityM = env.visibilityM;
+    }
     frame.dtSeconds = dt;
     frame.timeSeconds = animationTime_;
     frame.resetExposure = scene_->takeExposureReset();

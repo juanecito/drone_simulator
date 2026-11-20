@@ -9,6 +9,7 @@
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "shadow.glsl"
+#include "weather.glsl"
 #include "lighting.glsl"
 
 layout(location = 7) uniform vec4 u_tint;
@@ -38,11 +39,13 @@ void main() {
     vec3 albedo = v_color.rgb * u_tint.rgb;
     float r = surfaceRadius(v_rel.y);
     float visibility = shadowVisibility(v_rel, n);
-    vec3 irradiance = surfaceIrradianceShadowed(r, n, visibility) + spotIrradiance(v_rel, n);
+    vec3 irradiance = surfaceIrradianceShadowed(v_rel, r, n, visibility) + spotIrradiance(v_rel, n);
     vec3 lum = albedo / PI * irradiance;
     bool sunCasts = s_texel.w < 0.5;
-    lum += highlight(r, n, v, u_sunDirLux, u_sunColorRadius, sunCasts ? visibility : 1.0);
-    lum += highlight(r, n, v, u_moonDirLux, u_moonColorRadius, sunCasts ? 1.0 : visibility);
+    lum += highlight(r, n, v, u_sunDirLux, u_sunColorRadius,
+                     (sunCasts ? visibility : 1.0) * cloudShadow(v_rel, u_sunDirLux.xyz));
+    lum += highlight(r, n, v, u_moonDirLux, u_moonColorRadius,
+                     (sunCasts ? 1.0 : visibility) * cloudShadow(v_rel, u_moonDirLux.xyz));
     lum += v_color.rgb * v_emissive * u_emissiveScale;
     vec4 c = finishSurface(lum, v_rel);
     o_color = vec4(c.rgb, v_color.a * u_tint.a);

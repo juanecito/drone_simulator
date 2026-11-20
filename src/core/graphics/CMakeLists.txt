@@ -19,6 +19,7 @@ ds_add_core_module(graphics
         image.cpp
         module.cpp
         renderer.cpp
+        weather_view.cpp
         shader_source.cpp
         shadow_cascades.cpp
         sky_model.cpp

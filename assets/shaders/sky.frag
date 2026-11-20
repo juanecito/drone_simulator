@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: MIT
 //
 // Sky: atmosphere from the sky-view LUT, sun disc, moon disc with phase, earthshine and
-// albedo texture, and the night-sky background. Drawn where the depth buffer is still at
-// infinity, after the opaque geometry.
+// albedo texture, and the night-sky background, behind the cloud layers and the fog
+// (FR-WX-09). Drawn where the depth buffer is still at infinity, after the opaque geometry.
 
 #include "common.glsl"
 #include "atmosphere.glsl"
+#include "weather.glsl"
 
 layout(binding = 3) uniform sampler2D t_moonAlbedo;
 
@@ -85,6 +86,14 @@ void main() {
     // Airglow and unresolved starlight, brighter towards the horizon (van Rhijn).
     float airglow = u_misc.y * (1.0 + 1.5 * (1.0 - max(dir.y, 0.0)));
     color += t * airglow * vec3(0.8, 0.9, 1.1);
-    color += t * (sunDisc(dir) + moonDisc(dir));
-    o_color = vec4(min(color * e_exposure, vec3(60000.0)), 1.0);
+    vec3 behind = color + t * (sunDisc(dir) + moonDisc(dir));
+    // Clouds hide the sky behind them; far away they fade into the horizon haze, which is
+    // grey under an overcast.
+    // Rays near the horizon cross the layers over tens of kilometres, where perspective packs
+    // the clouds together.
+    const float kCloudRange = 150000.0;
+    vec3 haze = mix(color, ambientLuminance(0.0), overcastAbove(0.0));
+    vec3 c = applyWeather(behind, dir, kCloudRange, true, 12,
+                          interleavedGradientNoise(gl_FragCoord.xy), haze);
+    o_color = vec4(min(c * e_exposure, vec3(60000.0)), 1.0);
 }

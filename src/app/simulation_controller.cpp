@@ -933,6 +933,7 @@ input::InputSource SimulationController::activeInputSource() const noexcept {
 // --- Scene changes --------------------------------------------------------------------------
 
 void SimulationController::onTerrainChanged() {
+    weatherGroundAt_.reset();
     loop_->post([ground = groundFunction(), water = scene_->source()->waterLevel(),
                  origin = scene_->terrain().origin](sim::World& w) {
         w.setGround(ground, water, origin.heightM);
@@ -1027,6 +1028,12 @@ void SimulationController::recordSession(const sim::SessionStats& stats,
     (void)pending;
 }
 
+glm::dvec3 SimulationController::cameraVelocity() const noexcept {
+    return cameraMode_ == graphics::CameraMode::Fpv || cameraMode_ == graphics::CameraMode::Chase
+               ? pose_.velocity
+               : glm::dvec3(0.0);
+}
+
 void SimulationController::updateFrame(double dt, double aspect) {
     if (loop_->acquireSnapshot()) {
         const sim::WorldSnapshot& s = loop_->snapshot();
@@ -1069,8 +1076,9 @@ void SimulationController::updateFrame(double dt, double aspect) {
     pose_.position = s.body.position;
     pose_.orientation = s.body.orientation;
     pose_.velocity = s.body.velocity;
+    double ahead = 0.0;
     if (s.state == sim::RunState::Running) {
-        const double ahead = std::clamp(
+        ahead = std::clamp(
             std::chrono::duration<double>(std::chrono::steady_clock::now() - s.publishedAt)
                     .count() *
                 s.timeScale,
@@ -1082,6 +1090,15 @@ void SimulationController::updateFrame(double dt, double aspect) {
                 pose_.orientation * glm::angleAxis(angle, glm::normalize(s.body.angularVelocity)));
         }
     }
+
+    // Weather (FR-WX-09), heights from the ground at the take-off point.
+    const glm::dvec2 homeXz(s.home.x, s.home.z);
+    if (!weatherGroundAt_ || *weatherGroundAt_ != homeXz) {
+        weatherGroundAt_ = homeXz;
+        weatherGroundY_ = scene_->query().height(s.home.x, s.home.z);
+    }
+    weather_ = graphics::makeWeatherView(s.weather, s.cloudDrift, s.groundCover, weatherGroundY_,
+                                         s.windMeanSpeedMs, s.weatherTimeS + ahead);
 
     if (!model_ && !rover_) {
         buildModel();

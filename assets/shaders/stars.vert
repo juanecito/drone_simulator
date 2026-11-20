@@ -7,6 +7,7 @@
 
 #include "common.glsl"
 #include "atmosphere.glsl"
+#include "weather.glsl"
 
 struct Star {
     vec4 directionLux;  // xyz: apparent equatorial direction; w: illuminance (lux).
@@ -26,6 +27,13 @@ void main() {
     vec3 dir = mat3(u_equatorialToWorld) * star.directionLux.xyz;
     float r = cameraRadius();
     vec3 t = rayHitsGround(r, dir.y) ? vec3(0.0) : transmittanceToTop(r, dir.y);
+    // Hidden by clouds (FR-WX-09) and fog.
+    if (cloudLayerCount() > 0 || w_fog.y > 0.0) {
+        vec3 unused;
+        float meanDist;
+        t *= cloudMarch(dir, 60000.0, true, 4, 0.5, unused, meanDist) *
+             fogTransmittance(dir, 60000.0);
+    }
     // Hidden behind the moon disc.
     if (dot(dir, u_moonDirLux.xyz) > cos(u_moonColorRadius.w)) {
         t = vec3(0.0);

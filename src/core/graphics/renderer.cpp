@@ -187,6 +187,76 @@ struct LightUniforms {
 };
 static_assert(sizeof(LightUniforms) == 16 + 4 * kMaxSpotLights * 16);
 
+// std140 mirror of WeatherUniforms in assets/shaders/weather.glsl.
+struct WeatherUniforms {
+    std::array<glm::vec4, weather::kMaxCloudLayers> layerHeights;
+    std::array<glm::vec4, weather::kMaxCloudLayers> layerNoise;
+    std::array<glm::vec4, weather::kMaxCloudLayers> layerLook;
+    glm::vec4 light;
+    glm::vec4 fog;
+    glm::vec4 wind;
+    glm::vec4 surface;
+    glm::vec4 precip;
+    glm::vec4 precipOffset;
+    glm::vec4 precipVelocity;
+};
+static_assert(sizeof(WeatherUniforms) == 16 * 16);
+
+// Shutter time of the rain streaks (the length the eye or a camera smears a drop over), s.
+constexpr double kRainShutterS = 1.0 / 30.0;
+
+float precipitationCode(weather::PrecipitationType type) noexcept {
+    switch (type) {
+        case weather::PrecipitationType::None: return 0.0F;
+        case weather::PrecipitationType::Drizzle: return 1.0F;
+        case weather::PrecipitationType::Rain: return 2.0F;
+        case weather::PrecipitationType::Snow: return 3.0F;
+        case weather::PrecipitationType::Sleet: return 4.0F;
+    }
+    return 0.0F;
+}
+
+// Weather uniforms for a camera at @p camera moving at @p cameraVelocity.
+WeatherUniforms weatherUniforms(const WeatherView& w, const glm::dvec3& camera,
+                                const glm::dvec3& cameraVelocity) {
+    WeatherUniforms u{};
+    for (std::size_t i = 0; i < w.layerCount; ++i) {
+        const CloudLayerView& l = w.layers[i];
+        u.layerHeights[i] = {static_cast<float>(l.baseY - camera.y),
+                             static_cast<float>(l.topY - camera.y),
+                             static_cast<float>(l.extinctionPerM), static_cast<float>(l.cover)};
+        u.layerNoise[i] = {static_cast<float>(camera.x - l.driftM.x),
+                           static_cast<float>(camera.z - l.driftM.y),
+                           static_cast<float>(l.frequency), static_cast<float>(l.threshold)};
+        u.layerLook[i] = {static_cast<float>(l.softness), static_cast<float>(l.type), 0.0F, 0.0F};
+    }
+    u.light = {static_cast<float>(w.skyFactor), static_cast<float>(w.beamDiffuse),
+               static_cast<float>(w.clearFraction), static_cast<float>(w.layerCount)};
+    u.fog = {static_cast<float>(w.fogTopY - camera.y), static_cast<float>(w.fogExtinctionPerM),
+             static_cast<float>(w.aerosolVisibilityM), 0.0F};
+    const double windSpeed = glm::length(glm::dvec2(w.windMs.x, w.windMs.z));
+    const glm::dvec2 windDir =
+        windSpeed > 1e-6 ? glm::dvec2(w.windMs.x, w.windMs.z) / windSpeed : glm::dvec2(0.0);
+    u.wind = {static_cast<float>(windDir.x), static_cast<float>(windDir.y),
+              static_cast<float>(windSpeed), 0.0F};
+    u.surface = {static_cast<float>(w.wetness), static_cast<float>(w.snowDepthM), 0.0F, 0.0F};
+    u.precip = {precipitationCode(w.precipitation), static_cast<float>(w.rateMmH),
+                static_cast<float>(kPrecipitationBoxM), static_cast<float>(w.particles)};
+    // The particles move with the fall speed and the wind; wrapping the offset (in double)
+    // keeps the floats small however far the camera goes and however long the session lasts.
+    const glm::dvec3 velocity = w.windMs + glm::dvec3(0.0, -w.fallSpeedMs, 0.0);
+    const glm::dvec3 offset = velocity * w.timeS - camera;
+    const auto wrap = [](double x) {
+        const double m = std::fmod(x, kPrecipitationBoxM);
+        return static_cast<float>(m < 0.0 ? m + kPrecipitationBoxM : m);
+    };
+    u.precipOffset = {wrap(offset.x), wrap(offset.y), wrap(offset.z),
+                      static_cast<float>(std::fmod(w.timeS, 3600.0))};
+    u.precipVelocity =
+        glm::vec4(glm::vec3(velocity - cameraVelocity), static_cast<float>(kRainShutterS));
+    return u;
+}
+
 // Lowest elevation (sine) at which the Sun or the Moon casts shadows.
 constexpr float kMinShadowLightY = 0.02F;
 
@@ -235,6 +305,7 @@ enum ProgramId : std::size_t {
     kObject,
     kShadowTerrain,
     kShadowObject,
+    kPrecipitation,
     kHistogram,
     kExposure,
     kTonemap,
@@ -285,7 +356,7 @@ GLuint dispatchSize(int size, int local) { return static_cast<GLuint>((size + lo
 
 }  // namespace
 
-double estimateEv100(const SkyState& sky, double compensationEv) noexcept {
+double estimateEv100(const SkyState& sky, double compensationEv, double lightFactor) noexcept {
     const auto horizontal = [](const SkyLight& light) {
         const double s = std::sin(common::degToRad(light.elevationDeg));
         // Direct light (crudely attenuated) plus diffuse sky light.
@@ -296,6 +367,7 @@ double estimateEv100(const SkyState& sky, double compensationEv) noexcept {
         // Twilight: sky light falls by about a decade per 2.5° of solar depression.
         illuminance += 400.0 * std::pow(10.0, sky.sun.elevationDeg / 2.5);
     }
+    illuminance *= std::clamp(lightFactor, 1e-3, 1.0);
     // Average ground reflectance 0.15 (Lambertian), plus a bright sky in part of the view.
     const double luminance = illuminance * 0.15 / common::kPi * 1.5;
     return autoExposureEv100(luminance, compensationEv);
@@ -382,6 +454,7 @@ struct Renderer::Impl {
     // Shadows.
     gl::Buffer shadowUbo;
     gl::Buffer lightUbo;
+    gl::Buffer weatherUbo;
     gl::Texture shadowMap;
     std::array<gl::Framebuffer, kShadowCascades> shadowFbos;
     int shadowSize = 0;
@@ -397,7 +470,10 @@ struct Renderer::Impl {
 };
 
 void Renderer::Impl::updateAtmosphere(double visibilityM, FrameStats& stats) {
-    if (atmosphereVisibility && std::abs(*atmosphereVisibility - visibilityM) < 1.0) {
+    // The LUTs are rebuilt only when the visibility changes by more than 0.5 % (weather
+    // transitions change it a little every frame).
+    if (atmosphereVisibility &&
+        std::abs(*atmosphereVisibility - visibilityM) < 0.005 * visibilityM + 1.0) {
         return;
     }
     atmosphereVisibility = visibilityM;
@@ -537,6 +613,7 @@ common::Result<void> Renderer::loadResources(const RendererResources& resources)
     lib.add("object", graphics("object.vert", "object.frag"));
     lib.add("shadow_terrain", graphics("shadow_terrain.vert", "shadow.frag"));
     lib.add("shadow_object", graphics("shadow_object.vert", "shadow.frag"));
+    lib.add("precipitation", graphics("precipitation.vert", "precipitation.frag"));
     lib.add("histogram", compute("histogram.comp"));
     lib.add("exposure", compute("exposure.comp"));
     lib.add("tonemap", graphics("fullscreen.vert", "tonemap.frag"));
@@ -590,6 +667,7 @@ common::Result<void> Renderer::loadResources(const RendererResources& resources)
     }
     impl->shadowUbo = gl::createBuffer(sizeof(ShadowUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
     impl->lightUbo = gl::createBuffer(sizeof(LightUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
+    impl->weatherUbo = gl::createBuffer(sizeof(WeatherUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
     impl->ensureShadowMap(1);  // A valid (lit) map until shadows are first rendered.
 
     impl->transmittance = gl::createTexture2D(GL_RGBA32F, kTransmittanceW, kTransmittanceH);
@@ -756,8 +834,16 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
         glBindBufferBase(GL_UNIFORM_BUFFER, 3, r.lightUbo.id());
     }
 
+    // Weather (FR-WX-09): clouds, fog, precipitation, camera-relative.
+    {
+        const WeatherUniforms wu =
+            weatherUniforms(input.weather, camera.position, input.cameraVelocity);
+        glNamedBufferSubData(r.weatherUbo.id(), 0, sizeof(wu), &wu);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 4, r.weatherUbo.id());
+    }
+
     // --- Atmosphere -------------------------------------------------------------------------
-    r.updateAtmosphere(input.visibilityM, stats_);
+    r.updateAtmosphere(input.weather.aerosolVisibilityM, stats_);
     glBindTextureUnit(0, r.transmittance.id());
     glBindTextureUnit(1, r.multiScatter.id());
     glUseProgram(r.shaders.program(kSkyView));
@@ -1032,6 +1118,17 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     drawObjects(true);
+    // Rain and snow around the camera (FR-WX-09), in front of the scene.
+    if (input.weather.particles > 0) {
+        glBindVertexArray(r.emptyVao.id());
+        glUseProgram(r.shaders.program(kPrecipitation));
+        glDrawArrays(GL_TRIANGLES, 0, 6 * input.weather.particles);
+        ++stats_.drawCalls;
+        stats_.triangles += 2 * static_cast<std::uint64_t>(input.weather.particles);
+        if (mainView) {
+            stats_.precipitation = input.weather.particles;
+        }
+    }
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
     glDisable(GL_DEPTH_TEST);
@@ -1075,7 +1172,8 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
         glProgramUniform1f(exposure, 3, static_cast<float>(input.exposure.compensationEv));
         glProgramUniform1i(exposure, 4, reset ? 1 : 0);
         glProgramUniform1f(exposure, 5,
-                           static_cast<float>(estimateEv100(sky, input.exposure.compensationEv)));
+                           static_cast<float>(estimateEv100(sky, input.exposure.compensationEv,
+                                                            input.weather.skyFactor)));
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         glUseProgram(exposure);
         glDispatchCompute(1, 1, 1);

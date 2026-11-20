@@ -17,12 +17,13 @@
 #include "ds/graphics/light.hpp"
 #include "ds/graphics/mesh.hpp"
 #include "ds/graphics/sky_model.hpp"
+#include "ds/graphics/weather_view.hpp"
 #include "ds/terrain/chunk.hpp"
 #include "ds/terrain/height_source.hpp"
 
 /// @file
 /// @brief OpenGL 4.5 core renderer (SPECIFICATION §4.4): terrain, water, atmosphere, sun, moon,
-/// stars, HDR with auto exposure and tone mapping.
+/// stars, weather (clouds, fog, rain and snow), HDR with auto exposure and tone mapping.
 /// @ingroup graphics
 
 namespace ds::graphics {
@@ -112,8 +113,12 @@ struct FrameInput {
     std::span<const DrawItem> objects;
     /// Local spot lights (headlights); at most kMaxSpotLights are used.
     std::span<const SpotLight> lights;
-    ExposureSettings exposure;      ///< Exposure mode.
-    double visibilityM = 60'000.0;  ///< Meteorological visibility (aerosol density, FR-GFX-09).
+    ExposureSettings exposure;  ///< Exposure mode.
+    /// Weather: aerosol visibility, clouds, fog, precipitation, wet ground (FR-WX-09,
+    /// FR-GFX-09). The default is a clear sky with 60 km visibility.
+    WeatherView weather;
+    /// Camera velocity, world frame (m/s): rain streaks follow the drops' motion relative to it.
+    glm::dvec3 cameraVelocity{0.0};
     /// Background night-sky luminance (airglow + unresolved stars), cd/m² (moonless night
     /// ≈ 0.001 lux on the ground, FR-GFX-08c).
     double nightSkyLuminance = 2.5e-4;
@@ -131,6 +136,7 @@ struct FrameStats {
     int objectsDrawn = 0;         ///< Object draw items drawn.
     int shadowCascades = 0;       ///< Shadow cascades rendered (0 when no light casts).
     int spotLights = 0;           ///< Spot lights of the main view.
+    int precipitation = 0;        ///< Rain drops or snowflakes drawn in the main view.
     std::uint64_t triangles = 0;  ///< Triangles submitted.
     std::size_t gpuChunks = 0;    ///< Chunk meshes resident on the GPU.
 };
@@ -232,7 +238,9 @@ private:
 };
 
 /// @brief Rough EV100 for a sky state (used to start the automatic exposure close to its
-/// final value): from the horizontal illuminance of the Sun and the Moon on average ground.
-[[nodiscard]] double estimateEv100(const SkyState& sky, double compensationEv = 0.0) noexcept;
+/// final value): from the horizontal illuminance of the Sun and the Moon on average ground,
+/// times @p lightFactor (the share the clouds let through, WeatherView::skyFactor).
+[[nodiscard]] double estimateEv100(const SkyState& sky, double compensationEv = 0.0,
+                                   double lightFactor = 1.0) noexcept;
 
 }  // namespace ds::graphics

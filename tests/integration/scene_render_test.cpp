@@ -38,6 +38,7 @@
 #include "ds/graphics/sky_model.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/streamer.hpp"
+#include "ds/weather/weather.hpp"
 
 namespace {
 
@@ -154,6 +155,7 @@ protected:
         input.terrain.gridSize = layout_.gridSize;
         input.terrain.waterLevelM = -40.0;
         input.exposure = exposure_;
+        input.weather = weather_;
         input.objects = objects;
         input.lights = lights;
 
@@ -175,6 +177,19 @@ protected:
         return fbo_->toImage().convertToFormat(QImage::Format_RGB32);
     }
 
+    // The weather of a preset at its planned values (no fluctuations).
+    graphics::WeatherView weatherPreset(const char* key, const weather::GroundCover& ground = {}) {
+        const auto table =
+            weather::WeatherPresetTable::load(kAssets / "environment" / "weather_presets.json");
+        EXPECT_TRUE(table.has_value());
+        weather::WeatherSettings settings;
+        settings.seed = 7;
+        settings.preset = key;
+        const weather::WeatherGenerator generator(settings, *table);
+        return graphics::makeWeatherView(generator.plannedAt(0.0), {}, ground,
+                                         source_->height(0.0, 0.0), 3.0, 10.0);
+    }
+
     void save(const QImage& image, const char* name) {
         if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
             image.save(QString::fromUtf8(dir) + QLatin1Char('/') + QLatin1StringView(name));
@@ -187,6 +202,7 @@ protected:
     std::unique_ptr<QOpenGLFramebufferObject> fbo_;
     graphics::SkyModel sky_;
     graphics::ExposureSettings exposure_;
+    graphics::WeatherView weather_;
     terrain::ChunkLayout layout_;
     common::WorkerPool pool_{4};
     std::shared_ptr<const terrain::ProceduralSource> source_;
@@ -436,6 +452,168 @@ TEST_F(SceneRenderTest, HeadlightLightsTheGroundAtNight) {
     EXPECT_NEAR(cornerLit.mean, cornerDark.mean, 2.0);
 }
 
+// --- Weather (FR-WX-09) ----------------------------------------------------------------------
+
+int countBrighterThan(const QImage& image, double level) {
+    int n = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            n += qGray(image.pixel(x, y)) > level ? 1 : 0;
+        }
+    }
+    return n;
+}
+
+TEST_F(SceneRenderTest, OvercastSkyIsGreyAndTheGroundDarker) {
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 14.0};
+    const QImage clear = render("2026-06-21T12:00:00Z", 0.0, 5.0);
+    weather_ = weatherPreset("overcast");
+    const QImage overcast = render("2026-06-21T12:00:00Z", 0.0, 5.0);
+    save(overcast, "overcast.png");
+    const Luma skyClear = average(clear, 0.0, 0.0, 1.0, 0.15);
+    const Luma sky = average(overcast, 0.0, 0.0, 1.0, 0.15);
+    EXPECT_GT(skyClear.b, skyClear.r + 10);
+    EXPECT_LT(std::abs(sky.b - sky.r), 12.0) << "an overcast sky is grey";
+    const Luma groundClear = average(clear, 0.0, 0.85, 1.0, 1.0);
+    const Luma ground = average(overcast, 0.0, 0.85, 1.0, 1.0);
+    EXPECT_LT(ground.mean, 0.6 * groundClear.mean)
+        << "clear " << groundClear.mean << " overcast " << ground.mean;
+    EXPECT_GT(ground.mean, 3.0);
+}
+
+TEST_F(SceneRenderTest, OvercastLeavesNoDroneShadow) {
+    // FR-WX-09: overcast skies diffuse the sunlight; a hovering drone casts no visible shadow.
+    weather_ = weatherPreset("overcast");
+    const auto noon = astro::parseUtc("2026-06-21T12:00:00Z");
+    ASSERT_TRUE(noon.has_value());
+    sky_.update(*noon, {40.4, -3.7, 650.0});
+    const glm::dvec3 sun(sky_.state().sun.direction);
+    const double ground = source_->height(0.0, 0.0);
+    const std::array<glm::dvec3, 4> motors{glm::dvec3(0.08, 0.08, 0), glm::dvec3(-0.08, 0.08, 0),
+                                           glm::dvec3(-0.08, -0.08, 0), glm::dvec3(0.08, -0.08, 0)};
+    const graphics::DroneModel model(graphics::droneShapeFor(motors, 0.127, 3, 0.03, 30.0));
+    graphics::DroneVisualState state;
+    state.position = glm::dvec3(0.0, ground, 0.0) + sun * (2.0 / sun.y);
+    state.orientation =
+        glm::quat_cast(glm::dmat3(glm::dvec3(0, 0, -1), glm::dvec3(1, 0, 0), glm::dvec3(0, -1, 0)));
+    std::vector<graphics::DrawItem> items;
+    model.appendDrawItems(state, items);
+    for (graphics::DrawItem& item : items) {
+        item.position = state.position + 4.0 * (item.position - state.position);
+        item.scale = glm::vec3(4.0F);
+    }
+    const graphics::Camera camera =
+        graphics::cameraFromAxes({0.0, ground + 9.0, 0.0}, {0.0, -1.0, 0.0}, {0.0, 0.0, -1.0}, 0.9);
+    const QImage without = renderScene("2026-06-21T12:00:00Z", camera, {});
+    const QImage with = renderScene("2026-06-21T12:00:00Z", camera, items);
+    save(with, "overcast_drone.png");
+    const Luma lit = average(without, 0.485, 0.485, 0.515, 0.515);
+    const Luma shaded = average(with, 0.485, 0.485, 0.515, 0.515);
+    EXPECT_GT(shaded.mean, 0.85 * lit.mean) << "lit " << lit.mean << " shaded " << shaded.mean;
+}
+
+TEST_F(SceneRenderTest, BrokenCloudsShowBlueSkyAndWhiteClouds) {
+    weather_ = weatherPreset("scattered-clouds");
+    const QImage image = render("2026-06-21T12:00:00Z", 0.0, 35.0, 90.0);
+    save(image, "scattered.png");
+    int blue = 0;
+    int white = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor c = image.pixelColor(x, y);
+            if (c.blue() > c.red() + 25) {
+                ++blue;
+            } else if (c.red() > 150 && std::abs(c.blue() - c.red()) < 25) {
+                ++white;
+            }
+        }
+    }
+    const int all = image.width() * image.height();
+    EXPECT_GT(blue, all / 10) << "blue sky between the clouds";
+    EXPECT_GT(white, all / 20) << "white clouds";
+}
+
+TEST_F(SceneRenderTest, OvercastNightHidesTheStars) {
+    const QImage clear = render("2026-08-12T23:30:00Z", 180.0, 40.0);
+    weather_ = weatherPreset("overcast");
+    const QImage overcast = render("2026-08-12T23:30:00Z", 180.0, 40.0);
+    save(overcast, "overcast_night.png");
+    const double level = average(clear, 0, 0, 1, 1).mean + 40;
+    EXPECT_GT(countBrighterThan(clear, level), 5);
+    EXPECT_EQ(countBrighterThan(overcast, level), 0) << "clouds hide the stars";
+}
+
+TEST_F(SceneRenderTest, FogHidesTheDistantTerrain) {
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 14.0};
+    graphics::Camera camera;
+    camera.position = {0.0, source_->height(0.0, 0.0) + 5.0, 0.0};
+    camera.pitchRad = -0.05;
+    const QImage clear = renderScene("2026-06-21T10:00:00Z", camera, {});
+    weather_ = weatherPreset("fog");
+    const QImage fog = renderScene("2026-06-21T10:00:00Z", camera, {});
+    save(fog, "fog.png");
+    // Clear: blue sky above the terrain. Fog: the distant terrain fades into the fog, which
+    // looks the same above and below the horizon.
+    const auto contrast = [](const QImage& image) {
+        // The hills around meet the sky at y ≈ 0.47; just below, the ground is a few hundred
+        // metres away.
+        const Luma above = average(image, 0.0, 0.30, 1.0, 0.42);
+        const Luma below = average(image, 0.0, 0.48, 1.0, 0.52);
+        return std::abs(above.r - below.r) + std::abs(above.g - below.g) +
+               std::abs(above.b - below.b);
+    };
+    EXPECT_LT(contrast(fog), 0.3 * contrast(clear))
+        << "clear " << contrast(clear) << " fog " << contrast(fog);
+    const Luma horizon = average(fog, 0.0, 0.4, 1.0, 0.6);
+    EXPECT_LT(std::abs(horizon.b - horizon.r), 15.0) << "fog is grey";
+    EXPECT_GT(horizon.mean, 60.0) << "lit fog is bright";
+}
+
+TEST_F(SceneRenderTest, RainAndSnowAreDrawnAroundTheCamera) {
+    graphics::Camera camera;
+    camera.position = {0.0, source_->height(0.0, 0.0) + 20.0, 0.0};
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 13.0};
+    weather_ = weatherPreset("heavy-rain");
+    weather_.particles = 0;
+    const QImage dry = renderScene("2026-06-21T12:00:00Z", camera, {});
+    weather_ = weatherPreset("heavy-rain");
+    const QImage rain = renderScene("2026-06-21T12:00:00Z", camera, {});
+    save(rain, "rain.png");
+    EXPECT_GT(renderer_->lastStats().precipitation, 1000);
+    weather_ = weatherPreset("heavy-snow");
+    const QImage snow = renderScene("2026-06-21T12:00:00Z", camera, {});
+    save(snow, "snow.png");
+    EXPECT_GT(renderer_->lastStats().precipitation, 1000);
+    const auto difference = [](const QImage& a, const QImage& b) {
+        int changed = 0;
+        for (int y = 0; y < a.height(); ++y) {
+            for (int x = 0; x < a.width(); ++x) {
+                changed += std::abs(qGray(a.pixel(x, y)) - qGray(b.pixel(x, y))) > 3 ? 1 : 0;
+            }
+        }
+        return changed;
+    };
+    EXPECT_GT(difference(dry, rain), kWidth * kHeight / 200) << "rain streaks";
+    EXPECT_GT(difference(dry, snow), kWidth * kHeight / 200) << "snowflakes";
+}
+
+TEST_F(SceneRenderTest, SnowCoverWhitensAndRainDarkensTheGround) {
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 12.0};
+    const double ground = source_->height(0.0, 0.0);
+    const graphics::Camera camera = graphics::cameraFromAxes(
+        {0.0, ground + 40.0, 0.0}, {0.0, -1.0, 0.0}, {0.0, 0.0, -1.0}, 0.9);
+    weather_ = weatherPreset("overcast");
+    const double dry = average(renderScene("2026-06-21T12:00:00Z", camera, {}), 0, 0, 1, 1).mean;
+    weather_ = weatherPreset("overcast", {.wetness = 1.0, .snowDepthM = 0.0});
+    const double wet = average(renderScene("2026-06-21T12:00:00Z", camera, {}), 0, 0, 1, 1).mean;
+    weather_ = weatherPreset("overcast", {.wetness = 0.0, .snowDepthM = 0.1});
+    const QImage snowy = renderScene("2026-06-21T12:00:00Z", camera, {});
+    save(snowy, "snow_cover.png");
+    const double snow = average(snowy, 0, 0, 1, 1).mean;
+    EXPECT_LT(wet, dry) << "wet ground is darker";
+    EXPECT_GT(snow, dry + 40.0) << "snow is white";
+}
+
 TEST_F(SceneRenderTest, ManualExposureIsApplied) {
     exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 18.0};
     const QImage dark = render("2026-06-21T12:00:00Z", 0.0, 5.0);
@@ -500,8 +678,39 @@ TEST_F(SceneRenderTest, FrameTimeAt1080p) {
                 ms, renderer_->lastStats().chunksDrawn,
                 static_cast<unsigned long long>(renderer_->lastStats().triangles),
                 info.toStdString().c_str());
-    if (!info.contains(QLatin1String("llvmpipe")) && !info.contains(QLatin1String("softpipe"))) {
+    const bool hardware =
+        !info.contains(QLatin1String("llvmpipe")) && !info.contains(QLatin1String("softpipe"));
+    if (hardware) {
         EXPECT_LT(ms, 16.7);
+    }
+
+    // The same with the weather: broken clouds over a wide sky, and heavy rain.
+    input.weather = weatherPreset("broken-clouds");
+    const graphics::WeatherView rain = weatherPreset("heavy-rain");
+    input.weather.precipitation = rain.precipitation;
+    input.weather.rateMmH = rain.rateMmH;
+    input.weather.fallSpeedMs = rain.fallSpeedMs;
+    input.weather.particles = rain.particles;
+    input.camera.pitchRad = 0.3;
+    for (int i = 0; i < 5; ++i) {
+        renderer_->renderFrame(target, input);
+    }
+    finish();
+    const auto weatherStart = std::chrono::steady_clock::now();
+    for (int i = 0; i < kFrames; ++i) {
+        input.camera.yawRad = 0.1 * i;
+        renderer_->renderFrame(target, input);
+    }
+    finish();
+    const double weatherMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - weatherStart)
+            .count() /
+        kFrames;
+    std::printf("[ PERF     ] %.2f ms/frame at 1920x1080 with broken clouds and heavy rain\n",
+                weatherMs);
+    save(fbo.toImage().convertToFormat(QImage::Format_RGB32), "weather_1080p.png");
+    if (hardware) {
+        EXPECT_LT(weatherMs, 16.7);
     }
 }
 

@@ -1966,6 +1966,49 @@ so Markdown pages appear in the generated site.
     true attitude drifts by ≈ 0.5°/s with the estimate level. The Angle-mode test now checks
     the self-levelling 1 s after centring; the drift is left for the NFR-REAL step (8), since
     changing the rotor drag moves every validated flight figure.
+- **Step 3 — Weather rendering (done, FR-WX-09 M and the S items marked, FR-GFX-09):**
+  - *Data path:* `graphics::makeWeatherView()` turns the snapshot's `WeatherConditions`, cloud
+    drift and `GroundCover` into a `WeatherView` (`FrameInput::weather`), with heights measured
+    from the ground at the take-off point; `assets/shaders/weather.glsl` holds the shared
+    shader code (uniform block 4).
+  - *Clouds (M):* each layer is a slab between its base and top whose horizontal density is
+    a 5-octave value noise moved by the layer's drift, thresholded so that it covers
+    oktas / 8 of the sky (`cloudCoverThreshold()`, checked against the noise's distribution
+    in a unit test). Cumulus and cumulonimbus have flat bases and narrow tops, cirrus are
+    streaked along the wind. Rays are marched through the slabs (12 samples per layer for the
+    sky, 3 for surfaces seen through or above clouds) with interleaved-gradient jitter; the
+    extinction (0.04–0.08 /m, ≈ 60 m inside a cloud; cirrus 0.002 /m) hides what is behind.
+    Light: multiple scattering from the light on the top falling to the two-stream diffuse
+    transmittance at the base (dark bases under thick clouds), single scattering of the direct
+    beam with a Henyey–Greenstein phase (bright thin edges), sun and moon alike, so the moon
+    lights the clouds at night and the clouds hide the moon, the stars and the airglow.
+    Distant clouds fade into the haze (Koschmieder); beyond 150 km, and below the horizon,
+    a layer is drawn as a continuous band. Ray-marched volumetric clouds (S) are not done.
+  - *Light under the clouds (M), cloud shadows (S):* the direct sun and moon light is
+    multiplied by the transmittance of the clouds towards them at each point (moving cloud
+    shadows on the terrain, water glints and highlights); the diffuse light is the clear-sky
+    light dimmed by the layers above plus the direct light they scatter down
+    (`skyFactor`, `beamDiffuse`). An overcast therefore lights the scene with 10–30 % of clear
+    daylight and no shadows (the shadow maps still run but carry no light); the haze and the
+    reflections under it take the overcast's grey.
+  - *Fog and visibility (M, FR-GFX-09):* a ground fog is a layer up to its top with the fog's
+    visibility under air of 30 km visibility; a visibility under 20 km without fog (haze,
+    rain, snow, and the Environment tab's visibility in free mode) becomes a layer up to the
+    lowest cloud base (1500 m without clouds) under 20 km air. The layer scatters the grey
+    light of its surroundings (dim and moonlit at night), so the sky above the clouds keeps
+    full sunlight instead of a reddened sun.
+  - *Precipitation (M):* rain streaks and snowflakes in a 24 m cube around the camera (600–
+    8000 drops, 800–10000 flakes by rate), fixed in the world and moved by the fall speed and
+    the wind; streaks follow the drops' velocity relative to the camera over 1/30 s; they are
+    lit by the surroundings and by the headlights. Sleet mixes both.
+  - *Ground (S):* wet ground is darker and reflects the sky with a Fresnel sheen; lying snow
+    from 3 mm (full at 4 cm) whitens slopes up to about 35°, fading out by 55°.
+  - *Not done:* raindrops on the FPV lens (S), lightning (C).
+  - *Simplifications:* the World's visibility rule (60 m inside a layer of ≥ 4 oktas) does
+    not follow the drawn cloud gaps; heights are flat above the take-off ground (terrain
+    following and spatial variation, FR-WX-04, are not modelled).
+  - *Cost:* 9.9 ms per 1080p frame with broken clouds and heavy rain on an RTX A2000
+    (5.9 ms clear), within NFR-PERF-01.
 
 ---
 

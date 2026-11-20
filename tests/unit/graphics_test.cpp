@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +24,8 @@
 #include "ds/graphics/shader_source.hpp"
 #include "ds/graphics/shadow_cascades.hpp"
 #include "ds/graphics/sky_model.hpp"
+#include "ds/graphics/weather_view.hpp"
+#include "ds/weather/weather.hpp"
 
 namespace {
 
@@ -829,6 +833,135 @@ TEST(ShadowCascades, SnapToTexelsAsTheCameraMoves) {
     }
     // No light: disabled.
     EXPECT_FALSE(computeShadowCascades(camera, glm::dvec3(0), 1024).enabled);
+}
+
+// --- Weather view (FR-WX-09) ------------------------------------------------------------------
+
+// Mean cloud density over a regular grid (independent of the random samples the threshold is
+// computed from).
+double gridCover(double threshold, double softness) {
+    double sum = 0.0;
+    int n = 0;
+    for (int i = 0; i < 160; ++i) {
+        for (int j = 0; j < 160; ++j) {
+            const double f = cloudNoise({i * 1.37 - 300.0, j * 1.41 + 120.0});
+            const double t = std::clamp((f - threshold) / softness, 0.0, 1.0);
+            sum += t * t * (3.0 - 2.0 * t);
+            ++n;
+        }
+    }
+    return sum / n;
+}
+
+TEST(WeatherView, CloudCoverMatchesTheOktas) {
+    for (const double softness : {0.05, 0.25}) {
+        EXPECT_NEAR(gridCover(cloudCoverThreshold(0.0, softness), softness), 0.0, 1e-9);
+        EXPECT_NEAR(gridCover(cloudCoverThreshold(1.0, softness), softness), 1.0, 1e-9);
+        for (const double cover : {0.125, 0.25, 0.5, 0.75}) {
+            EXPECT_NEAR(gridCover(cloudCoverThreshold(cover, softness), softness), cover, 0.04)
+                << "cover " << cover << " softness " << softness;
+        }
+    }
+    // The noise spans most of 0–1.
+    double lo = 1.0;
+    double hi = 0.0;
+    for (int i = 0; i < 2000; ++i) {
+        const double f = cloudNoise({i * 0.73, i * 0.31});
+        lo = std::min(lo, f);
+        hi = std::max(hi, f);
+    }
+    EXPECT_LT(lo, 0.3);
+    EXPECT_GT(hi, 0.7);
+}
+
+TEST(WeatherView, DiffuseTransmittanceAndParticles) {
+    EXPECT_DOUBLE_EQ(cloudDiffuseTransmittance(0.0), 1.0);
+    EXPECT_GT(cloudDiffuseTransmittance(10.0), cloudDiffuseTransmittance(40.0));
+    using ds::weather::PrecipitationType;
+    EXPECT_EQ(precipitationParticles(PrecipitationType::None, 5.0), 0);
+    EXPECT_EQ(precipitationParticles(PrecipitationType::Rain, 0.0), 0);
+    EXPECT_LT(precipitationParticles(PrecipitationType::Rain, 1.0),
+              precipitationParticles(PrecipitationType::Rain, 12.0));
+    EXPECT_LT(precipitationParticles(PrecipitationType::Snow, 0.5),
+              precipitationParticles(PrecipitationType::Snow, 4.0));
+    EXPECT_LE(precipitationParticles(PrecipitationType::Snow, 1000.0), 10000);
+}
+
+ds::weather::WeatherConditions presetConditions(const char* key) {
+    ds::weather::WeatherSettings settings;
+    settings.preset = key;
+    return ds::weather::WeatherGenerator(settings).plannedAt(0.0);
+}
+
+TEST(WeatherView, ClearSky) {
+    const WeatherView v = makeWeatherView(presetConditions("clear"), {}, {}, 100.0, 4.0, 12.0);
+    EXPECT_EQ(v.layerCount, 0U);
+    EXPECT_DOUBLE_EQ(v.skyFactor, 1.0);
+    EXPECT_DOUBLE_EQ(v.clearFraction, 1.0);
+    EXPECT_DOUBLE_EQ(v.beamDiffuse, 0.0);
+    EXPECT_DOUBLE_EQ(v.fogExtinctionPerM, 0.0);
+    EXPECT_DOUBLE_EQ(v.aerosolVisibilityM, 50'000.0);
+    EXPECT_EQ(v.particles, 0);
+    EXPECT_DOUBLE_EQ(v.timeS, 12.0);
+    // Wind from 270° blows towards the east (+x).
+    EXPECT_NEAR(v.windMs.x, 4.0, 1e-9);
+    EXPECT_NEAR(v.windMs.z, 0.0, 1e-9);
+}
+
+TEST(WeatherView, OvercastDimsTheDaylightLikeRealOvercast) {
+    const std::array<ds::weather::Drift, 3> drift{
+        ds::weather::Drift{.eastM = 50.0, .northM = 20.0}};
+    const WeatherView v = makeWeatherView(presetConditions("overcast"), drift, {}, 100.0, 4.0, 0.0);
+    ASSERT_EQ(v.layerCount, 1U);
+    const CloudLayerView& l = v.layers[0];
+    EXPECT_EQ(l.type, ds::weather::CloudType::Stratus);
+    EXPECT_DOUBLE_EQ(l.baseY, 700.0);  // 600 m above the ground at y = 100.
+    EXPECT_DOUBLE_EQ(l.topY, 1300.0);
+    EXPECT_DOUBLE_EQ(l.cover, 1.0);
+    EXPECT_DOUBLE_EQ(l.driftM.x, 50.0);
+    EXPECT_DOUBLE_EQ(l.driftM.y, -20.0);  // North is −z.
+    // Overcast daylight is typically 10–30 % of a clear day's; no direct sunlight.
+    EXPECT_GT(v.skyFactor, 0.1);
+    EXPECT_LT(v.skyFactor, 0.3);
+    EXPECT_LT(v.clearFraction, 1e-6);
+    EXPECT_NEAR(v.beamDiffuse, v.skyFactor, 1e-6);
+    // Heavy rain under a thick stratus is darker still.
+    const WeatherView rain = makeWeatherView(presetConditions("heavy-rain"), {}, {}, 0.0, 4.0, 0.0);
+    EXPECT_LT(rain.skyFactor, 0.5 * v.skyFactor);
+}
+
+TEST(WeatherView, LayersAreSortedAndShadeTheLowerOnes) {
+    const WeatherView v = makeWeatherView(presetConditions("thunderstorm"), {}, {}, 0.0, 10.0, 0.0);
+    ASSERT_EQ(v.layerCount, 2U);
+    EXPECT_LT(v.layers[0].baseY, v.layers[1].baseY);
+    EXPECT_EQ(v.layers[0].type, ds::weather::CloudType::Cumulonimbus);
+    EXPECT_DOUBLE_EQ(v.layers[1].lightFactor, 1.0);  // Nothing above the highest.
+    EXPECT_LT(v.layers[0].lightFactor, 1.0);
+    EXPECT_GT(v.layers[0].threshold, v.layers[1].threshold - 1.0);  // Partly covered.
+    EXPECT_GT(v.beamDiffuse, 0.0);
+    EXPECT_GT(v.clearFraction, 0.0);
+}
+
+TEST(WeatherView, FogAndPrecipitationLowerTheVisibilityNearTheGround) {
+    // Ground fog: a 120 m layer with the fog's visibility; clear air above.
+    const WeatherView fog = makeWeatherView(presetConditions("fog"), {}, {}, 10.0, 1.0, 0.0);
+    EXPECT_DOUBLE_EQ(fog.fogTopY, 130.0);
+    EXPECT_DOUBLE_EQ(fog.aerosolVisibilityM, ds::weather::kAboveFogVisibilityM);
+    EXPECT_NEAR(3.912 / (fog.fogExtinctionPerM + 3.912 / fog.aerosolVisibilityM), 500.0, 1e-6);
+    // Heavy rain: 3 km visibility below the 500 m cloud base, 20 km above.
+    const WeatherView rain = makeWeatherView(presetConditions("heavy-rain"), {}, {}, 0.0, 4.0, 0.0);
+    EXPECT_DOUBLE_EQ(rain.fogTopY, 500.0);
+    EXPECT_DOUBLE_EQ(rain.aerosolVisibilityM, 20'000.0);
+    EXPECT_NEAR(3.912 / (rain.fogExtinctionPerM + 3.912 / rain.aerosolVisibilityM), 3000.0, 1e-6);
+    EXPECT_EQ(rain.precipitation, ds::weather::PrecipitationType::Rain);
+    EXPECT_GT(rain.particles, 1000);
+    EXPECT_GT(rain.fallSpeedMs, 5.0);
+    // Snow falls slowly; the ground cover is passed on.
+    const WeatherView snow = makeWeatherView(presetConditions("heavy-snow"), {},
+                                             {.wetness = 0.4, .snowDepthM = 0.12}, 0.0, 4.0, 0.0);
+    EXPECT_DOUBLE_EQ(snow.fallSpeedMs, 1.0);
+    EXPECT_DOUBLE_EQ(snow.wetness, 0.4);
+    EXPECT_DOUBLE_EQ(snow.snowDepthM, 0.12);
 }
 
 }  // namespace

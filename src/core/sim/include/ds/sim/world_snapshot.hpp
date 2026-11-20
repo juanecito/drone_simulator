@@ -63,6 +63,7 @@ struct WorldSnapshot {
     double weatherTimeS = 0.0;            ///< Weather clock (restarts with the session).
     weather::WeatherConditions weather;   ///< Weather now (FR-WX-02).
     std::array<weather::Drift, weather::kMaxCloudLayers> cloudDrift{};  ///< Cloud motion.
+    weather::GroundCover groundCover;     ///< Wet ground and lying snow.
     double visibilityM = 50'000.0;        ///< Visibility at the vehicle's height.
     SessionStats stats;                   ///< Flight statistics.
     double sunElevationDeg = 45.0;        ///< Apparent sun elevation at the origin.

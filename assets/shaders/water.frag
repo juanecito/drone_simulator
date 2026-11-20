@@ -7,6 +7,7 @@
 #include "common.glsl"
 #include "atmosphere.glsl"
 #include "shadow.glsl"
+#include "weather.glsl"
 #include "lighting.glsl"
 
 layout(location = 3) uniform vec3 u_cameraPos;  // Camera world position (detail noise only).
@@ -35,10 +36,13 @@ void main() {
     float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
     vec3 refl = reflect(-v, n);
     refl.y = max(refl.y, 0.01);
-    vec3 sky = skyLuminance(normalize(refl), cameraRadius());
+    // Under the clouds the water reflects the overcast.
+    vec3 sky = mix(skyLuminance(normalize(refl), cameraRadius()), ambientLuminance(0.0),
+                   overcastAbove(0.0));
     vec3 body = vec3(0.010, 0.025, 0.030) / PI *
-                (surfaceIrradiance(r, vec3(0.0, 1.0, 0.0)) + spotIrradiance(v_rel, vec3(0.0, 1.0, 0.0)));
+                (surfaceIrradiance(v_rel, r, vec3(0.0, 1.0, 0.0)) + spotIrradiance(v_rel, vec3(0.0, 1.0, 0.0)));
     vec3 luminance = mix(body, sky, fresnel) + fresnel *
-        (glint(r, n, v, u_sunDirLux, u_sunColorRadius) + glint(r, n, v, u_moonDirLux, u_moonColorRadius));
+        (glint(r, n, v, u_sunDirLux, u_sunColorRadius) * cloudShadow(v_rel, u_sunDirLux.xyz) +
+         glint(r, n, v, u_moonDirLux, u_moonColorRadius) * cloudShadow(v_rel, u_moonDirLux.xyz));
     o_color = finishSurface(luminance, v_rel);
 }

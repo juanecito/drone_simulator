@@ -22,6 +22,7 @@
 #include "ds/graphics/drone_model.hpp"
 #include "ds/graphics/mesh_loader.hpp"
 #include "ds/graphics/rover_model.hpp"
+#include "ds/graphics/weather_view.hpp"
 #include "ds/input/input_selector.hpp"
 #include "ds/input/joystick_service.hpp"
 #include "ds/missions/mission.hpp"
@@ -260,6 +261,13 @@ public:
     [[nodiscard]] const glm::dvec3& vehiclePosition() const noexcept { return pose_.position; }
     /// @brief Take-off point.
     [[nodiscard]] const glm::dvec3& home() const noexcept { return home_; }
+    /// @brief Weather to draw this frame (FR-WX-09): the snapshot's, its clock extrapolated
+    /// like the pose; cloud and fog heights are measured from the ground at the take-off
+    /// point.
+    [[nodiscard]] const graphics::WeatherView& weatherView() const noexcept { return weather_; }
+    /// @brief Velocity of the vehicle camera (FPV and Chase follow the vehicle; the others
+    /// stand still), world frame.
+    [[nodiscard]] glm::dvec3 cameraVelocity() const noexcept;
     /// @brief The loop (tests).
     [[nodiscard]] sim::SimulationLoop& loop() noexcept { return *loop_; }
 
@@ -339,6 +347,9 @@ private:
     EnvironmentConfig lastEnvironment_;
 
     graphics::CameraMode cameraMode_ = graphics::CameraMode::Free;
+    graphics::WeatherView weather_;
+    std::optional<glm::dvec2> weatherGroundAt_;  // Where weatherGroundY_ was sampled.
+    double weatherGroundY_ = 0.0;
     graphics::CameraRig rig_;
     graphics::VehiclePose pose_;
     graphics::Camera camera_;

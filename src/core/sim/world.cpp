@@ -560,6 +560,7 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.weatherTimeS = w.timeS;
     s.weather = w.conditions;
     s.cloudDrift = w.cloudDrift;
+    s.groundCover = w.ground;
     s.visibilityM = visibilityAtVehicle();
     s.stats = stats_;
     s.resetCount = resets_;

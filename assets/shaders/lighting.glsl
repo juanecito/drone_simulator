@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Surface lighting shared by terrain, water and objects. Requires common.glsl,
-// atmosphere.glsl and shadow.glsl.
+// atmosphere.glsl, shadow.glsl and weather.glsl.
 
 // Local spot lights (headlights, FR-GFX-08d). Mirrors LightUniforms in renderer.cpp and
 // spotIlluminance() in light.cpp; positions are camera-relative.
@@ -45,39 +45,52 @@ vec3 directLight(float r, vec3 n, vec4 dirLux, vec4 colorRadius) {
     return t * colorRadius.rgb * dirLux.w * max(dot(n, l), 0.0);
 }
 
-// Total irradiance (lux) on a Lambertian surface with normal n.
-vec3 surfaceIrradiance(float r, vec3 n) {
-    vec3 sky = e_skyIrradiance.rgb * (0.5 + 0.5 * n.y);
-    return directLight(r, n, u_sunDirLux, u_sunColorRadius) +
-           directLight(r, n, u_moonDirLux, u_moonColorRadius) + sky;
+// Diffuse irradiance (lux) at camera-relative p with normal n: the clear sky dimmed by the
+// clouds above, plus the direct light the clouds scatter downwards (overcast light).
+vec3 diffuseIrradiance(vec3 p, float r, vec3 n) {
+    float sky;
+    float clear;
+    lightUnderClouds(p.y, sky, clear);
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 horizontal = directLight(r, up, u_sunDirLux, u_sunColorRadius) +
+                      directLight(r, up, u_moonDirLux, u_moonColorRadius);
+    return (e_skyIrradiance.rgb * sky + horizontal * max(sky - clear, 0.0)) * (0.5 + 0.5 * n.y);
+}
+
+// Total irradiance (lux) on a Lambertian surface at camera-relative p with normal n; the
+// direct light passes the cloud shadows.
+vec3 surfaceIrradiance(vec3 p, float r, vec3 n) {
+    return directLight(r, n, u_sunDirLux, u_sunColorRadius) * cloudShadow(p, u_sunDirLux.xyz) +
+           directLight(r, n, u_moonDirLux, u_moonColorRadius) * cloudShadow(p, u_moonDirLux.xyz) +
+           diffuseIrradiance(p, r, n);
 }
 
 // As surfaceIrradiance, with the direct light of the shadow-casting body (Sun, or the Moon
 // when the Sun is down; shadow.glsl) scaled by its visibility.
-vec3 surfaceIrradianceShadowed(float r, vec3 n, float visibility) {
+vec3 surfaceIrradianceShadowed(vec3 p, float r, vec3 n, float visibility) {
     bool sunCasts = s_texel.w < 0.5;
-    vec3 sky = e_skyIrradiance.rgb * (0.5 + 0.5 * n.y);
-    return directLight(r, n, u_sunDirLux, u_sunColorRadius) * (sunCasts ? visibility : 1.0) +
-           directLight(r, n, u_moonDirLux, u_moonColorRadius) * (sunCasts ? 1.0 : visibility) +
-           sky;
+    return directLight(r, n, u_sunDirLux, u_sunColorRadius) * cloudShadow(p, u_sunDirLux.xyz) *
+               (sunCasts ? visibility : 1.0) +
+           directLight(r, n, u_moonDirLux, u_moonColorRadius) * cloudShadow(p, u_moonDirLux.xyz) *
+               (sunCasts ? 1.0 : visibility) +
+           diffuseIrradiance(p, r, n);
 }
 
+#ifndef DS_NO_FINISH_SURFACE
+// Pixel jitter for the cloud samples (breaks up banding).
+float pixelJitter() { return interleavedGradientNoise(gl_FragCoord.xy); }
+
+// Aerial perspective, clouds and fog between the camera and a surface at camera-relative
+// position rel; returns the pre-exposed colour.
 vec4 finishSurface(vec3 luminance, vec3 rel) {
     vec3 inScatter;
     vec3 t = aerialPerspective(rel, inScatter);
-    return vec4(min((luminance * t + inScatter) * e_exposure, vec3(60000.0)), 1.0);
+    // Under the clouds the haze is lit by the overcast, not by the clear sky.
+    vec3 ambient = ambientLuminance(0.0);
+    inScatter = mix(inScatter, (1.0 - t) * ambient, overcastAbove(0.0));
+    float dist = length(rel);
+    vec3 dir = rel / max(dist, 1e-3);
+    vec3 c = applyWeather(luminance * t + inScatter, dir, dist, false, 3, pixelJitter(), ambient);
+    return vec4(min(c * e_exposure, vec3(60000.0)), 1.0);
 }
-
-float hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-float valueNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x),
-               mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
-}
+#endif
