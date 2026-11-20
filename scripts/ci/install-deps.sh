@@ -12,6 +12,7 @@ apt-get install -y -qq --no-install-recommends \
     build-essential cmake ninja-build pkg-config git ca-certificates file dpkg-dev \
     qt6-base-dev qt6-base-dev-tools libqt6opengl6-dev libqt6sql6-sqlite \
     libgl-dev libegl-dev libglm-dev libsdl3-dev libassimp-dev nlohmann-json3-dev libcurl4-openssl-dev \
+    libgdal-dev liblaszip-dev qtkeychain-qt6-dev \
     xvfb xauth libgl1-mesa-dri \
     doxygen graphviz \
     clang-tidy clang-format lintian

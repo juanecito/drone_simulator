@@ -1395,12 +1395,12 @@ manager hands the focus back and forth).
 | `docs` | custom | Doxygen |
 
 - System dependencies (`find_package`): Qt6 (`Core`, `Sql`, `Gui`, `Widgets`,
-  `OpenGLWidgets`, `Test`), OpenGL, **GDAL ≥ 3.6** (brings PROJ), **PDAL ≥ 2.6**, **libcurl**, **SDL3**,
+  `OpenGLWidgets`, `Test`), OpenGL, **GDAL ≥ 3.6** (brings PROJ), **LASzip ≥ 3.4** (LAZ; PDAL is not packaged in Debian 13, see the M4 notes), **libcurl**, **SDL3**,
   **Assimp ≥ 5.2** (glTF 2.0 / OBJ model files, FR-GFX-12);
   QtKeychain (app layer, for the OS keyring).
   SQLite comes with Qt's `QSQLITE` driver plugin. glm, GoogleTest and nlohmann/json via
   `FetchContent` if not found; cpp-httplib (tests only, mock provider server); glad vendored in `third_party/`.
-  Debian 13 packages: `qt6-base-dev libgdal-dev libpdal-dev libcurl4-openssl-dev libsdl3-dev libassimp-dev qtkeychain-qt6-dev`.
+  Debian 13 packages: `qt6-base-dev libgdal-dev liblaszip-dev libcurl4-openssl-dev libsdl3-dev libassimp-dev qtkeychain-qt6-dev`.
 - Shaders, models, reference vehicles, missions and provider presets are copied next to the
   binary at build time and installed under `<prefix>/share/` (see §7.1).
 - `cmake --install` produces a relocatable layout: the app finds its data relative to its

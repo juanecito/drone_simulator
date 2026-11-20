@@ -299,7 +299,7 @@ Position hold for 25 s in a steady wind, nose into the wind, then averaged over 
 | NFR-REAL-09 ground drone | Checked (`docs/GROUND_MODEL.md` §8) |
 | NFR-REAL-10 astronomy | Checked (`astro_test.cpp`) |
 | NFR-REAL-11 battery and fog | Checked. Open item: the battery temperature curves are representative, not taken from a cell datasheet |
-| NFR-REAL-12 lidar DTM | Deferred to M4 (needs PDAL) |
+| NFR-REAL-12 lidar DTM | Deferred to M4 (LAS/LAZ through LASzip) |
 
 ### Acro step response
 

@@ -13,6 +13,9 @@
 | SDL 3 | ≥ 3.2 (joystick subsystem only) | `libsdl3-dev` |
 | Assimp | ≥ 5.2 (glTF 2.0 / OBJ model files) | `libassimp-dev` |
 | libcurl | ≥ 7.85 (HTTPS to data providers) | `libcurl4-openssl-dev` |
+| GDAL | ≥ 3.6 (Debian: 3.10; elevation rasters, orthophotos, PROJ reprojection) | `libgdal-dev` |
+| LASzip | ≥ 3.4 (LAZ lidar point clouds) | `liblaszip-dev` |
+| QtKeychain | Qt 6 build (API keys in the OS keyring) | `qtkeychain-qt6-dev` |
 | nlohmann/json | ≥ 3.11 (header-only; optional, see below) | `nlohmann-json3-dev` |
 | Doxygen (+ Graphviz) | optional, for `docs` | `doxygen`, `graphviz` |
 | lintian, clang-format | optional, package and style checks | `lintian`, `clang-format` |
