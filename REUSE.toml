@@ -12,6 +12,7 @@ path = [
     "THIRD_PARTY_NOTICES.md",
     "CMakePresets.json",
     "docs/**.md",
+    "docs/img/screenshot_drone_simulator.png",
     "packaging/linux/drone-simulator.desktop",
     "packaging/debian/copyright",
     "packaging/debian/changelog",
