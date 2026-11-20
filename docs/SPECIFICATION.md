@@ -1799,7 +1799,7 @@ so Markdown pages appear in the generated site.
     forward, left reverse, left stick steers) or with the sticks (left stick drive, right
     stick steering), both with A = brake, start = arm, right shoulder = Manual/Speed control,
     Y = lights; and RC transmitter AETR/TAER (aileron steers, elevator drives, arm on axis 4,
-    mode on axis 5). The calibration wizard stays aerial-only for now.
+    mode on axis 5). The calibration wizard covers ground mappings since step 6.
   - *Vehicle tab:* type selector (aerial / ground); the profile list, parameter editor
     (`groundParameters()`) and computed figures (FR-GND-13: top speed, 0 → 90 % time, stall
     torque, static rollover angles, range and endurance, steepest slope per material) follow
@@ -1871,8 +1871,17 @@ so Markdown pages appear in the generated site.
     ground gates open at the driving surface (terrain or deck) and that bays, ramps and
     bridges stand on level ground; a scripted driver on the drive and steering controls
     completes each mission in the simulation (`MissionDrive.*`).
-- **Next steps:** calibration wizard for ground mappings; shadows of the headlights and lights
-  on items (FR-GFX-08d, S) later; steering of Ackermann layouts.
+- **Step 6 — Calibration wizard for ground mappings (done, FR-IN-02/03a M):** with a ground
+  mapping the wizard asks for centre, full travel, *drive forward*, *reverse* and *steer
+  right*. The forward move tells a drive stick or pistol-grip trigger (self-centring: drive
+  slot, reverse = the same axis pulled back) from a gamepad trigger (an axis resting at one end
+  of its travel: forward slot, then the other trigger for reverse); the preset's unused slots
+  are cleared, switches, deadzones and expo kept. Steering on a trigger is refused. The
+  Controls tab enables *Calibrate…* for both types (ground needs 2 axes) and names its button
+  *Drive With This* for ground mappings.
+- **Next steps:** mesh loading for vehicles and items (FR-GFX-12, deferred here from M3);
+  shadows of the headlights and lights on items (FR-GFX-08d, S) later; steering of Ackermann
+  layouts.
 
 ---
 

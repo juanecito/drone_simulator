@@ -115,7 +115,9 @@ rate.
 - **Settings › Controls:** choose the keyboard or a joystick (RC transmitter in USB joystick
   mode, or a gamepad), start from a preset (aerial: radio AETR/TAER, gamepad mode 1/2;
   ground: gamepad with the triggers or the sticks, radio AETR/TAER), run the calibration
-  wizard (aerial mappings) and set expo and deadzones, then *Fly With This*. Mappings are
+  wizard (it finds the sticks, or the drive control — a stick, a pistol-grip trigger or a pair
+  of gamepad triggers — and the steering) and set expo and deadzones, then *Fly With This* or
+  *Drive With This*. Mappings are
   saved per device and per vehicle type, and the panel edits those of the type in use.
 
 - **Terrain tab:** choose a preset (built-in or your own: *Save As…* / *Delete*), set the seed

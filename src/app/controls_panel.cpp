@@ -311,11 +311,8 @@ void ControlsPanel::reloadMappings() {
     for (QWidget* w : std::initializer_list<QWidget*>{mapping_, calibrate_, save_, delete_}) {
         w->setEnabled(joystick);
     }
-    // The wizard calibrates aerial sticks; ground mappings start from a preset.
-    calibrate_->setEnabled(joystick && !ground());
-    calibrate_->setToolTip(ground() ? tr("Calibration of ground mappings is not available yet: "
-                                         "start from a preset and adjust the channels.")
-                                    : QString());
+    // The wizard finds the sticks (aerial) or the drive control and steering (ground).
+    calibrate_->setEnabled(joystick);
     for (ChannelRow& r : rows_) {
         r.inverted->setEnabled(joystick);
         r.expo->setEnabled(joystick);
@@ -519,6 +516,7 @@ void ControlsPanel::updateChannelLabels() {
     }
     vehicleLabel_->setText(ground() ? tr("Ground drone (drive and steering)")
                                     : tr("Aerial drone (sticks)"));
+    use_->setText(ground() ? tr("Drive With This") : tr("Fly With This"));
 }
 
 void ControlsPanel::onVehicleChanged() {
@@ -564,7 +562,7 @@ void ControlsPanel::use() {
 void ControlsPanel::calibrate() {
     const auto guid = selectedGuid();
     input::JoystickService* js = simulation_->joysticks();
-    if (!guid || js == nullptr || ground()) {
+    if (!guid || js == nullptr) {
         return;
     }
     int axes = 0;
@@ -573,9 +571,12 @@ void ControlsPanel::calibrate() {
             axes = d.axes;
         }
     }
-    if (axes < 4) {
-        QMessageBox::warning(this, tr("Calibrate Controller"),
-                             tr("The controller must be connected and have at least 4 axes."));
+    // Aerial: four sticks; ground: drive and steering at least.
+    const int needed = ground() ? 2 : 4;
+    if (axes < needed) {
+        QMessageBox::warning(
+            this, tr("Calibrate Controller"),
+            tr("The controller must be connected and have at least %1 axes.").arg(needed));
         return;
     }
     readChannels();
@@ -584,7 +585,7 @@ void ControlsPanel::calibrate() {
         working_ = dialog.result();
         working_.deviceGuid = *guid;
         showMapping();
-        status_->setText(tr("Calibrated. Save the mapping and press “Fly With This”."));
+        status_->setText(tr("Calibrated. Save the mapping and press “%1”.").arg(use_->text()));
     }
 }
 
