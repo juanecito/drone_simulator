@@ -115,6 +115,7 @@ SimulationController::SimulationController(SceneController& scene, SettingsContr
     modelDirs.push_back(assetDirectory / "models");
     models_ = std::make_unique<graphics::ModelLibrary>(std::move(modelDirs));
     loadWindTable(assetDirectory);
+    loadWeatherPresets(assetDirectory);
     loadBuiltInProfiles(assetDirectory);
     syncBuiltInProfiles();
     reloadProfiles();
@@ -166,6 +167,15 @@ void SimulationController::loadWindTable(const std::filesystem::path& assets) {
         windTable_ = std::move(*table);
     } else {
         log::warn("Using the built-in wind levels: {}", table.error().message);
+    }
+}
+
+void SimulationController::loadWeatherPresets(const std::filesystem::path& assets) {
+    const auto file = assets / "environment" / "weather_presets.json";
+    if (auto table = weather::WeatherPresetTable::load(file)) {
+        weatherPresets_ = std::move(*table);
+    } else {
+        log::warn("Using the built-in weather presets: {}", table.error().message);
     }
 }
 
@@ -388,6 +398,8 @@ void SimulationController::createLoop() {
     c.air = lastEnvironment_.air;
     c.wind = lastEnvironment_.wind;
     c.windTable = windTable_;
+    c.weather = lastEnvironment_.weather;
+    c.weatherPresets = weatherPresets_;
     c.startPosition = home_;
     c.startHeadingRad = homeHeadingRad_;
     c.startUtc = lastEnvironment_.time;
@@ -931,14 +943,22 @@ void SimulationController::onTerrainChanged() {
 
 void SimulationController::onEnvironmentChanged() {
     const EnvironmentConfig& env = scene_->environment();
-    if (env.wind != lastEnvironment_.wind) {
-        loop_->post([wind = env.wind](sim::World& w) { w.setWind(wind); });
-    }
-    if (env.air != lastEnvironment_.air) {
-        loop_->post([air = env.air](sim::World& w) { w.setAir(air); });
-    }
-    if (env.visibilityM != lastEnvironment_.visibilityM) {
-        loop_->post([v = env.visibilityM](sim::World& w) { w.setVisibility(v); });
+    if (env.weather != lastEnvironment_.weather) {
+        // Entering or leaving a mission: the whole weather changes.
+        loop_->post([env](sim::World& w) {
+            w.setWeather(env.weather.value_or(weather::WeatherSettings::fromBasic(
+                env.air, env.wind, env.visibilityM, w.config().seed)));
+        });
+    } else {
+        if (env.wind != lastEnvironment_.wind) {
+            loop_->post([wind = env.wind](sim::World& w) { w.setWind(wind); });
+        }
+        if (env.air != lastEnvironment_.air) {
+            loop_->post([air = env.air](sim::World& w) { w.setAir(air); });
+        }
+        if (env.visibilityM != lastEnvironment_.visibilityM) {
+            loop_->post([v = env.visibilityM](sim::World& w) { w.setVisibility(v); });
+        }
     }
     // A time edited in the Environment tab moves the simulated clock; before the start the
     // clock simply follows the scene.

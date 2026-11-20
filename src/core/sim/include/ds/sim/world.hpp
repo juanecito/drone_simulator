@@ -21,6 +21,7 @@
 #include "ds/sim/events.hpp"
 #include "ds/sim/mission_session.hpp"
 #include "ds/sim/world_snapshot.hpp"
+#include "ds/weather/weather.hpp"
 #include "ds/weather/wind_levels.hpp"
 
 /// @file
@@ -49,16 +50,21 @@ struct WorldConfig {
     GroundFunction ground;              ///< Terrain (flat ground at 0 if empty).
     std::optional<double> waterLevelM;  ///< Water surface, if any.
     double originAltitudeM = 0.0;       ///< AMSL altitude of world height 0.
-    weather::AirConditions air;         ///< Air at the ground.
-    weather::WindSettings wind;         ///< Wind level and direction.
+    weather::AirConditions air;         ///< Air at the ground (without @ref weather).
+    weather::WindSettings wind;         ///< Wind level and direction (without @ref weather).
     weather::WindLevelTable windTable = weather::WindLevelTable::builtIn();  ///< Levels.
+    /// Weather generator settings (FR-WX-01). Without them the weather is a clear sky with
+    /// @ref air, @ref wind and @ref visibilityM, seeded with the session seed.
+    std::optional<weather::WeatherSettings> weather;
+    /// Weather presets (FR-WX-01).
+    weather::WeatherPresetTable weatherPresets = weather::WeatherPresetTable::builtIn();
     double roughnessM = 0.03;          ///< Surface roughness for the wind profile.
     physics::Vec3 startPosition{0.0};  ///< Take-off point (x, z; placed on the ground).
     double startHeadingRad = 0.0;      ///< Initial heading.
     astro::UtcTime startUtc{};         ///< Simulation clock at the start.
     /// Geographic position of world (0, 0, 0) (sun position for the flight rules).
     geo::Geodetic geoOrigin{};
-    double visibilityM = 60'000.0;     ///< Meteorological visibility (VLOS limit).
+    double visibilityM = 60'000.0;  ///< Visibility (VLOS limit; without @ref weather).
 };
 
 /// @brief Flight rules in free mode (FR-MIS-06d): the default rules, checked from the pilot's
@@ -101,16 +107,21 @@ public:
     /// @brief Replaces the terrain (the vehicle is lifted onto it if it ended up below).
     void setGround(GroundFunction ground, std::optional<double> waterLevelM,
                    double originAltitudeM);
-    /// @brief Changes the air at the ground.
-    void setAir(const weather::AirConditions& air) noexcept { config_.air = air; }
-    /// @brief Changes the wind (restarts the wind model with the session seed).
+    /// @brief Replaces the weather generator settings (FR-WX-01). The weather keeps its clock;
+    /// the wind changes without restarting.
+    void setWeather(const weather::WeatherSettings& settings);
+    /// @brief Changes the air at the ground (the temperature, QNH and humidity overrides of the
+    /// weather settings).
+    void setAir(const weather::AirConditions& air);
+    /// @brief Changes the wind level and direction of the weather settings (restarts the wind
+    /// model with the session seed).
     void setWind(const weather::WindSettings& wind);
     /// @brief Sets the simulation clock.
     void setUtc(astro::UtcTime utc) noexcept;
     /// @brief Replaces the vehicle (new profile, either type) and resets.
     void setProfile(const physics::VehicleProfile& profile);
-    /// @brief Changes the visibility (VLOS limit).
-    void setVisibility(double visibilityM) noexcept { config_.visibilityM = visibilityM; }
+    /// @brief Changes the visibility override of the weather settings (VLOS limit).
+    void setVisibility(double visibilityM);
     /// @brief Changes the geographic origin (sun position).
     void setGeoOrigin(const geo::Geodetic& origin) noexcept;
 
@@ -152,6 +163,19 @@ public:
     [[nodiscard]] const physics::GroundVehicle* groundVehicle() const noexcept;
     /// @brief Wind model.
     [[nodiscard]] const physics::WindModel& wind() const noexcept { return wind_; }
+    /// @brief Weather generator settings in use.
+    [[nodiscard]] const weather::WeatherSettings& weatherSettings() const noexcept {
+        return weatherSettings_;
+    }
+    /// @brief The weather now (its clock restarts with the session).
+    [[nodiscard]] const weather::WeatherState& weather() const noexcept { return weather_.state(); }
+    /// @brief Air at the ground now.
+    [[nodiscard]] const weather::AirConditions& air() const noexcept {
+        return weather_.state().conditions.air;
+    }
+    /// @brief Visibility at the vehicle's height above the ground (in a cloud or above a fog
+    /// layer it differs from the ground value).
+    [[nodiscard]] double visibilityAtVehicle() const noexcept;
     /// @brief Environment of the last tick.
     [[nodiscard]] const physics::EnvironmentSample& environment() const noexcept { return env_; }
     /// @brief Configuration.
@@ -171,6 +195,8 @@ private:
     physics::EnvironmentSample sampleEnvironment(const physics::Vec3& position) const;
     [[nodiscard]] const items::ItemRegistry& activeItems() const noexcept;
     void restartWind();
+    void rebuildWeather();
+    void applyWeatherToWind();
     void publishVehicleEvents();
     void resolveObstacles();
     void updateSun();
@@ -179,6 +205,10 @@ private:
     WorldConfig config_;
     std::unique_ptr<physics::Vehicle> vehicle_;
     physics::WindModel wind_;
+    weather::WeatherSettings weatherSettings_;
+    weather::WeatherGenerator weather_;
+    double windLevelApplied_ = 0.0;  // Weather wind the wind model was last set to.
+    double windFromApplied_ = 0.0;
     physics::EnvironmentSample env_;
     physics::SurfaceQuery surfaceQuery_;  ///< surfaceAt(), for the vehicle's contacts.
     EventBus events_;

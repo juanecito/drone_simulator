@@ -33,9 +33,9 @@ struct MissionScene {
 [[nodiscard]] std::optional<std::string> unplayableReason(
     const missions::MissionDefinition& mission);
 
-/// @brief Visibility of a weather preset ("fog" ⇒ 500 m, "clear" ⇒ 50 km), overridden by
-/// `visibilityM`.
-[[nodiscard]] double weatherVisibilityM(const missions::WeatherSpec& weather);
+/// @brief The mission's weather at its start (FR-WX-01), with values outside the ranges of the
+/// Environment tab clamped.
+[[nodiscard]] weather::WeatherConditions missionStartWeather(const missions::WeatherSpec& weather);
 
 /// @brief Terrain of a procedural mission: the built-in preset `terrain.preset` (rolling hills
 /// if none), then the mission's seed and `params`, origin and extent.

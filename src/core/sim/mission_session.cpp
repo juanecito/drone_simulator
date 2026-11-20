@@ -52,7 +52,7 @@ missions::VehicleSample MissionSession::sample(const World& world) {
     s.cameraForward = glm::normalize(
         physics::bodyToWorld(body.orientation, {std::cos(uptilt), 0.0, -std::sin(uptilt)}));
     s.sunElevationDeg = world.sunElevationDeg();
-    s.visibilityM = world.config().visibilityM;
+    s.visibilityM = world.visibilityAtVehicle();
     if (const auto water = world.config().waterLevelM) {
         s.inWater = body.position.y < *water;
     }

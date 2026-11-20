@@ -286,6 +286,7 @@ signals:
 
 private:
     void loadWindTable(const std::filesystem::path& assets);
+    void loadWeatherPresets(const std::filesystem::path& assets);
     /// Replaces the procedural body by the profile's model file, if it has one.
     void applyModelFile();
     void loadBuiltInProfiles(const std::filesystem::path& assets);
@@ -316,6 +317,7 @@ private:
     SceneController* scene_;
     SettingsController* settings_;
     weather::WindLevelTable windTable_ = weather::WindLevelTable::builtIn();
+    weather::WeatherPresetTable weatherPresets_ = weather::WeatherPresetTable::builtIn();
     std::vector<physics::VehicleProfile> builtIn_;
     QList<VehicleProfileInfo> profiles_;
     physics::VehicleProfile profile_;

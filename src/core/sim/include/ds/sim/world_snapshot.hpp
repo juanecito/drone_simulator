@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -12,6 +13,7 @@
 #include "ds/missions/flight_rules.hpp"
 #include "ds/physics/vehicle.hpp"
 #include "ds/sim/mission_session.hpp"
+#include "ds/weather/weather.hpp"
 
 /// @file
 /// @brief Immutable state published after every tick (FR-LOOP-06).
@@ -58,6 +60,10 @@ struct WorldSnapshot {
     double windFromDeg = 0.0;             ///< Current mean wind direction (from), degrees true.
     double windMeanSpeedMs = 0.0;         ///< Level's mean speed at 10 m.
     double windGustMs = 0.0;              ///< Level's gust peak.
+    double weatherTimeS = 0.0;            ///< Weather clock (restarts with the session).
+    weather::WeatherConditions weather;   ///< Weather now (FR-WX-02).
+    std::array<weather::Drift, weather::kMaxCloudLayers> cloudDrift{};  ///< Cloud motion.
+    double visibilityM = 50'000.0;        ///< Visibility at the vehicle's height.
     SessionStats stats;                   ///< Flight statistics.
     double sunElevationDeg = 45.0;        ///< Apparent sun elevation at the origin.
     /// Flight-rule warnings (the mission's, or free mode's, FR-MIS-06b/06d).

@@ -96,11 +96,11 @@ TEST(MissionsPanel, ListsTheDefaultMissionWithItsDetails) {
     EXPECT_EQ(panel.selectedMission(), "first-flight");  // Selected by default.
     const QString details =
         panel.findChild<QTextBrowser*>(QStringLiteral("MissionDetails"))->toPlainText();
-    for (const char* text : {"First flight", "Climb to 10 m", "Fly to the beacon",
-                             "Land on the home pad", "Procedural, flatlands", "Europe/Madrid",
-                             "wind level 1", "camera-250g", "Height limit 120 m",
-                             "No time limit", "Keyboard flying allowed", "time ≤ 1:00.0",
-                             "first-flight.mission.json"}) {
+    for (const char* text :
+         {"First flight", "Climb to 10 m", "Fly to the beacon", "Land on the home pad",
+          "Procedural, flatlands", "Europe/Madrid", "Wind 270° level 1 (4 km/h, gusts 5)",
+          "clear sky", "camera-250g", "Height limit 120 m", "No time limit",
+          "Keyboard flying allowed", "time ≤ 1:00.0", "first-flight.mission.json"}) {
         EXPECT_TRUE(details.contains(QString::fromUtf8(text))) << text;
     }
     EXPECT_TRUE(panel.findChild<QPushButton*>(QStringLiteral("StartMission"))->isEnabled());

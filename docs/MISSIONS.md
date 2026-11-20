@@ -214,6 +214,54 @@ failure (`gpsDrift`, `gpsLoss`, `motorFailure`, `batteryDrop`, `compassError`, `
 `baroDrift`) is handed to the simulation with its parameters. The physical effects of the
 injected failures arrive in M7.
 
+## Weather
+
+`environment.weather` drives a **seeded weather generator** (FR-WX-01…03): the same seed and
+settings always give the same weather.
+
+1. The conditions start from the defaults: 15 °C, QNH 1013.25 hPa, 50 % humidity, calm, clear
+   sky, 50 km visibility.
+2. The **preset** sets the sky (from `assets/environment/weather_presets.json`):
+
+   | Preset | Clouds | Precipitation | Visibility | Also sets |
+   |--------|--------|---------------|-----------:|-----------|
+   | `clear` | none | none | 50 km | |
+   | `few-clouds` | cumulus 2/8 at 1200–1800 m | none | 40 km | |
+   | `scattered-clouds` | cumulus 4/8 at 1000–2000 m | none | 30 km | |
+   | `broken-clouds` | stratocumulus 6/8 at 900–1500 m | none | 25 km | |
+   | `overcast` | stratus 8/8 at 600–1200 m | none | 20 km | humidity 80 % |
+   | `mist` | none | none | 3 km, mist up to 200 m | humidity 93 % |
+   | `fog` | none | none | 500 m, fog up to 120 m | humidity 99 % |
+   | `drizzle` | stratus 8/8 at 300–900 m | moderate drizzle (0.3 mm/h) | 8 km | humidity 95 % |
+   | `light-rain` | stratus 8/8 at 700–2500 m | light rain (1 mm/h) | 10 km | humidity 88 % |
+   | `heavy-rain` | stratus 8/8 at 500–3000 m | heavy rain (12 mm/h) | 3 km | humidity 95 % |
+   | `light-snow` | stratus 8/8 at 800–2500 m | light snow (0.5 mm/h water) | 4 km | −2 °C, 90 % |
+   | `heavy-snow` | stratus 8/8 at 500–3000 m | heavy snow (4 mm/h water) | 1 km | −4 °C, 95 % |
+   | `thunderstorm` | cumulonimbus 6/8 at 900–11000 m, cumulus 3/8 | rain 20 mm/h | 5 km | 90 %, thunderstorm |
+
+3. The other members **override** the preset: `temperatureC`, `humidityPct` (or `dewPointC`),
+   `pressureHpa`, `wind` (`level`, `fromDeg`; default from 270°), `clouds` (replaces every
+   layer; a layer without `topM` gets a thickness typical of its type), `precipitation`
+   (`type` with `intensity` — light / moderate / heavy — or `rateMmH`), `visibilityM` and `fog`
+   (`topM`: the visibility holds below it and the air is clear above; `haze`).
+4. Each **timeline** entry starts at `atS` seconds after the vehicle is placed on the spawn
+   point and blends over `transitionS` seconds (smoothly) into the previous conditions changed
+   by its own `preset` and overrides. A preset in the timeline changes only what that preset
+   sets: rain arriving keeps the temperature, pressure and wind of the mission unless the entry
+   changes them. Wind levels blend through the intermediate levels.
+5. Around these planned values the weather **fluctuates**: partial cloud cover wanders by up
+   to ±0.75 okta (clear and overcast skies stay as they are) over a few minutes, the
+   precipitation rate by ±40 % (and the visibility with it); the clouds drift with the wind
+   at their height.
+
+Inside a cloud layer of at least 4 oktas the visibility drops to 60 m, so the pilot loses
+sight of a drone that climbs into the cloud (VLOS). Temperature, pressure and humidity set the
+air density (thrust) and the battery temperature; the barometer reads relative to the QNH.
+
+The **briefing** summarises the weather at the start, e.g. *Wind 270° level 4 (24 km/h,
+gusts 34) · broken clouds at 900 m · light rain · visibility 6.0 km · 12 °C · QNH 1009*. The
+timeline is listed only when `forecast` is true.
+
 ## Lifecycle
 
 `Briefing → PreFlight → InProgress → Succeeded / Failed / Aborted → Debrief`. In PreFlight the

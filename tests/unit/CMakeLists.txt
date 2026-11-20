@@ -24,6 +24,7 @@ add_executable(ds_unit_tests
     sim_test.cpp
     terrain_files_test.cpp
     version_test.cpp
+    weather_test.cpp
     wind_test.cpp)
 target_link_libraries(ds_unit_tests PRIVATE
     GTest::gtest_main

@@ -39,31 +39,13 @@ std::optional<std::string> unplayableReason(const missions::MissionDefinition& m
     return std::nullopt;
 }
 
-double weatherVisibilityM(const missions::WeatherSpec& weather) {
-    if (weather.visibilityM) {
-        return std::clamp(*weather.visibilityM, kMinVisibilityM, kMaxVisibilityM);
-    }
-    static constexpr std::array<std::pair<std::string_view, double>, 13> kVisibility{{
-        {"clear", 50'000.0},
-        {"few-clouds", 40'000.0},
-        {"scattered-clouds", 30'000.0},
-        {"broken-clouds", 25'000.0},
-        {"overcast", 20'000.0},
-        {"mist", 3'000.0},
-        {"fog", 500.0},
-        {"drizzle", 8'000.0},
-        {"light-rain", 10'000.0},
-        {"heavy-rain", 3'000.0},
-        {"light-snow", 4'000.0},
-        {"heavy-snow", 1'000.0},
-        {"thunderstorm", 5'000.0},
-    }};
-    for (const auto& [name, metres] : kVisibility) {
-        if (name == weather.preset) {
-            return metres;
-        }
-    }
-    return 50'000.0;
+weather::WeatherConditions missionStartWeather(const missions::WeatherSpec& weather) {
+    weather::WeatherConditions c = weather::WeatherGenerator(weather.settings).plannedAt(0.0);
+    c.visibilityM = std::clamp(c.visibilityM, kMinVisibilityM, kMaxVisibilityM);
+    c.air.temperatureC = std::clamp(c.air.temperatureC, kMinTemperatureC, kMaxTemperatureC);
+    c.air.pressureHpa = std::clamp(c.air.pressureHpa, kMinQnhHpa, kMaxQnhHpa);
+    c.air.humidityPct = std::clamp(c.air.humidityPct, 0.0, 100.0);
+    return c;
 }
 
 common::Result<TerrainConfig> missionTerrain(const missions::MissionDefinition& mission) {
@@ -122,18 +104,13 @@ common::Result<MissionScene> missionScene(const missions::MissionDefinition& mis
     env.time = e.utc;
     env.timeZone = e.timeZone.empty() ? "UTC" : e.timeZone;
     env.animate = false;  // The simulation clock drives the sky during the mission.
-    env.visibilityM = weatherVisibilityM(w);
-    env.wind = {.level = w.windLevel, .fromDeg = w.windFromDeg, .randomDirection = false};
-    env.air = weather::AirConditions{};
-    if (w.temperatureC) {
-        env.air.temperatureC = std::clamp(*w.temperatureC, kMinTemperatureC, kMaxTemperatureC);
-    }
-    if (w.pressureHpa) {
-        env.air.pressureHpa = std::clamp(*w.pressureHpa, kMinQnhHpa, kMaxQnhHpa);
-    }
-    if (w.humidityPct) {
-        env.air.humidityPct = std::clamp(*w.humidityPct, 0.0, 100.0);
-    }
+    const weather::WeatherConditions start = missionStartWeather(w);
+    env.visibilityM = start.visibilityM;
+    env.wind = {.level = static_cast<int>(std::lround(start.windLevel)),
+                .fromDeg = start.windFromDeg,
+                .randomDirection = false};
+    env.air = start.air;
+    env.weather = w.settings;
     return MissionScene{std::move(*terrain), env};
 }
 

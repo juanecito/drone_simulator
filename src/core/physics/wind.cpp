@@ -44,6 +44,17 @@ WindParameters WindParameters::fromLevel(const weather::WindLevelTable& table,
     return p;
 }
 
+WindParameters WindParameters::fromLevel(const weather::WindLevel& level, double fromDeg) {
+    WindParameters p;
+    p.meanSpeed10mMs = level.meanSpeedMs;
+    p.gustPeakMs = level.gustPeakMs;
+    p.gustIntervalS = level.gustIntervalS;
+    p.turbulenceScale = level.turbulenceScale;
+    p.directionSwingDeg = level.directionSwingDeg;
+    p.fromDeg = fromDeg;
+    return p;
+}
+
 double logProfileSpeed(double speed10m, double heightAglM, double roughnessM) noexcept {
     const double z0 = std::max(roughnessM, 1e-4);
     const double h = std::min(heightAglM, kMaxProfileHeightM);
@@ -55,15 +66,31 @@ double logProfileSpeed(double speed10m, double heightAglM, double roughnessM) no
 
 WindModel::WindModel(const WindParameters& params, std::uint64_t seed)
     : params_(params), random_(common::mix64(seed ^ 0x44525944454EULL)) {
+    updateCompensation();
+    scheduleGust();
+    update(0.0, 10.0, Vec3(0.0));
+}
+
+void WindModel::updateCompensation() {
     // Gusts only add speed; lower the base so that the long-term mean stays at the table value.
+    meanCompensation_ = 1.0;
     if (params_.meanSpeed10mMs > 0.0 && params_.gustIntervalS > 0.0) {
         const double meanAmplitude = 0.75 * (params_.gustPeakMs - params_.meanSpeed10mMs);
         const double meanDuration = 0.5 * (kMinGustDurationS + kMaxGustDurationS);
         const double average = 0.5 * meanAmplitude * meanDuration / params_.gustIntervalS;
         meanCompensation_ = std::max(0.5, 1.0 - average / params_.meanSpeed10mMs);
     }
-    scheduleGust();
-    update(0.0, 10.0, Vec3(0.0));
+}
+
+void WindModel::setParameters(const WindParameters& params) {
+    const bool gustsPending = timeToGust_ < 1e299 || gustElapsed_ < gustDuration_;
+    const double roughness = params_.roughnessM;
+    params_ = params;
+    params_.roughnessM = roughness;
+    updateCompensation();
+    if (!gustsPending) {
+        scheduleGust();  // Gusts start when the wind picks up.
+    }
 }
 
 void WindModel::scheduleGust() {

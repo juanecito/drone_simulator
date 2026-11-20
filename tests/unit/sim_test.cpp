@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "ds/common/event_bus.hpp"
+#include "ds/common/json.hpp"
 #include "ds/common/math.hpp"
 #include "ds/common/triple_buffer.hpp"
 #include "ds/geo/coordinates.hpp"
@@ -245,6 +246,85 @@ TEST(World, SnapshotAndSessionStats) {
     EXPECT_EQ(s.resetCount, resets + 1);
     EXPECT_FALSE(s.telemetry.armed);
     EXPECT_LT(s.aglM, 0.05);
+}
+
+weather::WeatherSettings weatherFrom(const char* text) {
+    auto json = common::parseJson(text);
+    EXPECT_TRUE(json.has_value());
+    auto settings = weather::WeatherSettings::fromJson(*json);
+    EXPECT_TRUE(settings.has_value());
+    return settings.value_or(weather::WeatherSettings{});
+}
+
+TEST(World, WeatherTimelineChangesWindAndAir) {
+    WorldConfig config = cameraWorld();
+    config.weather = weatherFrom(R"({"seed": 3, "preset": "clear", "temperatureC": 20,
+        "timeline": [{"atS": 10, "transitionS": 10, "preset": "light-rain", "temperatureC": 10,
+                      "wind": {"level": 5, "fromDeg": 90}}]})");
+    World world(std::move(config));
+    const input::ControlInputs idle;
+    WorldSnapshot s;
+    for (int i = 0; i < 2500; ++i) {
+        world.tick(idle, 0.002);
+    }
+    world.fillSnapshot(s);
+    EXPECT_NEAR(s.weatherTimeS, 5.0, 1e-6);
+    EXPECT_EQ(s.windLevel, 0);
+    EXPECT_EQ(s.weather.precipitation.type, weather::PrecipitationType::None);
+    EXPECT_DOUBLE_EQ(world.environment().ambientC, 20.0);
+    EXPECT_DOUBLE_EQ(glm::length(world.wind().meanVelocity()), 0.0);
+
+    for (int i = 0; i < 10'000; ++i) {
+        world.tick(idle, 0.002);
+    }
+    world.fillSnapshot(s);
+    EXPECT_EQ(s.windLevel, 5);
+    EXPECT_DOUBLE_EQ(s.windMeanSpeedMs, 9.4);
+    EXPECT_EQ(s.weather.precipitation.type, weather::PrecipitationType::Rain);
+    EXPECT_DOUBLE_EQ(world.environment().ambientC, 10.0);
+    EXPECT_LT(world.wind().meanVelocity().x, 0.0);  // From the east: the air moves west.
+    EXPECT_FALSE(s.weather.clouds.empty());
+
+    world.reset();  // The weather starts again with the session.
+    world.fillSnapshot(s);
+    EXPECT_DOUBLE_EQ(s.weatherTimeS, 0.0);
+    EXPECT_EQ(s.windLevel, 0);
+}
+
+TEST(World, CloudsAndFogLimitTheVisibilityAtTheVehicle) {
+    WorldConfig config = cameraWorld();
+    config.weather = weatherFrom(R"({"seed": 1, "preset": "overcast",
+        "clouds": [{"type": "stratus", "coverOktas": 8, "baseM": 30, "topM": 300}]})");
+    World world(std::move(config));
+    world.tick({}, 0.002);
+    EXPECT_DOUBLE_EQ(world.visibilityAtVehicle(), 20'000.0);
+    physics::RigidBodyState body = world.vehicle().bodyState();
+    body.position.y += 100.0;
+    world.vehicle().setBodyState(body);
+    world.tick({}, 0.002);
+    EXPECT_DOUBLE_EQ(world.visibilityAtVehicle(), weather::kInCloudVisibilityM);
+
+    // Changing the air keeps the mission's sky.
+    world.setAir({.temperatureC = 5.0, .pressureHpa = 1000.0, .humidityPct = 70.0});
+    EXPECT_DOUBLE_EQ(world.air().temperatureC, 5.0);
+    EXPECT_EQ(world.weather().conditions.clouds.size(), 1U);
+    world.setVisibility(800.0);
+    EXPECT_DOUBLE_EQ(world.weather().conditions.visibilityM, 800.0);
+}
+
+TEST(World, BasicSettingsBecomeAClearSky) {
+    WorldConfig config = cameraWorld();
+    config.wind = {.level = 2, .fromDeg = 180.0, .randomDirection = false};
+    config.air.temperatureC = -5.0;
+    config.visibilityM = 7000.0;
+    World world(std::move(config));
+    EXPECT_EQ(world.weatherSettings().preset, "clear");
+    EXPECT_DOUBLE_EQ(world.weather().conditions.windLevel, 2.0);
+    EXPECT_DOUBLE_EQ(world.weather().conditions.windFromDeg, 180.0);
+    EXPECT_DOUBLE_EQ(world.air().temperatureC, -5.0);
+    EXPECT_DOUBLE_EQ(world.weather().conditions.visibilityM, 7000.0);
+    world.setWind({.level = 6, .fromDeg = 0.0, .randomDirection = false});
+    EXPECT_DOUBLE_EQ(world.wind().params().meanSpeed10mMs, 12.3);
 }
 
 // --- Loop ------------------------------------------------------------------------------------

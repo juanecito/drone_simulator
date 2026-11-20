@@ -15,6 +15,7 @@
 #include "ds/graphics/exposure.hpp"
 #include "ds/storage/terrain_preset_store.hpp"
 #include "ds/terrain/procedural_source.hpp"
+#include "ds/weather/weather.hpp"
 #include "ds/weather/wind_levels.hpp"
 
 /// @file
@@ -44,6 +45,10 @@ struct EnvironmentConfig {
     double visibilityM = 60'000.0;        ///< Meteorological visibility (fog / haze).
     weather::WindSettings wind;           ///< Wind level and direction (FR-WIND-01).
     weather::AirConditions air;           ///< Temperature, QNH and humidity at the ground.
+    /// Weather generator settings of a mission (FR-WX-01). Empty in free mode, where the
+    /// weather is a clear sky with the visibility, wind and air above. In a mission those
+    /// fields hold the mission's weather at its start (for display).
+    std::optional<weather::WeatherSettings> weather;
     /// @brief Equality.
     bool operator==(const EnvironmentConfig&) const = default;
 };

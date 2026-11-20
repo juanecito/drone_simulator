@@ -16,6 +16,7 @@
 #include "ds/physics/vehicle.hpp"
 #include "ds/terrain/height_source.hpp"
 #include "ds/terrain/terrain_files.hpp"
+#include "ds/weather/weather.hpp"
 
 /// @file
 /// @brief In-memory form of a mission file (§4.9.1). Produced by the loader from a
@@ -72,19 +73,10 @@ struct TerrainSpec {
     std::optional<terrain::Extent> extent;              ///< Bounded terrain (FR-TER-04a).
 };
 
-/// @brief `environment.weather` (§4.2.3). The generator itself arrives in M7; the mission keeps
-/// the full object and the fields the simulation already uses.
+/// @brief `environment.weather` (§4.2.3): the weather generator settings.
 struct WeatherSpec {
-    std::uint64_t seed = 0;                 ///< Generator seed.
-    std::string preset = "clear";           ///< Base preset.
-    std::optional<double> temperatureC;     ///< Ground temperature.
-    std::optional<double> humidityPct;      ///< Relative humidity.
-    std::optional<double> pressureHpa;      ///< QNH.
-    std::optional<double> visibilityM;      ///< Visibility.
-    int windLevel = 0;                      ///< Wind level 0–10 (§4.2.1).
-    double windFromDeg = 0.0;               ///< Wind direction (from), degrees true.
-    bool forecast = false;                  ///< Reveal the timeline in the briefing.
-    common::Json json = common::Json::object();  ///< The whole object.
+    weather::WeatherSettings settings;           ///< Generator settings.
+    common::Json json = common::Json::object();  ///< The whole object (plausibility checks).
 };
 
 /// @brief `environment`.

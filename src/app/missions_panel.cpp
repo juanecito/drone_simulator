@@ -22,6 +22,7 @@
 
 #include "ds/app/missions_controller.hpp"
 #include "ds/astro/time.hpp"
+#include "ds/weather/weather.hpp"
 
 namespace ds::app {
 namespace {
@@ -86,14 +87,16 @@ QString timeText(const missions::EnvironmentSpec& e) {
 }
 
 QString weatherText(const missions::WeatherSpec& w) {
-    QString text = html(w.preset);
-    text.replace(QLatin1Char('-'), QLatin1Char(' '));
-    if (w.temperatureC) {
-        text += QStringLiteral(", %1 °C").arg(number(*w.temperatureC));
-    }
-    text += tr(", wind level %1").arg(w.windLevel);
-    if (w.windLevel > 0) {
-        text += tr(" from %1°").arg(number(w.windFromDeg));
+    const weather::WeatherGenerator generator(w.settings);
+    QString text = html(weather::describe(generator.plannedAt(0.0)));
+    // The timeline stays hidden unless the mission reveals it (FR-WX-10).
+    if (w.settings.forecast && w.settings.timelineEnabled) {
+        for (const weather::WeatherChange& c : w.settings.timeline) {
+            text += QStringLiteral("<br>") +
+                    tr("From %1: %2")
+                        .arg(durationText(c.atS),
+                             html(weather::describe(generator.plannedAt(c.atS + c.transitionS))));
+        }
     }
     return text;
 }

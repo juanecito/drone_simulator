@@ -214,6 +214,21 @@ TEST(MissionLoader, WeatherPlausibility) {
     EXPECT_NE(errorsOf(m).find("increasing time order"), std::string::npos);
 }
 
+TEST(MissionLoader, WeatherGeneratorSettings) {
+    const auto r = validateMission(fixture("rover-delivery-01.mission.json"), context());
+    ASSERT_TRUE(r.valid()) << r.report();
+    const ds::weather::WeatherSettings& w = r.definition->environment.weather.settings;
+    EXPECT_EQ(w.seed, 55U);
+    EXPECT_EQ(w.preset, "overcast");
+    EXPECT_EQ(w.overrides.temperatureC, 12.0);
+    EXPECT_EQ(w.overrides.windLevel, 2);
+    ASSERT_EQ(w.timeline.size(), 1U);
+    EXPECT_EQ(w.timeline[0].preset, "light-rain");
+    const ds::weather::WeatherGenerator g(w);
+    EXPECT_EQ(g.plannedAt(0.0).precipitation.type, ds::weather::PrecipitationType::None);
+    EXPECT_EQ(g.plannedAt(400.0).precipitation.type, ds::weather::PrecipitationType::Rain);
+}
+
 TEST(MissionLoader, FileTerrainPathsAreChecked) {
     const fs::path dir = fs::temp_directory_path() / std::format("ds_mission_files_{}", ::getpid());
     fs::create_directories(dir);

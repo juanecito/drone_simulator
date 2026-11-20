@@ -1904,6 +1904,43 @@ so Markdown pages appear in the generated site.
   and the waypoint autopilot (C) (FR-GND-05/11); texture maps on model files; choosing item
   models in the Items tab.
 
+**M7 implementation notes** (in progress; deliberate scope decisions):
+
+- **Plan:** (1) weather generator core; (2) weather effects on the vehicles (rain, wet and
+  snowy ground, flying into cloud) and the battery checks of NFR-REAL-11; (3) weather
+  rendering (cloud layers, overcast light, rain and snow, ground fog); (4) the generator in the
+  Environment tab and the HUD (FR-WX-12); (5) Position hold and return to home; (6) failure
+  injection; (7) telemetry recording, replays and the History tab; (8) NFR-REAL validation;
+  (9, S) the online orthophoto provider, which needs the raster sources of M4.
+- **Step 1 — Weather generator core (done, FR-WX-01…03, FR-WX-10 M):**
+  - *`core/weather`:* `WeatherSettings` (seed, preset, overrides, timeline, `forecast`; the
+    JSON form is the mission's `environment.weather`), the 13 presets as data
+    (`assets/environment/weather_presets.json`, `WeatherPresetTable`; a preset sets only the
+    parameters it lists — snow presets also a temperature below 0 °C), and
+    `WeatherGenerator`. The conditions start from 15 °C, 1013.25 hPa, 50 %, calm, clear and
+    50 km, then the preset, then the overrides (a dew point gives the humidity, Magnus
+    formula). Each timeline entry blends with a smoothstep over `transitionS` into the
+    previous target changed by its preset and overrides: numbers linearly, visibility in log
+    scale, the wind direction along the shorter arc, cloud layers pairwise (a layer missing on
+    one side fades in or out), types and flags at half-way. Wind levels may be fractional
+    while blending (`WindLevelTable::interpolated`).
+  - *Fluctuations (seeded value noise):* partial cloud cover ±0.75 okta over ~5 min (none at
+    0 or 8 oktas), precipitation rate ±40 % over ~2 min with the visibility ∝ rate^−0.6.
+    Cloud layers drift with the mean wind at mid-layer height (log profile, constant above
+    300 m); `advance()` keeps the clock and the drift, `seek()` jumps.
+  - *In the world:* `sim::World` runs the generator (its clock restarts with every reset, so
+    a mission's timeline counts from the spawn); the air (density, barometer QNH, battery
+    ambient temperature), the wind level and direction (changed in place with
+    `WindModel::setParameters`, without restarting turbulence or gusts) and the visibility
+    come from it. The visibility used for VLOS is taken at the vehicle's height: 60 m inside
+    a cloud layer of ≥ 4 oktas, the clear-air value above a ground fog layer. Free mode keeps
+    the M3 Environment tab: its air, wind and visibility become a clear-sky setting
+    (`WeatherSettings::fromBasic`). The snapshot carries the conditions and cloud drift for
+    the rendering and the HUD.
+  - *Missions:* the loader turns `environment.weather` into `WeatherSettings`; the mission
+    scene shows its start conditions in the Environment tab; the briefing shows the summary of
+    FR-WX-10 (`weather::describe`) and, with `forecast: true`, one line per timeline entry.
+
 ---
 
 ## 11. Decisions, Assumptions & Open Questions

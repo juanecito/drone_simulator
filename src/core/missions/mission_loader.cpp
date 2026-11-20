@@ -319,16 +319,10 @@ private:
             const Json& w = j["weather"];
             WeatherSpec& ws = e.weather;
             ws.json = w;
-            ws.seed = unsignedValue(w, "seed");
-            ws.preset = text(w, "preset", "clear");
-            ws.temperatureC = optNumber(w, "temperatureC");
-            ws.humidityPct = optNumber(w, "humidityPct");
-            ws.pressureHpa = optNumber(w, "pressureHpa");
-            ws.visibilityM = optNumber(w, "visibilityM");
-            ws.forecast = flag(w, "forecast", false);
-            if (w.contains("wind")) {
-                ws.windLevel = static_cast<int>(number(w["wind"], "level", 0));
-                ws.windFromDeg = number(w["wind"], "fromDeg", 0.0);
+            if (auto settings = weather::WeatherSettings::fromJson(w)) {
+                ws.settings = std::move(*settings);
+            } else {
+                error("environment.weather", settings.error().message);
             }
         }
     }

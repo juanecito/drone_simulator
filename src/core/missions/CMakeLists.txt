@@ -14,6 +14,7 @@ ds_add_core_module(missions
         ds::common
         ds::geo
         ds::astro
+        ds::weather
         ds::terrain
         ds::items
         ds::physics)

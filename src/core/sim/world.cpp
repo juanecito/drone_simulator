@@ -134,6 +134,9 @@ World::World(WorldConfig config) : config_(std::move(config)) {
     // World is neither copied nor moved: `this` stays valid.
     surfaceQuery_ = [this](const physics::Vec3& p) { return surfaceAt(p); };
     vehicle_ = physics::makeVehicle(config_.profile, config_.seed);
+    weatherSettings_ = config_.weather.value_or(weather::WeatherSettings::fromBasic(
+        config_.air, config_.wind, config_.visibilityM, config_.seed));
+    rebuildWeather();
     clockBase_ = config_.startUtc;
     clockBaseTime_ = 0.0;
     reset();
@@ -202,7 +205,7 @@ void World::checkFreeRules() {
     r.armed = v.armed() && !v.telemetry().crashed;
     r.lightsOn = controls_.lights;
     r.sunElevationDeg = sunElevationDeg_;
-    r.visibilityM = config_.visibilityM;
+    r.visibilityM = visibilityAtVehicle();
     if (const auto broken = freeMonitor_->update(r); broken && freeRules_->enforce) {
         events_.publish(FlightRuleBrokenEvent{broken->message});
         freeMonitor_->reset();
@@ -257,22 +260,77 @@ physics::EnvironmentSample World::sampleEnvironment(const physics::Vec3& positio
     env.waterLevelM = config_.waterLevelM;
     env.groundQuery = &config_.ground;
     env.surfaceQuery = &surfaceQuery_;
-    env.air = physics::airAt(config_.originAltitudeM + position.y, config_.air,
+    const weather::AirConditions& ground = air();
+    env.air = physics::airAt(config_.originAltitudeM + position.y, ground,
                              config_.originAltitudeM + env.ground.heightM);
-    env.qnhHpa = config_.air.pressureHpa;
-    env.ambientC = config_.air.temperatureC;
+    env.qnhHpa = ground.pressureHpa;
+    env.ambientC = ground.temperatureC;
     env.wind = wind_.velocity();
     return env;
 }
 
 void World::restartWind() {
-    auto params = physics::WindParameters::fromLevel(config_.windTable, config_.wind, config_.seed);
+    const weather::WeatherConditions& c = weather_.state().conditions;
+    auto params = physics::WindParameters::fromLevel(config_.windTable.interpolated(c.windLevel),
+                                                     c.windFromDeg);
     params.roughnessM = config_.roughnessM;
     wind_ = physics::WindModel(params, config_.seed + resets_ * 0x9E3779B97F4A7C15ULL);
+    windLevelApplied_ = c.windLevel;
+    windFromApplied_ = c.windFromDeg;
+}
+
+void World::applyWeatherToWind() {
+    const weather::WeatherConditions& c = weather_.state().conditions;
+    if (std::abs(c.windLevel - windLevelApplied_) < 1e-4 &&
+        std::abs(c.windFromDeg - windFromApplied_) < 1e-3) {
+        return;
+    }
+    auto params = physics::WindParameters::fromLevel(config_.windTable.interpolated(c.windLevel),
+                                                     c.windFromDeg);
+    params.roughnessM = config_.roughnessM;
+    wind_.setParameters(params);
+    windLevelApplied_ = c.windLevel;
+    windFromApplied_ = c.windFromDeg;
+}
+
+void World::rebuildWeather() {
+    const double now = weather_.state().timeS;
+    weather_ =
+        weather::WeatherGenerator(weatherSettings_, config_.weatherPresets, config_.windTable);
+    weather_.seek(now);
+}
+
+void World::setWeather(const weather::WeatherSettings& settings) {
+    weatherSettings_ = settings;
+    rebuildWeather();
+    applyWeatherToWind();
+}
+
+void World::setAir(const weather::AirConditions& air) {
+    config_.air = air;
+    weather::WeatherOverrides& o = weatherSettings_.overrides;
+    o.temperatureC = air.temperatureC;
+    o.pressureHpa = air.pressureHpa;
+    o.humidityPct = air.humidityPct;
+    o.dewPointC.reset();
+    rebuildWeather();
+}
+
+void World::setVisibility(double visibilityM) {
+    config_.visibilityM = visibilityM;
+    weatherSettings_.overrides.visibilityM = visibilityM;
+    rebuildWeather();
+}
+
+double World::visibilityAtVehicle() const noexcept {
+    const physics::RigidBodyState& body = vehicle_->bodyState();
+    return weather_.state().conditions.visibilityAt(
+        std::max(0.0, body.position.y - env_.ground.heightM));
 }
 
 void World::reset() {
     ++resets_;
+    weather_.restart();
     restartWind();
     const physics::Vec3 start = config_.startPosition;
     // Air where the vehicle will rest (the barometer starts from it).
@@ -317,6 +375,10 @@ void World::setGround(GroundFunction ground, std::optional<double> waterLevelM,
 
 void World::setWind(const weather::WindSettings& wind) {
     config_.wind = wind;
+    weatherSettings_.overrides.windLevel = wind.level;
+    weatherSettings_.overrides.windFromDeg = wind.fromDeg;
+    weatherSettings_.randomWindDirection = wind.randomDirection;
+    rebuildWeather();
     restartWind();
 }
 
@@ -432,6 +494,8 @@ void World::tick(const input::ControlInputs& controls, double dt) {
     // Environment at the vehicle (terrain queried once per tick).
     const physics::RigidBodyState& body = v.bodyState();
     const physics::GroundSample g = config_.ground(body.position.x, body.position.z);
+    weather_.advance(dt);
+    applyWeatherToWind();
     wind_.update(dt, std::max(0.0, body.position.y - g.heightM), body.velocity);
     env_ = sampleEnvironment(body.position);
 
@@ -485,11 +549,16 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.aglM = s.body.position.y - g.heightM - v.restHeightM();
     s.originAltitudeM = config_.originAltitudeM;
     s.home = home_;
-    const weather::WindLevel& level = config_.windTable.level(config_.wind.level);
-    s.windLevel = level.level;
+    const weather::WeatherState& w = weather_.state();
+    const weather::WindLevel level = config_.windTable.interpolated(w.conditions.windLevel);
+    s.windLevel = static_cast<int>(std::lround(w.conditions.windLevel));
     s.windFromDeg = wind_.currentFromDeg();
     s.windMeanSpeedMs = level.meanSpeedMs;
     s.windGustMs = level.gustPeakMs;
+    s.weatherTimeS = w.timeS;
+    s.weather = w.conditions;
+    s.cloudDrift = w.cloudDrift;
+    s.visibilityM = visibilityAtVehicle();
     s.stats = stats_;
     s.resetCount = resets_;
     s.sunElevationDeg = sunElevationDeg_;

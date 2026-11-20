@@ -47,6 +47,10 @@ public:
 
     /// @brief Level @p level, clamped to 0–10.
     [[nodiscard]] const WindLevel& level(int level) const noexcept;
+    /// @brief Parameters at a fractional level (linear between the neighbouring levels; the
+    /// name, turbulence text and level number are those of the nearest level). Used while the
+    /// weather blends from one level to another.
+    [[nodiscard]] WindLevel interpolated(double level) const noexcept;
     /// @brief The level whose mean speed is closest to @p meanSpeedMs (FR-WIND-08).
     [[nodiscard]] int nearestLevel(double meanSpeedMs) const noexcept;
     /// @brief Highest level whose mean speed does not exceed @p speedMs (0 if none).

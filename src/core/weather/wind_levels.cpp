@@ -92,6 +92,31 @@ const WindLevel& WindLevelTable::level(int level) const noexcept {
     return levels_[static_cast<std::size_t>(std::clamp(level, 0, kLevelCount - 1))];
 }
 
+WindLevel WindLevelTable::interpolated(double level) const noexcept {
+    const double l = std::isfinite(level) ? std::clamp(level, 0.0, kLevelCount - 1.0) : 0.0;
+    const auto lo = static_cast<std::size_t>(std::floor(l));
+    const std::size_t hi = std::min(lo + 1, levels_.size() - 1);
+    const double f = l - static_cast<double>(lo);
+    const WindLevel& a = levels_.at(lo);
+    const WindLevel& b = levels_.at(hi);
+    if (f <= 0.0) {
+        return a;
+    }
+    WindLevel w = f < 0.5 ? a : b;
+    const auto mix = [f](double x, double y) { return x + (y - x) * f; };
+    w.meanSpeedMs = mix(a.meanSpeedMs, b.meanSpeedMs);
+    w.gustPeakMs = mix(a.gustPeakMs, b.gustPeakMs);
+    // Level 0 has no gusts (interval 0): take the other level's interval.
+    w.gustIntervalS = a.gustIntervalS <= 0.0   ? b.gustIntervalS
+                      : b.gustIntervalS <= 0.0 ? a.gustIntervalS
+                                               : mix(a.gustIntervalS, b.gustIntervalS);
+    w.turbulenceScale = mix(a.turbulenceScale, b.turbulenceScale);
+    w.directionSwingDeg = a.directionSwingDeg <= 0.0
+                              ? b.directionSwingDeg
+                              : mix(a.directionSwingDeg, b.directionSwingDeg);
+    return w;
+}
+
 int WindLevelTable::nearestLevel(double meanSpeedMs) const noexcept {
     int best = 0;
     double bestDiff = 1e300;

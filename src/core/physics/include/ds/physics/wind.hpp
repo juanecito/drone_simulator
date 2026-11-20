@@ -32,6 +32,8 @@ struct WindParameters {
     [[nodiscard]] static WindParameters fromLevel(const weather::WindLevelTable& table,
                                                   const weather::WindSettings& settings,
                                                   std::uint64_t seed);
+    /// @brief Parameters of a (possibly interpolated) level blowing from @p fromDeg.
+    [[nodiscard]] static WindParameters fromLevel(const weather::WindLevel& level, double fromDeg);
 };
 
 /// @brief Mean wind speed at @p heightAglM for a speed @p speed10m at 10 m and roughness
@@ -53,6 +55,9 @@ public:
     /// @p vehicleVelocity (world frame).
     void update(double dt, double heightAglM, const Vec3& vehicleVelocity);
 
+    /// @brief Changes the parameters (the weather changing) without restarting the turbulence,
+    /// gust and wander states.
+    void setParameters(const WindParameters& params);
     /// @brief Wind velocity (world frame, the direction the air moves to), m/s.
     [[nodiscard]] const Vec3& velocity() const noexcept { return velocity_; }
     /// @brief Mean component only (profile + wander, no gusts or turbulence).
@@ -66,6 +71,7 @@ public:
 
 private:
     void scheduleGust();
+    void updateCompensation();
 
     WindParameters params_;
     common::GaussianRandom random_{0};
