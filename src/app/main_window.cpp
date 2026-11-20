@@ -10,7 +10,6 @@
 #include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QTimer>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
@@ -20,6 +19,7 @@
 #include <QSignalBlocker>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <array>
@@ -30,12 +30,13 @@
 #include <utility>
 
 #include "ds/app/asset_paths.hpp"
-#include "ds/app/mission_setup.hpp"
 #include "ds/app/controls_panel.hpp"
 #include "ds/app/environment_panel.hpp"
+#include "ds/app/history_panel.hpp"
 #include "ds/app/items_controller.hpp"
 #include "ds/app/items_panel.hpp"
 #include "ds/app/mission_dialogs.hpp"
+#include "ds/app/mission_setup.hpp"
 #include "ds/app/missions_controller.hpp"
 #include "ds/app/missions_panel.hpp"
 #include "ds/app/scene_controller.hpp"
@@ -232,6 +233,29 @@ void MainWindow::createPanel() {
             environmentPanel_ = new EnvironmentPanel(*scene_);
             environmentPanel_->setObjectName(QStringLiteral("EnvironmentPanel"));
             tabs_->addTab(environmentPanel_, tr(tab.title));
+            continue;
+        }
+        if (title == "History") {
+            historyPanel_ = new HistoryPanel(settings_ != nullptr ? &settings_->storage() : nullptr,
+                                             *simulation_);
+            historyPanel_->setObjectName(QStringLiteral("HistoryPanel"));
+            connect(historyPanel_, &HistoryPanel::replayRequested, this,
+                    [this](const storage::ReplayRecord& replay) {
+                        if (auto played = playReplay(replay); !played) {
+                            QMessageBox::warning(
+                                this, tr("Replay"),
+                                tr("The replay cannot be played: %1")
+                                    .arg(QString::fromStdString(played.error().message)));
+                        }
+                    });
+            connect(missions_, &MissionsController::missionsChanged, historyPanel_,
+                    &HistoryPanel::refresh);
+            // In a scroll area: the tables and the plot do not widen the panel.
+            auto* scroll = new QScrollArea;
+            scroll->setWidget(historyPanel_);
+            scroll->setWidgetResizable(true);
+            scroll->setFrameShape(QFrame::NoFrame);
+            tabs_->addTab(scroll, tr(tab.title));
             continue;
         }
         if (title == "Settings") {
@@ -563,6 +587,21 @@ void MainWindow::endMission() {
     }
 }
 
+common::Result<void> MainWindow::playReplay(const storage::ReplayRecord& replay) {
+    if (simulation_->missionActive()) {
+        return common::makeError("end the mission first");
+    }
+    if (replay.missionKey.empty()) {
+        return simulation_->startReplay(replay);
+    }
+    const MissionRow* row = missions_->find(replay.missionKey);
+    if (row == nullptr || !missions_->entry(*row).load.definition) {
+        return common::makeError("the mission \"" + replay.missionKey + "\" is not installed");
+    }
+    const missions::CatalogEntry& entry = missions_->entry(*row);
+    return simulation_->startReplay(replay, &*entry.load.definition, entry.load.file.parent_path());
+}
+
 void MainWindow::onMissionFinished() {
     const sim::MissionStatus& status = simulation_->missionStatus();
     if (!status.result || missionKey_.empty()) {
@@ -575,6 +614,9 @@ void MainWindow::onMissionFinished() {
         std::chrono::milliseconds(std::llround(status.elapsedS * 1000.0));
     auto id = missions_->recordAttempt(missionKey_, *status.result, started);
     lastAttemptId_ = id ? std::optional<std::int64_t>(*id) : std::nullopt;
+    if (id) {
+        simulation_->linkNextSessionToAttempt(*id);  // History: the attempt's replay.
+    }
     const std::uint64_t attempt = status.attempt;
     QTimer::singleShot(kDebriefDelayMs, this, [this, attempt] {
         if (simulation_->missionActive() && simulation_->missionStatus().attempt == attempt &&

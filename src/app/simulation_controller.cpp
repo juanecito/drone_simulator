@@ -13,6 +13,7 @@
 #include <cmath>
 #include <random>
 
+#include "ds/app/items_controller.hpp"
 #include "ds/app/mission_setup.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/settings_controller.hpp"
@@ -21,6 +22,7 @@
 #include "ds/missions/mission_runner.hpp"
 #include "ds/storage/data_location.hpp"
 #include "ds/storage/input_profile_store.hpp"
+#include "ds/storage/recording_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/storage_service.hpp"
 #include "ds/storage/vehicle_profile_store.hpp"
@@ -153,9 +155,9 @@ SimulationController::SimulationController(SceneController& scene, SettingsContr
 
 SimulationController::~SimulationController() {
     loop_->shutdown();
-    loop_->acquireSnapshot();
-    recordSession(loop_->snapshot().stats, loop_->snapshot().profileKey,
-                  loop_->snapshot().telemetry.type);
+    // The thread has ended: this runs here and the last session is collected.
+    loop_->post([](sim::World& w) { w.finishRecording(); });
+    saveRecordings();
     scene_->followSimulationTime(std::nullopt);
 }
 
@@ -409,17 +411,20 @@ void SimulationController::createLoop() {
     loop_ =
         std::make_unique<sim::SimulationLoop>(std::make_unique<sim::World>(std::move(c)),
                                               [selector](double dt) { return selector->poll(dt); });
+    if (settings_ != nullptr) {
+        // Sessions are saved with their telemetry and replay (FR-X-06).
+        loop_->post([](sim::World& w) { w.setRecording(true); });
+    }
+    updateSceneTag();
     loop_->acquireSnapshot();
     lastResetCount_ = loop_->snapshot().resetCount;
-    lastProfileKey_ = physics::profileKey(profile_);
-    lastVehicleType_ = vehicleType();
     updatePilotEye();
     rig_.reset({.position = loop_->snapshot().body.position,
                 .orientation = loop_->snapshot().body.orientation});
 }
 
 void SimulationController::updatePilotEye() {
-    if (mission_) {
+    if (mission_ || replayMission_) {
         // The mission's pilot position (its pilot item, or the spawn point).
         const double ground = scene_->query().height(missionPilot_.x, missionPilot_.z);
         rig_.setPilotEye({missionPilot_.x, ground + kPilotEyeHeightM, missionPilot_.z});
@@ -504,6 +509,9 @@ common::Result<void> SimulationController::selectProfile(const QString& key) {
     if (mission_) {
         return common::makeError("The vehicle profile is locked during a mission.");
     }
+    if (replay_) {
+        return common::makeError("The vehicle profile is locked during a replay.");
+    }
     auto profile = profileFor(key);
     if (!profile) {
         return common::makeError(profile.error().message);
@@ -523,6 +531,9 @@ common::Result<void> SimulationController::selectVehicleType(physics::VehicleTyp
     }
     if (mission_) {
         return common::makeError("The vehicle is locked during a mission.");
+    }
+    if (replay_) {
+        return common::makeError("The vehicle is locked during a replay.");
     }
     QString key = QString::fromLatin1(defaultProfileKey(type));
     if (settings_ != nullptr) {
@@ -553,6 +564,9 @@ common::Result<void> SimulationController::selectVehicleType(physics::VehicleTyp
 common::Result<void> SimulationController::applyProfile(const physics::VehicleProfile& profile) {
     if (mission_) {
         return common::makeError("The vehicle profile is locked during a mission.");
+    }
+    if (replay_) {
+        return common::makeError("The vehicle profile is locked during a replay.");
     }
     if (physics::profileType(profile) != vehicleType()) {
         return common::makeError("The edited profile is of another vehicle type.");
@@ -675,6 +689,10 @@ void SimulationController::reset() {
         refuseInMission(tr("Reset (use Missions › Retry)"));
         return;
     }
+    if (replay_) {
+        emit simulationEvent(tr("A replay is playing: stop it in the History tab first"));
+        return;
+    }
     selector_->keyboardAction(input::KeyboardAction::Reset);
     loop_->post([](sim::World& w) { w.reset(); });
 }
@@ -682,6 +700,10 @@ void SimulationController::reset() {
 void SimulationController::moveHomeToCamera() {
     if (mission_) {
         refuseInMission(tr("Moving the take-off point"));
+        return;
+    }
+    if (replay_) {
+        emit simulationEvent(tr("A replay is playing: stop it in the History tab first"));
         return;
     }
     const graphics::Camera& free = scene_->camera();
@@ -699,31 +721,15 @@ common::Result<void> SimulationController::setTimeScale(double scale) {
 
 // --- Missions -------------------------------------------------------------------------------
 
-common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
-                                                        const physics::VehicleProfile& profile,
-                                                        const std::filesystem::path& missionDir) {
-    if (auto reason = unplayableReason(m)) {
-        return common::makeError(*reason);
-    }
-    if (physics::profileType(profile) != m.vehicle.type) {
-        return common::makeError(std::string("the mission needs a ") + typeName(m.vehicle.type) +
-                                 " vehicle");
-    }
-    auto checked = validated(profile);
-    if (!checked) {
-        return common::makeError("vehicle profile: " + checked.error().message);
-    }
-    setProfileKey(*checked, physics::profileKey(profile));
+common::Result<std::unique_ptr<missions::MissionRunner>> SimulationController::enterMissionScene(
+    const missions::MissionDefinition& m, const std::filesystem::path& missionDir) {
     auto scene = missionScene(m, scene_->environment());
     if (!scene) {
         return common::makeError(scene.error().message);
     }
-    if (!mission_) {
-        freeProfile_ = profile_;
-        freeProfileModified_ = modified_;
-        freeHome_ = home_;
-        freeHeadingRad_ = homeHeadingRad_;
-    }
+    const bool wasMissionScene = mission_ || replayMission_;
+    // The session flown so far ends before the scene changes: it stays replayable.
+    loop_->post([](sim::World& w) { w.finishRecording(); });
     // The mission's terrain and environment first: the world receives the new ground before
     // the vehicle is placed on it.
     if (auto entered = scene_->enterMission(scene->terrain, scene->environment); !entered) {
@@ -739,7 +745,7 @@ common::Result<void> SimulationController::startMission(const missions::MissionD
     auto runner =
         missions::MissionRunner::create(m, placement, sim::terrainLineOfSight(groundFunction()));
     if (!runner) {
-        if (!mission_) {
+        if (!wasMissionScene && !replay_) {
             scene_->leaveMission();
         }
         return common::makeError(runner.error().message);
@@ -750,6 +756,37 @@ common::Result<void> SimulationController::startMission(const missions::MissionD
     missionSpawn_ = (*runner)->spawnPosition();
     missionHeadingRad_ = common::degToRad((*runner)->spawnHeadingDeg());
     missionPilot_ = (*runner)->pilotPosition();
+    return std::move(*runner);
+}
+
+common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
+                                                        const physics::VehicleProfile& profile,
+                                                        const std::filesystem::path& missionDir) {
+    if (auto reason = unplayableReason(m)) {
+        return common::makeError(*reason);
+    }
+    if (physics::profileType(profile) != m.vehicle.type) {
+        return common::makeError(std::string("the mission needs a ") + typeName(m.vehicle.type) +
+                                 " vehicle");
+    }
+    auto checked = validated(profile);
+    if (!checked) {
+        return common::makeError("vehicle profile: " + checked.error().message);
+    }
+    setProfileKey(*checked, physics::profileKey(profile));
+    if (replay_) {
+        stopReplay();
+    }
+    if (!mission_) {
+        freeProfile_ = profile_;
+        freeProfileModified_ = modified_;
+        freeHome_ = home_;
+        freeHeadingRad_ = homeHeadingRad_;
+    }
+    auto runner = enterMissionScene(m, missionDir);
+    if (!runner) {
+        return common::makeError(runner.error().message);
+    }
     mission_ = m;
     const bool typeChanged = physics::profileType(*checked) != vehicleType();
     profile_ = *checked;
@@ -803,9 +840,7 @@ void SimulationController::retryMission() {
                  utc = mission_->environment.utc](sim::World& w) {
         w.setUtc(utc);
         w.resetAt(home, heading);
-        if (sim::MissionSession* m = w.mission()) {
-            m->retry(w);
-        }
+        w.retryMission();
     });
     lastMissionState_.reset();
     if (loop_->state() == sim::RunState::Paused) {
@@ -819,14 +854,14 @@ void SimulationController::abortMission() {
     if (!mission_) {
         return;
     }
-    loop_->post([](sim::World& w) {
-        if (sim::MissionSession* m = w.mission()) {
-            m->abort(w);
-        }
-    });
+    loop_->post([](sim::World& w) { w.abortMission(); });
 }
 
 void SimulationController::setFreeItems(const std::vector<items::Item>& freeItems) {
+    freeItems_ = freeItems;
+    if (replay_) {
+        return;  // Shown and solid again when the replay ends.
+    }
     items::ItemRegistry registry;
     for (const items::Item& item : freeItems) {
         (void)registry.add(item);
@@ -835,6 +870,7 @@ void SimulationController::setFreeItems(const std::vector<items::Item>& freeItem
                        ? std::make_unique<sim::ItemVisuals>(registry, true, models_.get())
                        : nullptr;
     loop_->post([freeItems](sim::World& w) { w.setFreeItems(freeItems); });
+    updateSceneTag();
 }
 
 void SimulationController::endMission() {
@@ -859,7 +895,9 @@ void SimulationController::endMission() {
     }
     home_ = freeHome_;
     homeHeadingRad_ = freeHeadingRad_;
-    // The free-mode terrain first, then the vehicle back at its take-off point on it.
+    // The free-mode terrain first, then the vehicle back at its take-off point on it. The
+    // mission's last session ends before the scene changes: it stays replayable.
+    loop_->post([](sim::World& w) { w.finishRecording(); });
     scene_->leaveMission();
     loop_->post([profile = profile_, home = home_, heading = homeHeadingRad_](sim::World& w) {
         w.setProfile(profile);
@@ -907,13 +945,16 @@ void SimulationController::keyboardAction(input::KeyboardAction action) {
 }
 
 void SimulationController::injectFailure(const physics::Failure& failure) {
-    if (mission_) {
+    if (mission_ || replay_) {
         return;
     }
     loop_->post([failure](sim::World& w) { w.injectFailure(failure); });
 }
 
 void SimulationController::clearFailures() {
+    if (replay_) {
+        return;
+    }
     loop_->post([](sim::World& w) { w.clearFailures(); });
 }
 
@@ -941,6 +982,181 @@ input::InputSource SimulationController::activeInputSource() const noexcept {
     return selector_->activeSource();
 }
 
+// --- Replays (FR-X-06) ----------------------------------------------------------------------
+
+common::Result<void> SimulationController::startReplay(const storage::ReplayRecord& record,
+                                                       const missions::MissionDefinition* mission,
+                                                       const std::filesystem::path& missionDir) {
+    if (mission_) {
+        return common::makeError("replays cannot be played during a mission");
+    }
+    if (!record.replayable) {
+        return common::makeError(
+            "this session cannot be replayed: its terrain or items changed during the flight");
+    }
+    auto meta = common::parseJson(record.metaJson);
+    if (!meta) {
+        return common::makeError("the replay is damaged");
+    }
+    auto log = sim::ReplayLog::fromJson(*meta);
+    if (!log) {
+        return common::makeError(log.error().message);
+    }
+    log->inputs = record.inputs;
+    log->ticks = static_cast<std::uint64_t>(std::max<std::int64_t>(record.ticks, 0));
+    if (auto inputs = sim::InputDecoder::open(log->inputs); !inputs) {
+        return common::makeError(inputs.error().message);
+    }
+    const common::Json& h = log->header;
+    auto profile = physics::vehicleProfileFromJson(h.value("profile", common::Json()));
+    if (!profile) {
+        return common::makeError("replay vehicle: " + profile.error().message);
+    }
+    const std::string missionId = h.value("mission", std::string());
+    if (!missionId.empty() && (mission == nullptr || mission->id != missionId)) {
+        return common::makeError("the mission \"" + missionId +
+                                 "\" of this session is not installed");
+    }
+    const common::Json start = h.value("start", common::Json::array());
+    if (start.size() != 3 || !h.contains("dt")) {
+        return common::makeError("the replay is damaged");
+    }
+
+    // The free-flight scene of the session, unless it flew a mission.
+    std::optional<TerrainConfig> terrain;
+    EnvironmentConfig environment = scene_->environment();
+    std::vector<items::Item> sceneItems;
+    if (missionId.empty()) {
+        const common::Json scene = h.value("scene", common::Json::object());
+        const auto toQt = [](const common::Json& j) {
+            return QJsonDocument::fromJson(QByteArray::fromStdString(j.dump())).object();
+        };
+        auto t = terrainFromJson(toQt(scene.value("terrain", common::Json::object())));
+        if (!t) {
+            return common::makeError("replay terrain: " + t.error().message);
+        }
+        terrain = std::move(*t);
+        environment = environmentFromJson(toQt(scene.value("environment", common::Json::object())),
+                                          scene_->environment());
+        for (const common::Json& j : scene.value("items", common::Json::array())) {
+            if (auto item = itemFromJson(j)) {
+                sceneItems.push_back(std::move(*item));
+            }
+        }
+    }
+
+    if (!replay_) {
+        freeProfile_ = profile_;
+        freeProfileModified_ = modified_;
+        freeHome_ = home_;
+        freeHeadingRad_ = homeHeadingRad_;
+        freeTickRateHz_ = loop_->snapshot().tickRateHz;
+    }
+    std::shared_ptr<std::unique_ptr<sim::MissionSession>> session =
+        std::make_shared<std::unique_ptr<sim::MissionSession>>();
+    if (mission != nullptr) {
+        auto runner = enterMissionScene(*mission, missionDir);
+        if (!runner) {
+            return common::makeError(runner.error().message);
+        }
+        *session = std::make_unique<sim::MissionSession>(std::move(*runner));
+        freeVisuals_.reset();
+    } else {
+        loop_->post([](sim::World& w) { w.finishRecording(); });
+        if (auto entered = scene_->enterMission(*terrain, environment); !entered) {
+            return common::makeError(entered.error().message);
+        }
+        itemVisuals_.reset();
+        highlighted_.clear();
+        items::ItemRegistry registry;
+        for (const items::Item& item : sceneItems) {
+            (void)registry.add(item);
+        }
+        freeVisuals_ = registry.size() > 0
+                           ? std::make_unique<sim::ItemVisuals>(registry, true, models_.get())
+                           : nullptr;
+    }
+    replay_ = true;
+    replayMission_ = mission != nullptr;
+    const bool typeChanged = physics::profileType(*profile) != vehicleType();
+    profile_ = std::move(*profile);
+    modified_ = false;
+    model_.reset();
+    rover_.reset();
+    if (typeChanged) {
+        activateJoystick();
+    }
+    home_ = glm::dvec3(start[0].get<double>(), start[1].get<double>(), start[2].get<double>());
+    homeHeadingRad_ = h.value("headingRad", 0.0);
+    updatePilotEye();
+    // Real-time playback at the recorded rate; the recorded time steps are used whatever it is.
+    loop_->setTickRate(std::clamp(1.0 / h.value("dt", 0.002), sim::FixedStepClock::kMinRateHz,
+                                  sim::FixedStepClock::kMaxRateHz));
+    auto shared = std::make_shared<sim::ReplayLog>(std::move(*log));
+    loop_->post([shared, session, sceneItems, freeFlight = mission == nullptr](sim::World& w) {
+        if (freeFlight) {
+            w.setFreeItems(sceneItems);
+        }
+        if (auto ok = w.startReplay(std::move(*shared), std::move(*session)); !ok) {
+            log::warn("Cannot play the replay: {}", ok.error().message);
+        }
+    });
+    started_ = true;
+    lastMissionState_.reset();
+    if (cameraMode_ == graphics::CameraMode::Free) {
+        setCameraMode(graphics::CameraMode::Chase);
+    }
+    rig_.reset({.position = home_, .orientation = glm::dquat(1.0, 0.0, 0.0, 0.0)});
+    if (loop_->state() == sim::RunState::Paused) {
+        loop_->resume();
+    } else {
+        loop_->start();
+    }
+    log::info("Replay of session {} started", record.sessionId);
+    emit profileChanged();
+    emit replayActiveChanged();
+    return {};
+}
+
+void SimulationController::stopReplay() {
+    if (!replay_) {
+        return;
+    }
+    replay_ = false;
+    replayMission_ = false;
+    loop_->post([](sim::World& w) {
+        w.stopReplay();
+        w.setMission(nullptr);
+    });
+    itemVisuals_.reset();
+    highlighted_.clear();
+    lastMissionState_.reset();
+    const bool typeChanged = physics::profileType(freeProfile_) != vehicleType();
+    profile_ = freeProfile_;
+    modified_ = freeProfileModified_;
+    model_.reset();
+    rover_.reset();
+    if (typeChanged) {
+        activateJoystick();
+    }
+    home_ = freeHome_;
+    homeHeadingRad_ = freeHeadingRad_;
+    if (freeTickRateHz_ > 0.0) {
+        loop_->setTickRate(freeTickRateHz_);
+    }
+    selector_->keyboardAction(input::KeyboardAction::Reset);
+    scene_->leaveMission();
+    setFreeItems(freeItems_);
+    loop_->post([profile = profile_, home = home_, heading = homeHeadingRad_](sim::World& w) {
+        w.setProfile(profile);
+        w.resetAt(home, heading);
+    });
+    updatePilotEye();
+    log::info("Replay ended");
+    emit profileChanged();
+    emit replayActiveChanged();
+}
+
 // --- Scene changes --------------------------------------------------------------------------
 
 void SimulationController::onTerrainChanged() {
@@ -950,11 +1166,17 @@ void SimulationController::onTerrainChanged() {
         w.setGround(ground, water, origin.heightM);
         w.setGeoOrigin(origin);
     });
+    updateSceneTag();
     updatePilotEye();
 }
 
 void SimulationController::onEnvironmentChanged() {
     const EnvironmentConfig& env = scene_->environment();
+    if (replay_) {
+        lastEnvironment_ = env;  // The replay brings its own weather and clock.
+        return;
+    }
+    updateSceneTag();
     if (env.weather != lastEnvironment_.weather ||
         (!env.weather && env.freeWeather != lastEnvironment_.freeWeather)) {
         // Entering or leaving a mission, or the free-mode generator changed (FR-WX-12): the
@@ -1013,14 +1235,41 @@ void SimulationController::handleEvents() {
     }
 }
 
-void SimulationController::recordSession(const sim::SessionStats& stats,
-                                         const std::string& profileKey, physics::VehicleType type) {
-    if (settings_ == nullptr || stats.flightTimeS < kMinRecordedFlightS) {
+void SimulationController::saveRecordings() {
+    for (sim::FlightRecording& r : loop_->takeRecordings()) {
+        saveRecording(std::move(r));
+    }
+    // Saves that finished: the History tab shows them.
+    for (auto it = pendingSaves_.begin(); it != pendingSaves_.end();) {
+        if (it->wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+            ++it;
+            continue;
+        }
+        if (const std::optional<std::int64_t> id = it->get()) {
+            emit sessionRecorded(*id);
+        }
+        it = pendingSaves_.erase(it);
+    }
+}
+
+void SimulationController::saveRecording(sim::FlightRecording recording) {
+    // The attempt that ended in this session (it is saved first, when it ends).
+    const std::optional<std::int64_t> attempt =
+        recording.missionId.empty() ? std::nullopt : std::exchange(attemptToLink_, std::nullopt);
+    if (settings_ == nullptr || recording.stats.flightTimeS < kMinRecordedFlightS) {
         return;
     }
-    storage::SessionRecord r;
-    r.vehicleProfileKey = profileKey;
-    r.vehicleType = typeName(type);
+    struct Flight {
+        storage::SessionRecord session;
+        std::vector<storage::TelemetryRow> samples;
+        storage::ReplayRecord replay;
+        std::optional<std::int64_t> attempt;
+    };
+    auto flight = std::make_shared<Flight>();
+    const sim::SessionStats& stats = recording.stats;
+    storage::SessionRecord& r = flight->session;
+    r.vehicleProfileKey = recording.profileKey;
+    r.vehicleType = typeName(recording.type);
     r.startedAt = astro::formatUtc(stats.startedAt);
     r.durationS = stats.durationS;
     r.maxAltitudeAglM = stats.maxAglM;
@@ -1028,16 +1277,59 @@ void SimulationController::recordSession(const sim::SessionStats& stats,
     r.distanceM = stats.distanceM;
     r.energyUsedWh = stats.energyWh;
     r.crashes = stats.crashes;
-    // Fire and forget: failures are logged on the storage thread's result.
-    auto pending = settings_->storage().submit([r](storage::DbConnection& c) {
-        storage::SessionStore store(c);
-        auto id = store.insert(r);
-        if (!id) {
-            log::warn("Cannot record the flight: {}", id.error().message);
-        }
-        return id.has_value();
-    });
-    (void)pending;
+    flight->samples.reserve(recording.samples.size());
+    for (const sim::TelemetrySample& t : recording.samples) {
+        flight->samples.push_back({.tS = t.tS,
+                                   .posX = t.position.x,
+                                   .posY = t.position.y,
+                                   .posZ = t.position.z,
+                                   .roll = t.rollRad,
+                                   .pitch = t.pitchRad,
+                                   .yaw = t.yawRad,
+                                   .speed = t.speedMs,
+                                   .altAgl = t.aglM,
+                                   .throttle = t.throttle,
+                                   .steering = t.steering,
+                                   .batteryV = t.batteryV,
+                                   .batteryA = t.batteryA});
+    }
+    storage::ReplayRecord& replay = flight->replay;
+    replay.missionKey = recording.missionId;
+    replay.replayable = recording.replay.replayable;
+    replay.durationS = recording.replay.durationS();
+    replay.ticks = static_cast<std::int64_t>(recording.replay.ticks);
+    replay.metaJson = recording.replay.metaJson().dump();
+    replay.inputs = std::move(recording.replay.inputs);
+    flight->attempt = attempt;
+    // One batch on the storage thread (FR-DB-07): the GUI does not wait for it.
+    pendingSaves_.push_back(settings_->storage().submit(
+        [flight](storage::DbConnection& c) -> std::optional<std::int64_t> {
+            auto id = storage::RecordingStore(c).saveFlight(flight->session, flight->samples,
+                                                            flight->replay, flight->attempt);
+            if (!id) {
+                log::warn("Cannot record the flight: {}", id.error().message);
+                return std::nullopt;
+            }
+            return *id;
+        }));
+}
+
+void SimulationController::updateSceneTag() {
+    if (replay_) {
+        return;  // The replayed scene is not a scene of its own.
+    }
+    const auto toJson = [](const QJsonObject& o) {
+        return common::parseJson(QJsonDocument(o).toJson(QJsonDocument::Compact).toStdString())
+            .value_or(common::Json::object());
+    };
+    common::Json items = common::Json::array();
+    for (const items::Item& item : freeItems_) {
+        items.push_back(itemToJson(item));
+    }
+    common::Json tag = {{"terrain", toJson(terrainToJson(scene_->terrain()))},
+                        {"environment", toJson(environmentToJson(scene_->environment()))},
+                        {"items", std::move(items)}};
+    loop_->post([tag = std::move(tag)](sim::World& w) { w.setSceneTag(tag); });
 }
 
 void SimulationController::updateLens() {
@@ -1072,14 +1364,11 @@ void SimulationController::updateFrame(double dt, double aspect) {
     if (loop_->acquireSnapshot()) {
         const sim::WorldSnapshot& s = loop_->snapshot();
         if (s.resetCount != lastResetCount_) {
-            recordSession(lastStats_, lastProfileKey_, lastVehicleType_);
             lastResetCount_ = s.resetCount;
             rig_.reset({.position = s.body.position, .orientation = s.body.orientation});
         }
-        lastStats_ = s.stats;
-        lastProfileKey_ = s.profileKey;
-        lastVehicleType_ = s.telemetry.type;
     }
+    saveRecordings();
     handleEvents();
     const sim::WorldSnapshot& s = loop_->snapshot();
     if (s.state != state_) {

@@ -145,7 +145,18 @@ void SimulationLoop::runTicks(int count) {
     publish();
 }
 
+std::vector<FlightRecording> SimulationLoop::takeRecordings() {
+    const std::scoped_lock lock(recordingMutex_);
+    return std::exchange(recordings_, {});
+}
+
 void SimulationLoop::publish() {
+    if (auto finished = world_->takeRecordings(); !finished.empty()) {
+        const std::scoped_lock lock(recordingMutex_);
+        for (FlightRecording& r : finished) {
+            recordings_.push_back(std::move(r));
+        }
+    }
     WorldSnapshot& s = snapshots_.writeBuffer();
     world_->fillSnapshot(s);
     s.state = state_.load();

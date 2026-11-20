@@ -131,6 +131,12 @@ rate.
   running time (up to 3600×); Sun and Moon position, phase, rise/set and twilight times; exposure
   (automatic with compensation, or manual EV), visibility (haze and fog), the wind level
   (0–10, Beaufort) and direction, and the air temperature, QNH and humidity.
+- **History tab:** your flight sessions and mission attempts with their figures. Select a
+  session to plot its telemetry: altitude, speed, battery voltage or current, throttle, roll
+  and pitch, or the ground track from above. *Replay* flies it again exactly from the
+  recorded controls, with the same scene, weather and failures. Pause, step and the time
+  scale work during a replay, and the HUD shows its position. *Stop replay* returns to free
+  flight. *Delete* removes a session with its telemetry and replay.
 
 An OpenGL **4.5 core profile** driver is required; if it is missing the program shows an error
 with the detected version and exits.
@@ -139,7 +145,7 @@ User data — one SQLite database per operating-system user — lives in
 `$HOME/.drone_simulation/drone_simulation.db` (folder mode `0700`, file `0600`). It holds the
 settings, including the window layout, the terrain and the environment, which are restored at
 the next start; the user's terrain presets, vehicle profiles and controller mappings; and a
-record of each flight. Your own missions go in `$HOME/.drone_simulation/missions/`: every valid
+record of each flight (with its 20 Hz telemetry and replay). Your own missions go in `$HOME/.drone_simulation/missions/`: every valid
 mission file there (`.json`) is added to the list of missions in the **Missions** tab at
 start-up (*Reload* rescans the folder; *Missions › Import Mission…* copies one in), and the
 default mission *First flight* is put there if it is missing. Every mission attempt is saved

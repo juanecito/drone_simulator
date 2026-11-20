@@ -14,6 +14,7 @@ ds_add_core_module(storage
         mission_store.cpp
         module.cpp
         provider_store.cpp
+        recording_store.cpp
         schema.cpp
         session_store.cpp
         settings_store.cpp

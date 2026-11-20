@@ -461,7 +461,7 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
 
     // Clocks and timer (top right).
     column(p, {area.right() - margin, area.top() + margin},
-           {&hud.clockLocal, &hud.clockUtc, &hud.timer}, Qt::AlignRight);
+           {&hud.clockLocal, &hud.clockUtc, &hud.timer, &hud.replay}, Qt::AlignRight);
 
     // Heading, true and magnetic (top centre).
     outlinedText(p, {area.center().x(), area.top() + margin},

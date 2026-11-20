@@ -309,7 +309,9 @@ starts a clean attempt from PreFlight.
 4. When the attempt ends — success, failure, or *Missions › Abort Mission* — it is saved at
    once with your progress. The **debrief** follows: stars, score breakdown, the path you
    flew, and your personal best. Choose **Retry**, **Next mission** or **Back to free flight**
-   (your free-flight scene, vehicle and camera come back as they were).
+   (your free-flight scene, vehicle and camera come back as they were). The attempt's flight
+   is recorded with its telemetry and replay; the **History** tab lists it and can replay
+   it (the mission must still be installed).
 
 *Missions › Import Mission…* (a file) and *Import Mission Folder…* (a folder with one mission
 file and its data) copy a mission into your folder and select it.

@@ -204,8 +204,22 @@ GROUP BY m.id)sql",
     R"sql(CREATE INDEX IF NOT EXISTS sessions_by_start ON sessions (started_at))sql",
 };
 
-constexpr std::array<Migration, 1> kMigrations{{
+// M7 step 7: replays of flight sessions (FR-X-06).
+constexpr std::array<std::string_view, 1> kVersion2{
+    R"sql(CREATE TABLE IF NOT EXISTS replays (
+    session_id  INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    mission_key TEXT,
+    replayable  INTEGER NOT NULL DEFAULT 1 CHECK (replayable IN (0, 1)),
+    duration_s  REAL NOT NULL DEFAULT 0,
+    tick_count  INTEGER NOT NULL DEFAULT 0,
+    meta_json   TEXT NOT NULL DEFAULT '{}',
+    inputs      BLOB NOT NULL
+))sql",
+};
+
+constexpr std::array<Migration, 2> kMigrations{{
     {1, "initial schema", kVersion1},
+    {2, "flight replays", kVersion2},
 }};
 
 }  // namespace

@@ -29,6 +29,8 @@ struct SessionRecord {
     double distanceM = 0.0;              ///< Distance flown.
     double energyUsedWh = 0.0;           ///< Battery energy used.
     int crashes = 0;                     ///< Number of crashes.
+    std::string missionKey;              ///< Mission flown, from its replay ("" = free flight).
+    bool hasReplay = false;              ///< A replay can be played (read only).
     /// @brief Equality (tests).
     bool operator==(const SessionRecord&) const = default;
 };
@@ -46,7 +48,8 @@ public:
     /// @brief Updates the figures of session @p session.id (written again when it ends).
     /// Returns false if the row does not exist.
     [[nodiscard]] StorageResult<bool> update(const SessionRecord& session);
-    /// @brief The @p limit most recent sessions, newest first.
+    /// @brief The @p limit most recent sessions, newest first (with the mission and whether
+    /// they can be replayed, from `replays`).
     [[nodiscard]] StorageResult<std::vector<SessionRecord>> recent(int limit = 50);
     /// @brief Deletes the row @p id (its telemetry samples go with it). False if none.
     [[nodiscard]] StorageResult<bool> remove(std::int64_t id);

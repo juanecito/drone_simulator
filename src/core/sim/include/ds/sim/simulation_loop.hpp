@@ -70,6 +70,9 @@ public:
     void post(std::function<void(World&)> command);
     /// @brief Synchronous: runs @p count ticks on the calling thread (thread not running).
     void runTicks(int count);
+    /// @brief Sessions the world finished recording (World::takeRecordings()), collected on
+    /// the simulation thread after every published snapshot. Any thread.
+    [[nodiscard]] std::vector<FlightRecording> takeRecordings();
 
     /// @brief Takes the latest snapshot (consumer thread). True if it changed.
     bool acquireSnapshot();
@@ -97,6 +100,8 @@ private:
     std::mutex commandMutex_;
     std::condition_variable wake_;
     std::vector<std::function<void(World&)>> commands_;
+    std::mutex recordingMutex_;
+    std::vector<FlightRecording> recordings_;
     std::vector<std::function<void(FixedStepClock&)>> clockCommands_;
     common::TripleBuffer<WorldSnapshot> snapshots_;
     std::mutex eventMutex_;

@@ -1597,8 +1597,8 @@ so Markdown pages appear in the generated site.
   vehicle's UTC; from then on the simulation clock drives the sky (time scale included) and a
   time edited in the Environment tab moves the simulation clock.
 - **Position hold and return to home** (flight mode 4 and the RTH switch) arrived in M7 step 5
-  (see the M7 notes). **Telemetry recording and replays** arrive in M7; M3
-  writes one `sessions` row per flight (flights shorter than 1 s armed are not recorded).
+  (see the M7 notes). Each flight goes to the `sessions` table (flights shorter than 1 s
+  armed are not recorded); since M7 step 7 its 20 Hz telemetry and its replay go with it.
 - **Estimator without GPS:** the attitude estimate uses the accelerometer only within ±5 % of
   1 g (plus GPS-derived acceleration once there is a fix), so long accelerating manoeuvres
   without a fix drift slowly, as on a real flight controller.
@@ -1750,7 +1750,7 @@ so Markdown pages appear in the generated site.
 - **Deferred:** the 4 ground missions (M6) and the real-terrain missions (GDAL/online sources
   of M4); physical effects of scheduled failures (done in M7 step 6); mouse picking of items in the viewport
   (FR-ITM-06, *S*); a gate-course timer in free flight; the mission editor (FR-MIS-14, *C*);
-  the History tab (M7).
+  the History tab (done in M7 step 7).
 - **Tests:** headless missions flown by a stick autopilot through the real world, flight
   model, controller and runner (*First flight* to three stars, the *Gate run* through every
   gate in its arrow direction, cargo mass during a delivery, height-limit failure, crash
@@ -2099,6 +2099,68 @@ so Markdown pages appear in the generated site.
     thrust left, duration, *Inject*, *Clear all*, the active list); disabled during missions.
   - *Events:* `FailureEvent` (started / ended) in the event log. The HUD shows only what the
     pilot would see (GPS no fix, failsafe, the drone's behaviour).
+- **Step 7 — Telemetry recording, replays and the History tab (done, FR-X-05 M, FR-X-06 S,
+  FR-DB-07, §4.11 History):**
+  - *Sessions:* a session runs from one reset of `sim::World` to the next (a mission attempt
+    is one session; changing the mission ends one). With recording on, the world keeps for
+    the current session:
+    - the replay log (`sim::ReplayLog`): a header with everything a reset does not restore —
+      seed, reset count (the wind is seeded with it), world time, tick count and clock,
+      vehicle profile, weather settings, air, wind, visibility, geographic origin, take-off
+      point, time step — plus the application's scene (terrain, environment and items as
+      JSON) and the mission id;
+    - the controls of every tick (`InputEncoder`: per tick a mask of the changed fields, the
+      analog axes on a 16-bit grid; about 1–5 bytes a tick, so 2 h at 500 Hz stay under
+      20 MB);
+    - every change made from outside between ticks as a command stamped with its tick: time
+      step, failure injected or cleared, weather, wind, air, visibility, clock, geographic
+      origin, mission retry and abort. Changes the world makes itself (a mission's scheduled
+      failures) are not recorded: they happen again on replay;
+    - 20 Hz telemetry samples (the `telemetry_samples` columns).
+
+    While recording, the controls are quantised to the stored grid on the live run too, so
+    the replay sees exactly what the pilot flew. A terrain or item change before the vehicle
+    first arms starts a new session on the new scene (the vehicle is reset in place). After
+    that, the session is kept but marked not replayable. Sessions stop recording after
+    2 h (`truncated`).
+  - *Replay (FR-X-06):* `World::startReplay` puts the world back into the header's state:
+    - vehicle, seeds, failure injector, weather, clock;
+    - world time and tick count (so the sun and the weather clock match);
+    - the reset count less one, then it resets.
+
+    It then ticks with the recorded controls, time steps and commands, ignoring the controls
+    and time step the loop passes. At the end it holds the last state. Every reset starts
+    from the same sun position, so a reset is a full restart point. Tests replay an aerial
+    and a ground session in a different world (another seed, vehicle and history) with a
+    weather timeline, injected and cleared failures, wind, air, visibility, clock and
+    time-step changes. They check that position, velocity, attitude, energy and statistics
+    are bit-identical (FR-X-05). An integration test does the same through the application:
+    storage, scene rebuild and controller.
+  - *Storage (FR-DB-07):* schema version 2 adds `replays` (session id, mission key,
+    replayable, duration, tick count, header/commands JSON, input stream BLOB; deleted with its
+    session). `RecordingStore::saveFlight` writes the session row, its telemetry samples, its
+    replay and the link from the mission attempt (`mission_attempts.session_id`) in one
+    transaction on the storage thread; the simulation controller only collects finished
+    sessions (`SimulationLoop::takeRecordings`) and polls the futures, so the GUI never waits.
+    The attempt is linked through `SimulationController::linkNextSessionToAttempt` (the
+    attempt is saved when it ends, its session at the next reset).
+  - *Application:* `SimulationController::startReplay` shows the session's scene (its
+    terrain, environment and items, or the mission's scene for a mission attempt, which must
+    still be installed) through the scene controller's override used by missions, flies the
+    recorded profile at the recorded tick rate and locks the profile, reset, take-off point and
+    failure injection. Pause, single step and the time scale work as usual (the scale gives
+    fast-forward). `stopReplay` brings the free-flight scene, profile and take-off point back.
+    The HUD shows `REPLAY 0:12 / 1:30` under the clocks, then `REPLAY ENDED` in amber.
+  - *History tab:* flight sessions (start, vehicle, mission, duration, max AGL, max speed,
+    distance, energy, crashes, replay), mission attempts (outcome, stars, score, time and the
+    session they link to — selecting one selects its session), and the telemetry of the
+    selected session drawn with QPainter (`TelemetryPlot`, no Qt Charts). The plot shows
+    altitude, speed, battery voltage or current, throttle, roll and pitch, or the ground track
+    from above. Buttons: *Replay*, *Stop replay*, *Delete* (with its telemetry and replay) and
+    *Refresh*. Every database request is asynchronous.
+  - *Not done:* ghost replay of the personal best next to the live vehicle (FR-MIS-15, C),
+    seeking inside a replay (restart it instead), and replaying a session recorded with an
+    older replay format (none exists yet).
 
 ---
 

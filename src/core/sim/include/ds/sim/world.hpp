@@ -21,6 +21,7 @@
 #include "ds/physics/wind.hpp"
 #include "ds/sim/events.hpp"
 #include "ds/sim/mission_session.hpp"
+#include "ds/sim/recording.hpp"
 #include "ds/sim/world_snapshot.hpp"
 #include "ds/weather/weather.hpp"
 #include "ds/weather/wind_levels.hpp"
@@ -134,10 +135,44 @@ public:
     void setGeoOrigin(const geo::Geodetic& origin) noexcept;
 
     /// @brief Flies @p session (null ends the mission). Free-mode rules are not checked while
-    /// a mission runs: the mission checks its own.
+    /// a mission runs: the mission checks its own. A recorded session that has ticked ends
+    /// here (the next reset starts a new one).
     void setMission(std::unique_ptr<MissionSession> session);
     /// @brief The mission being flown, or null.
     [[nodiscard]] MissionSession* mission() noexcept { return mission_.get(); }
+    /// @brief Retries the mission (recorded for replays).
+    void retryMission();
+    /// @brief Aborts the mission (recorded for replays).
+    void abortMission();
+
+    // --- Recording and replays (FR-X-05, FR-X-06) ---------------------------------------
+    /// @brief Records every session from the next reset on — or from now, if the world has
+    /// not ticked since the last one — or stops recording: the replay log and 20 Hz telemetry. A
+    /// session runs from one reset to the next. While recording, analog controls are quantised to
+    /// the stored 16-bit grid (quantized()).
+    void setRecording(bool enabled);
+    /// @brief Whether sessions are recorded.
+    [[nodiscard]] bool recording() const noexcept { return recordingEnabled_; }
+    /// @brief The application's description of the scene (terrain, environment, items), copied
+    /// into the header of the sessions that start from now on — and of the current one if it
+    /// has not ticked yet.
+    void setSceneTag(common::Json scene);
+    /// @brief Ends the current session's recording (before shutting down).
+    void finishRecording();
+    /// @brief Sessions finished since the last call (sessions without a tick are dropped).
+    [[nodiscard]] std::vector<FlightRecording> takeRecordings();
+    /// @brief Plays @p log (FR-X-06): the world is put back into the state of the header —
+    /// vehicle, seeds, clock, weather, take-off point — and then ticks with the recorded
+    /// controls, time steps and changes, ignoring the controls and time step tick() gets.
+    /// At the end the world stops advancing. The ground, the water and the items must already
+    /// be those of the header's scene; @p mission is a new session of the header's mission
+    /// (null in free flight). Nothing is recorded while a replay plays.
+    common::Result<void> startReplay(ReplayLog log, std::unique_ptr<MissionSession> mission);
+    /// @brief Ends the replay (the world stays where it is; recording resumes at the next
+    /// reset).
+    void stopReplay();
+    /// @brief Position in the replay.
+    [[nodiscard]] ReplayStatus replayStatus() const noexcept;
     /// @brief Free-mode flight rules; nullopt switches them off.
     void setFreeFlightRules(std::optional<FreeFlightRules> rules);
     /// @brief Items of the free-flight scene (Items tab): obstacles outside missions. During a
@@ -209,6 +244,13 @@ private:
     void resolveObstacles();
     void updateSun();
     void checkFreeRules();
+    void tickBody(const input::ControlInputs& controls, double dt);
+    void beginRecording();
+    void recordCommand(common::Json command);
+    void recordTick(const input::ControlInputs& controls, double dt);
+    void sampleTelemetry();
+    void applyReplayCommands();
+    bool sceneChangedMidSession();
 
     WorldConfig config_;
     std::unique_ptr<physics::Vehicle> vehicle_;
@@ -237,6 +279,32 @@ private:
     std::unique_ptr<missions::FlightRulesMonitor> freeMonitor_;
     double sunElevationDeg_ = 45.0;
     double sunUpdatedAtS_ = -1e9;
+    double sessionStartS_ = 0.0;          ///< time_ at the last reset.
+    std::uint64_t sessionStartTick_ = 0;  ///< ticks_ at the last reset.
+    bool inTick_ = false;                 ///< Changes made inside tick() are not recorded commands.
+
+    struct ActiveRecording {
+        FlightRecording recording;
+        InputEncoder encoder;
+        double lastDt = 0.0;
+        std::uint64_t samples = 0;
+    };
+    bool recordingEnabled_ = false;
+    common::Json sceneTag_ = common::Json::object();
+    std::optional<ActiveRecording> recording_;
+    std::vector<FlightRecording> finished_;
+
+    struct ActiveReplay {
+        ReplayLog log;
+        std::optional<InputDecoder> decoder;
+        std::size_t nextCommand = 0;
+        std::uint64_t tick = 0;
+        double dt = 0.0;
+        double timeS = 0.0;
+        double durationS = 0.0;
+        bool finished = false;
+    };
+    std::unique_ptr<ActiveReplay> replay_;  // Heap: the decoder points into its log.
 };
 
 }  // namespace ds::sim

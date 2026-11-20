@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -31,7 +32,12 @@
 #include "ds/sim/hud.hpp"
 #include "ds/sim/item_visuals.hpp"
 #include "ds/sim/simulation_loop.hpp"
+#include "ds/storage/recording_store.hpp"
 #include "ds/weather/wind_levels.hpp"
+
+namespace ds::missions {
+class MissionRunner;
+}  // namespace ds::missions
 
 /// @file
 /// @brief Adapter between the GUI and the flight simulation: vehicle profiles, the simulation
@@ -193,6 +199,31 @@ public:
     }
     /// @brief True if the keyboard may fly (free mode, or a mission with `allowKeyboard`).
     [[nodiscard]] bool keyboardAllowed() const noexcept;
+    /// @brief The next recorded session of a mission is linked to attempt @p attemptId (the
+    /// attempt is saved when it ends, its session when the next one starts).
+    void linkNextSessionToAttempt(std::int64_t attemptId) { attemptToLink_ = attemptId; }
+
+    // --- Recording and replays (FR-X-05, FR-X-06; M7 step 7) -----------------------------
+
+    /// @brief Plays the recorded session @p replay: the scene, vehicle, weather and seeds of
+    /// its start come back and the world runs on the recorded controls (pause, single step
+    /// and time scale work as usual). A session that flew a mission needs @p mission, the
+    /// mission it flew (@p missionDir: its folder, for item models). Refused during a mission
+    /// and for sessions that cannot be replayed. Free flight comes back with stopReplay().
+    common::Result<void> startReplay(const storage::ReplayRecord& replay,
+                                     const missions::MissionDefinition* mission = nullptr,
+                                     const std::filesystem::path& missionDir = {});
+    /// @brief Ends the replay: the free-flight scene, vehicle and take-off point come back.
+    void stopReplay();
+    /// @brief True between startReplay() and stopReplay().
+    [[nodiscard]] bool replayActive() const noexcept { return replay_; }
+    /// @brief Position in the replay (latest snapshot).
+    [[nodiscard]] const sim::ReplayStatus& replayStatus() const noexcept {
+        return loop_->snapshot().replay;
+    }
+    /// @brief Saves the sessions the simulation finished recording (called every frame; the
+    /// writes run on the storage thread).
+    void saveRecordings();
 
     // --- Cameras --------------------------------------------------------------------------
 
@@ -301,6 +332,10 @@ signals:
     /// @brief The current attempt ended (succeeded, failed or aborted); missionStatus().result
     /// holds the result. Emitted once per attempt.
     void missionFinished();
+    /// @brief A replay started or ended (replayActive() changed).
+    void replayActiveChanged();
+    /// @brief A flight session was saved (History tab); @p sessionId is its row.
+    void sessionRecorded(qint64 sessionId);
 
 private:
     void loadWindTable(const std::filesystem::path& assets);
@@ -324,8 +359,12 @@ private:
     void onTerrainChanged();
     void onEnvironmentChanged();
     void handleEvents();
-    void recordSession(const sim::SessionStats& stats, const std::string& profileKey,
-                       physics::VehicleType type);
+    void saveRecording(sim::FlightRecording recording);
+    void updateSceneTag();
+    void saveFreeState();
+    void restoreFreeState();
+    [[nodiscard]] common::Result<std::unique_ptr<missions::MissionRunner>> enterMissionScene(
+        const missions::MissionDefinition& mission, const std::filesystem::path& missionDir);
     void updatePilotEye();
     void applyFreeFlightRules();
     void refuseInMission(const QString& what);
@@ -386,10 +425,15 @@ private:
     std::optional<missions::MissionState> lastMissionState_;
     std::uint64_t reportedAttempt_ = ~std::uint64_t{0};
 
-    sim::SessionStats lastStats_;
-    std::string lastProfileKey_;
-    physics::VehicleType lastVehicleType_ = physics::VehicleType::Aerial;
     std::uint64_t lastResetCount_ = 0;
+
+    // Recording and replays.
+    std::vector<items::Item> freeItems_;
+    std::optional<std::int64_t> attemptToLink_;
+    bool replay_ = false;
+    bool replayMission_ = false;  // The replayed session flew a mission.
+    double freeTickRateHz_ = 0.0;
+    std::vector<std::future<std::optional<std::int64_t>>> pendingSaves_;
 };
 
 }  // namespace ds::app

@@ -318,6 +318,7 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
     h.weather = weatherItem(s, o.imperial);
     const auto timer = static_cast<int>(t.armedTimeS);
     h.timer.text = std::format("{:02d}:{:02d}", timer / 60, timer % 60);
+    h.replay = replayItem(s.replay);
     if (auto local = astro::toLocalTime(s.utc, o.timeZone)) {
         h.clockLocal.text = std::format("{} {}", clock(local->time), local->abbreviation);
     }
@@ -452,6 +453,21 @@ void buildMissionHud(const MissionStatus& m, const physics::Vec3& vehicle, const
         panel.notes.push_back({std::format("Cargo {:.2f} kg", m.payloadKg), HudLevel::Normal});
     }
     h.mission = std::move(panel);
+}
+
+HudItem replayItem(const ReplayStatus& replay) {
+    if (!replay.active) {
+        return {};
+    }
+    const auto mmss = [](double seconds) {
+        const auto t = static_cast<long long>(std::max(0.0, std::floor(seconds)));
+        return std::format("{}:{:02d}", t / 60, t % 60);
+    };
+    if (replay.finished) {
+        return {std::format("REPLAY ENDED {}", mmss(replay.durationS)), HudLevel::Caution};
+    }
+    return {std::format("REPLAY {} / {}", mmss(replay.timeS), mmss(replay.durationS)),
+            HudLevel::Normal};
 }
 
 }  // namespace ds::sim

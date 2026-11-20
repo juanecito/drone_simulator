@@ -101,8 +101,10 @@ StorageResult<std::vector<SessionRecord>> SessionStore::recent(int limit) {
         "SELECT s.id, COALESCE(v.profile_key, ''), s.vehicle_type, s.started_at, "
         "COALESCE(s.duration_s, 0), COALESCE(s.max_altitude_agl_m, 0), "
         "COALESCE(s.max_speed_ms, 0), COALESCE(s.distance_m, 0), "
-        "COALESCE(s.energy_used_wh, 0), s.crashes "
+        "COALESCE(s.energy_used_wh, 0), s.crashes, COALESCE(r.mission_key, ''), "
+        "COALESCE(r.replayable, 0) "
         "FROM sessions s LEFT JOIN vehicle_profiles v ON v.id = s.vehicle_profile_id "
+        "LEFT JOIN replays r ON r.session_id = s.id "
         "ORDER BY s.started_at DESC, s.id DESC LIMIT :limit");
     if (!query) {
         return std::unexpected(query.error());
@@ -124,6 +126,8 @@ StorageResult<std::vector<SessionRecord>> SessionStore::recent(int limit) {
         r.distanceM = query->value(7).toDouble();
         r.energyUsedWh = query->value(8).toDouble();
         r.crashes = query->value(9).toInt();
+        r.missionKey = query->value(10).toString().toStdString();
+        r.hasReplay = query->value(11).toInt() != 0;
         records.push_back(std::move(r));
     }
     return records;

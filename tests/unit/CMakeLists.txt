@@ -21,6 +21,7 @@ add_executable(ds_unit_tests
     net_test.cpp
     physics_test.cpp
     renderer_test.cpp
+    replay_test.cpp
     sim_test.cpp
     terrain_files_test.cpp
     version_test.cpp

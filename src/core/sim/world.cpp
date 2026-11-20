@@ -167,6 +167,8 @@ const physics::GroundVehicle* World::groundVehicle() const noexcept {
 }
 
 void World::setGeoOrigin(const geo::Geodetic& origin) noexcept {
+    recordCommand({{"kind", "geoOrigin"},
+                   {"value", {origin.latitudeDeg, origin.longitudeDeg, origin.heightM}}});
     config_.geoOrigin = origin;
     sunUpdatedAtS_ = -1e9;
     updateSun();
@@ -182,6 +184,12 @@ void World::updateSun() {
 
 void World::setMission(std::unique_ptr<MissionSession> session) {
     mission_ = std::move(session);
+    if (recording_ && recording_->encoder.ticks() == 0) {
+        recording_->recording.replay.header["mission"] =
+            mission_ ? mission_->runner().mission().id : std::string();
+    } else {
+        finishRecording();  // The session ends with its mission; the next reset starts one.
+    }
     if (freeMonitor_) {
         freeMonitor_->reset();
     }
@@ -223,6 +231,7 @@ astro::UtcTime World::utc() const noexcept {
 }
 
 void World::setUtc(astro::UtcTime utc) noexcept {
+    recordCommand({{"kind", "utc"}, {"ms", utc.time_since_epoch().count()}});
     clockBase_ = utc;
     clockBaseTime_ = time_;
     sunUpdatedAtS_ = -1e9;
@@ -308,12 +317,15 @@ void World::rebuildWeather() {
 }
 
 void World::setWeather(const weather::WeatherSettings& settings) {
+    recordCommand({{"kind", "weather"}, {"value", settings.toJson()}});
     weatherSettings_ = settings;
     rebuildWeather();
     applyWeatherToWind();
 }
 
 void World::setAir(const weather::AirConditions& air) {
+    recordCommand(
+        {{"kind", "air"}, {"value", {air.temperatureC, air.pressureHpa, air.humidityPct}}});
     config_.air = air;
     weather::WeatherOverrides& o = weatherSettings_.overrides;
     o.temperatureC = air.temperatureC;
@@ -324,6 +336,7 @@ void World::setAir(const weather::AirConditions& air) {
 }
 
 void World::setVisibility(double visibilityM) {
+    recordCommand({{"kind", "visibility"}, {"value", visibilityM}});
     config_.visibilityM = visibilityM;
     weatherSettings_.overrides.visibilityM = visibilityM;
     rebuildWeather();
@@ -336,7 +349,10 @@ double World::visibilityAtVehicle() const noexcept {
 }
 
 void World::reset() {
+    finishRecording();
     ++resets_;
+    sessionStartS_ = time_;
+    sessionStartTick_ = ticks_;
     weather_.restart();
     restartWind();
     const physics::Vec3 start = config_.startPosition;
@@ -354,15 +370,20 @@ void World::reset() {
     if (freeMonitor_) {
         freeMonitor_->reset();
     }
+    sunUpdatedAtS_ = -1e9;  // Every session starts from the same sun (FR-X-05).
+    updateSun();
+    beginRecording();
     events_.publish(SimResetEvent{});
 }
 
 void World::injectFailure(const physics::Failure& failure) {
+    recordCommand({{"kind", "failure"}, {"value", failureToJson(failure)}});
     failures_.inject(failure);
     events_.publish(FailureEvent{std::string(physics::failureTitle(failure.type)), true});
 }
 
 void World::clearFailures() {
+    recordCommand({{"kind", "clearFailures"}});
     for (const physics::FailureInjector::Active& a : failures_.active()) {
         events_.publish(FailureEvent{std::string(physics::failureTitle(a.failure.type)), false});
     }
@@ -378,6 +399,7 @@ void World::resetAt(const physics::Vec3& position, double headingRad) {
 
 void World::setGround(GroundFunction ground, std::optional<double> waterLevelM,
                       double originAltitudeM) {
+    const bool restart = sceneChangedMidSession();
     config_.ground = ground ? std::move(ground) : flatGround();
     config_.waterLevelM = waterLevelM;
     config_.originAltitudeM = originAltitudeM;
@@ -393,9 +415,16 @@ void World::setGround(GroundFunction ground, std::optional<double> waterLevelM,
         body.velocity = physics::Vec3(0.0);
         vehicle_->setBodyState(body);
     }
+    if (restart) {
+        reset();
+    }
 }
 
 void World::setWind(const weather::WindSettings& wind) {
+    recordCommand({{"kind", "wind"},
+                   {"level", wind.level},
+                   {"fromDeg", wind.fromDeg},
+                   {"randomDirection", wind.randomDirection}});
     config_.wind = wind;
     weatherSettings_.overrides.windLevel = wind.level;
     weatherSettings_.overrides.windFromDeg = wind.fromDeg;
@@ -461,11 +490,15 @@ void World::publishVehicleEvents() {
 }
 
 void World::setFreeItems(const std::vector<items::Item>& freeItems) {
+    const bool restart = sceneChangedMidSession();
     freeItems_.clear();
     for (const items::Item& item : freeItems) {
         (void)freeItems_.add(item);  // Keys are unique: the scene's items were checked.
     }
     freeItems_.clearHistory();
+    if (restart) {
+        reset();
+    }
 }
 
 void World::resolveObstacles() {
@@ -510,7 +543,36 @@ void World::resolveObstacles() {
     });
 }
 
-void World::tick(const input::ControlInputs& controls, double dt) {
+void World::tick(const input::ControlInputs& liveControls, double liveDt) {
+    input::ControlInputs controls = liveControls;
+    double dt = liveDt;
+    if (replay_) {
+        if (replay_->finished) {
+            return;  // The last state stays.
+        }
+        applyReplayCommands();
+        const auto next = replay_->decoder->next();
+        if (!next) {
+            replay_->finished = true;
+            return;
+        }
+        controls = *next;
+        dt = replay_->dt;
+        ++replay_->tick;
+        replay_->timeS += dt;
+    } else if (recording_) {
+        controls = quantized(controls);
+        recordTick(controls, dt);
+    }
+    inTick_ = true;
+    tickBody(controls, dt);
+    inTick_ = false;
+    if (recording_) {
+        sampleTelemetry();
+    }
+}
+
+void World::tickBody(const input::ControlInputs& controls, double dt) {
     controls_ = controls;
     physics::Vehicle& v = *vehicle_;
     // Failure injection (FR-PHY-15): sensor errors, motor power, battery and RC link.
@@ -552,7 +614,7 @@ void World::tick(const input::ControlInputs& controls, double dt) {
 
     // Statistics.
     const physics::RigidBodyState& after = v.bodyState();
-    stats_.durationS = time_;
+    stats_.durationS = time_ - sessionStartS_;
     const bool armed = v.armed();
     if (armed) {
         stats_.flightTimeS += dt;
@@ -599,6 +661,7 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.visibilityM = visibilityAtVehicle();
     s.stats = stats_;
     s.resetCount = resets_;
+    s.replay = replayStatus();
     s.sunElevationDeg = sunElevationDeg_;
     if (mission_) {
         mission_->fill(s.mission);
@@ -612,6 +675,273 @@ void World::fillSnapshot(WorldSnapshot& s) const {
             s.ruleWarnings = freeMonitor_->warnings();
         } else {
             s.ruleWarnings.clear();
+        }
+    }
+}
+
+// --- Missions ---------------------------------------------------------------------------------
+
+void World::retryMission() {
+    recordCommand({{"kind", "retryMission"}});
+    if (mission_) {
+        mission_->retry(*this);
+    }
+}
+
+void World::abortMission() {
+    recordCommand({{"kind", "abortMission"}});
+    if (mission_) {
+        mission_->abort(*this);
+    }
+}
+
+// --- Recording (FR-X-06) --------------------------------------------------------------------
+
+void World::setRecording(bool enabled) {
+    recordingEnabled_ = enabled;
+    if (!enabled) {
+        recording_.reset();
+    } else if (!recording_ && ticks_ == sessionStartTick_) {
+        beginRecording();  // Nothing happened since the reset: this session is recorded.
+    }
+}
+
+void World::setSceneTag(common::Json scene) {
+    sceneTag_ = std::move(scene);
+    if (recording_ && recording_->encoder.ticks() == 0) {
+        recording_->recording.replay.header["scene"] = sceneTag_;
+    }
+}
+
+void World::beginRecording() {
+    if (!recordingEnabled_ || replay_) {
+        return;
+    }
+    recording_.emplace();
+    FlightRecording& r = recording_->recording;
+    r.profileKey = physics::profileKey(config_.profile);
+    r.type = vehicle_->type();
+    const physics::Vec3& start = config_.startPosition;
+    r.replay.header = {
+        {"format", ReplayLog::kFormat},
+        {"seed", config_.seed},
+        {"resets", resets_},
+        {"timeS", time_},
+        {"ticks", ticks_},
+        {"clockBaseMs", clockBase_.time_since_epoch().count()},
+        {"clockBaseTimeS", clockBaseTime_},
+        {"profile", physics::vehicleProfileToJson(config_.profile)},
+        {"weather", weatherSettings_.toJson()},
+        {"air", {config_.air.temperatureC, config_.air.pressureHpa, config_.air.humidityPct}},
+        {"wind",
+         {{"level", config_.wind.level},
+          {"fromDeg", config_.wind.fromDeg},
+          {"randomDirection", config_.wind.randomDirection}}},
+        {"visibilityM", config_.visibilityM},
+        {"geoOrigin",
+         {config_.geoOrigin.latitudeDeg, config_.geoOrigin.longitudeDeg,
+          config_.geoOrigin.heightM}},
+        {"start", {start.x, start.y, start.z}},
+        {"headingRad", config_.startHeadingRad},
+        {"scene", sceneTag_},
+        {"mission", mission_ ? mission_->runner().mission().id : std::string()},
+    };
+}
+
+void World::recordCommand(common::Json command) {
+    if (!recording_ || inTick_) {
+        return;  // Changes the world makes itself (missions) replay by themselves.
+    }
+    recording_->recording.replay.commands.push_back(
+        {recording_->encoder.ticks(), std::move(command)});
+}
+
+void World::recordTick(const input::ControlInputs& controls, double dt) {
+    ActiveRecording& r = *recording_;
+    ReplayLog& log = r.recording.replay;
+    if (log.truncated) {
+        return;
+    }
+    if (time_ - sessionStartS_ >= kMaxRecordedS) {
+        log.truncated = true;
+        return;
+    }
+    if (r.encoder.ticks() == 0) {
+        log.header["dt"] = dt;
+    } else if (dt != r.lastDt) {
+        log.commands.push_back({r.encoder.ticks(), {{"kind", "dt"}, {"value", dt}}});
+    }
+    r.lastDt = dt;
+    r.encoder.add(controls);
+}
+
+void World::sampleTelemetry() {
+    ActiveRecording& r = *recording_;
+    const double t = time_ - sessionStartS_;
+    if (r.recording.replay.truncated ||
+        t + 1e-9 < static_cast<double>(r.samples) / kTelemetryRateHz) {
+        return;
+    }
+    ++r.samples;
+    const physics::Vehicle& v = *vehicle_;
+    const physics::RigidBodyState& body = v.bodyState();
+    const physics::Euler e = physics::eulerFromOrientation(body.orientation);
+    const bool aerial = v.type() == physics::VehicleType::Aerial;
+    r.recording.samples.push_back({
+        .tS = t,
+        .position = body.position,
+        .rollRad = e.roll,
+        .pitchRad = e.pitch,
+        .yawRad = e.yaw,
+        .speedMs = glm::length(body.velocity),
+        .aglM = body.position.y - env_.ground.heightM - v.restHeightM(),
+        .throttle = aerial ? controls_.throttle : controls_.drive,
+        .steering = aerial ? controls_.roll : controls_.steering,
+        .batteryV = v.battery().voltage(),
+        .batteryA = v.battery().current(),
+    });
+}
+
+bool World::sceneChangedMidSession() {
+    if (!recording_ || recording_->encoder.ticks() == 0) {
+        return false;
+    }
+    if (stats_.flightTimeS == 0.0) {
+        // Not flown yet: a new session starts on the new scene, still replayable. The vehicle
+        // stands at its take-off point; the reset puts it on the new surface.
+        return true;
+    }
+    recording_->recording.replay.replayable = false;
+    return false;
+}
+
+void World::finishRecording() {
+    if (!recording_) {
+        return;
+    }
+    ActiveRecording& r = *recording_;
+    if (r.encoder.ticks() > 0) {
+        FlightRecording& out = r.recording;
+        out.stats = stats_;
+        out.missionId = out.replay.header.value("mission", std::string());
+        out.replay.ticks = r.encoder.ticks();
+        out.replay.inputs = r.encoder.take();
+        finished_.push_back(std::move(out));
+    }
+    recording_.reset();
+}
+
+std::vector<FlightRecording> World::takeRecordings() { return std::exchange(finished_, {}); }
+
+// --- Replay (FR-X-06) -----------------------------------------------------------------------
+
+common::Result<void> World::startReplay(ReplayLog log, std::unique_ptr<MissionSession> mission) {
+    auto replay = std::make_unique<ActiveReplay>();
+    replay->log = std::move(log);
+    const common::Json& h = replay->log.header;
+    if (!h.is_object() || h.value("format", 0) != ReplayLog::kFormat || !h.contains("dt")) {
+        return common::makeError("the replay is damaged or from another version");
+    }
+    auto profile = physics::vehicleProfileFromJson(h.value("profile", common::Json()));
+    if (!profile) {
+        return common::makeError("replay vehicle: " + profile.error().message);
+    }
+    auto weather = weather::WeatherSettings::fromJson(h.value("weather", common::Json()),
+                                                      config_.weatherPresets);
+    if (!weather) {
+        return common::makeError("replay weather: " + weather.error().message);
+    }
+    const common::Json start = h.value("start", common::Json::array());
+    const common::Json geo = h.value("geoOrigin", common::Json::array());
+    const common::Json air = h.value("air", common::Json::array());
+    if (start.size() != 3 || geo.size() != 3 || air.size() != 3) {
+        return common::makeError("the replay is damaged");
+    }
+    auto decoder = InputDecoder::open(replay->log.inputs);
+    if (!decoder) {
+        return common::makeError(decoder.error().message);
+    }
+    replay->decoder = std::move(*decoder);
+    replay->dt = h.value("dt", 0.002);
+    replay->durationS = replay->log.durationS();
+
+    // The world as it was when the session started.
+    finishRecording();
+    config_.seed = h.value("seed", std::uint64_t{1});
+    config_.profile = std::move(*profile);
+    vehicle_ = physics::makeVehicle(config_.profile, config_.seed);
+    failures_ = physics::FailureInjector(common::mix64(config_.seed ^ 0x494E4A45ULL));
+    config_.air = {air[0].get<double>(), air[1].get<double>(), air[2].get<double>()};
+    const common::Json wind = h.value("wind", common::Json::object());
+    config_.wind = {wind.value("level", 0), wind.value("fromDeg", 270.0),
+                    wind.value("randomDirection", false)};
+    config_.visibilityM = h.value("visibilityM", config_.visibilityM);
+    config_.geoOrigin = {geo[0].get<double>(), geo[1].get<double>(), geo[2].get<double>()};
+    config_.startPosition = {start[0].get<double>(), start[1].get<double>(),
+                             start[2].get<double>()};
+    config_.startHeadingRad = h.value("headingRad", 0.0);
+    weatherSettings_ = *weather;
+    rebuildWeather();
+    time_ = h.value("timeS", 0.0);
+    ticks_ = h.value("ticks", std::uint64_t{0});
+    clockBase_ = astro::UtcTime(std::chrono::milliseconds(h.value("clockBaseMs", std::int64_t{0})));
+    clockBaseTime_ = h.value("clockBaseTimeS", 0.0);
+    resets_ = h.value("resets", std::uint64_t{1}) - 1;
+    mission_ = std::move(mission);
+    if (freeRules_) {
+        setFreeFlightRules(freeRules_);  // For the replayed vehicle type.
+    }
+    replay_ = std::move(replay);
+    reset();
+    return {};
+}
+
+void World::stopReplay() { replay_.reset(); }
+
+ReplayStatus World::replayStatus() const noexcept {
+    if (!replay_) {
+        return {};
+    }
+    return {.active = true,
+            .timeS = replay_->timeS,
+            .durationS = replay_->durationS,
+            .finished = replay_->finished};
+}
+
+void World::applyReplayCommands() {
+    ActiveReplay& r = *replay_;
+    const std::vector<ReplayCommand>& commands = r.log.commands;
+    while (r.nextCommand < commands.size() && commands[r.nextCommand].tick <= r.tick) {
+        const common::Json& c = commands[r.nextCommand++].data;
+        const std::string kind = c.value("kind", std::string());
+        const common::Json& v = c.contains("value") ? c["value"] : c;
+        if (kind == "dt") {
+            r.dt = v.get<double>();
+        } else if (kind == "failure") {
+            if (const auto f = failureFromJson(v)) {
+                injectFailure(*f);
+            }
+        } else if (kind == "clearFailures") {
+            clearFailures();
+        } else if (kind == "weather") {
+            if (auto w = weather::WeatherSettings::fromJson(v, config_.weatherPresets)) {
+                setWeather(*w);
+            }
+        } else if (kind == "air" && v.size() == 3) {
+            setAir({v[0].get<double>(), v[1].get<double>(), v[2].get<double>()});
+        } else if (kind == "wind") {
+            setWind({c.value("level", 0), c.value("fromDeg", 270.0),
+                     c.value("randomDirection", false)});
+        } else if (kind == "visibility") {
+            setVisibility(v.get<double>());
+        } else if (kind == "utc") {
+            setUtc(astro::UtcTime(std::chrono::milliseconds(c.value("ms", std::int64_t{0}))));
+        } else if (kind == "geoOrigin" && v.size() == 3) {
+            setGeoOrigin({v[0].get<double>(), v[1].get<double>(), v[2].get<double>()});
+        } else if (kind == "retryMission") {
+            retryMission();
+        } else if (kind == "abortMission") {
+            abortMission();
         }
     }
 }

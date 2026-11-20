@@ -9,6 +9,7 @@ ds_add_core_module(sim
         mission_session.cpp
         module.cpp
         simulation_loop.cpp
+        recording.cpp
         world.cpp
     DEPS
         ds::common

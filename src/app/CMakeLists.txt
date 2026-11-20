@@ -12,6 +12,7 @@ add_library(ds_app_ui STATIC
     command_line.cpp
     controls_panel.cpp
     environment_panel.cpp
+    history_panel.cpp
     hud_painter.cpp
     scene_config.cpp
     scene_controller.cpp
@@ -30,6 +31,7 @@ add_library(ds_app_ui STATIC
     settings_panel.cpp
     simulation_controller.cpp
     simulation_panel.cpp
+    telemetry_plot.cpp
     user_storage.cpp
     vehicle_panel.cpp
     viewport.cpp
@@ -37,6 +39,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/command_line.hpp
     include/ds/app/controls_panel.hpp
     include/ds/app/environment_panel.hpp
+    include/ds/app/history_panel.hpp
     include/ds/app/hud_painter.hpp
     include/ds/app/scene_config.hpp
     include/ds/app/scene_controller.hpp
@@ -55,6 +58,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/settings_panel.hpp
     include/ds/app/simulation_controller.hpp
     include/ds/app/simulation_panel.hpp
+    include/ds/app/telemetry_plot.hpp
     include/ds/app/user_storage.hpp
     include/ds/app/vehicle_panel.hpp
     include/ds/app/viewport.hpp)

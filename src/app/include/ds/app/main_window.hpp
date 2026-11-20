@@ -14,6 +14,7 @@
 
 #include "ds/common/error.hpp"
 #include "ds/storage/mission_store.hpp"
+#include "ds/storage/recording_store.hpp"
 
 class QAction;
 class QDockWidget;
@@ -31,6 +32,7 @@ class QTabWidget;
 namespace ds::app {
 
 class EnvironmentPanel;
+class HistoryPanel;
 class MissionBriefingDialog;
 class MissionDebriefDialog;
 class MissionsController;
@@ -94,6 +96,9 @@ public:
     common::Result<void> launchMission(const std::string& key, const QString& profileKey = {});
     /// @brief Leaves the mission and goes back to free flight.
     void endMission();
+    /// @brief Plays the replay @p replay (History tab, FR-X-06); a session that flew a mission
+    /// is replayed with that mission, which must still be installed.
+    common::Result<void> playReplay(const storage::ReplayRecord& replay);
     /// @brief Missions › Import Mission: copies @p source (a mission file or folder) into the
     /// user's mission folder and selects it. Asks before replacing an existing mission.
     void importMission(const QString& source);
@@ -148,6 +153,7 @@ private:
     MissionsController* missions_ = nullptr;
     Viewport* viewport_ = nullptr;
     EnvironmentPanel* environmentPanel_ = nullptr;
+    HistoryPanel* historyPanel_ = nullptr;
     MissionsPanel* missionsPanel_ = nullptr;
     QWidget* terrainPanel_ = nullptr;
     QWidget* vehiclePanel_ = nullptr;

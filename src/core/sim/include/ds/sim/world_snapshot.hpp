@@ -37,6 +37,14 @@ struct SessionStats {
     int crashes = 0;             ///< Number of crashes.
 };
 
+/// @brief State of a replay being played (WorldSnapshot::replay).
+struct ReplayStatus {
+    bool active = false;     ///< A replay drives the world.
+    double timeS = 0.0;      ///< Position in the replay.
+    double durationS = 0.0;  ///< Length.
+    bool finished = false;   ///< Played to the end (the world holds the last state).
+};
+
 /// @brief Everything the GUI and the renderer need from one tick.
 struct WorldSnapshot {
     std::uint64_t tick = 0;               ///< Tick counter.
@@ -67,6 +75,7 @@ struct WorldSnapshot {
     weather::GroundCover groundCover;     ///< Wet ground and lying snow.
     double visibilityM = 50'000.0;        ///< Visibility at the vehicle's height.
     std::vector<std::string> activeFailures;  ///< Injected failures now (FR-PHY-15).
+    ReplayStatus replay;                      ///< A replay being played (FR-X-06).
     SessionStats stats;                   ///< Flight statistics.
     double sunElevationDeg = 45.0;        ///< Apparent sun elevation at the origin.
     /// Flight-rule warnings (the mission's, or free mode's, FR-MIS-06b/06d).

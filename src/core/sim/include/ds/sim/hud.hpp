@@ -118,6 +118,7 @@ struct HudModel {
     /// Amber under 5 km visibility or with precipitation, red under 1 km or in a thunderstorm.
     HudItem weather;
     HudItem timer;                  ///< Flight timer.
+    HudItem replay;                 ///< "REPLAY 0:12 / 1:30" while a replay plays (FR-X-06).
     HudItem clockLocal;             ///< Local time.
     HudItem clockUtc;               ///< UTC.
     HudItem lights;                 ///< Lights indicator.
@@ -133,6 +134,10 @@ struct HudModel {
     std::optional<HudGround> ground;
     std::vector<HudMarker> markers;     ///< Guidance markers.
 };
+
+/// @brief Replay read-out: "REPLAY 0:12 / 1:30", "REPLAY ENDED 1:30" (amber) at the end, empty
+/// without a replay.
+[[nodiscard]] HudItem replayItem(const ReplayStatus& replay);
 
 /// @brief Visibility under which the HUD weather is amber, m.
 inline constexpr double kVisibilityCautionM = 5000.0;

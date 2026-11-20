@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <future>
 #include <limits>
 #include <stdexcept>
@@ -20,6 +21,7 @@
 #include "ds/storage/migrations.hpp"
 #include "ds/storage/mission_store.hpp"
 #include "ds/storage/provider_store.hpp"
+#include "ds/storage/recording_store.hpp"
 #include "ds/storage/session_store.hpp"
 #include "ds/storage/settings_store.hpp"
 #include "ds/storage/storage_service.hpp"
@@ -868,3 +870,81 @@ TEST(StorageSessions, InsertUpdateListAndProfileLink) {
     EXPECT_TRUE(*store.remove(*id));
     EXPECT_EQ(store.recent()->size(), 1U);
 }
+
+namespace {
+
+TEST(StorageRecordings, SaveFlightWithTelemetryReplayAndAttemptLink) {
+    DbConnection db = migratedDb();
+    MissionStore missions(db);
+    ASSERT_TRUE(missions.sync("builtin", {missionRow("m1")}));
+    const auto attemptId = missions.recordAttempt(attempt("m1", "succeeded", 3, 900.0, 42.0));
+    ASSERT_TRUE(attemptId);
+
+    SessionRecord s;
+    s.startedAt = "2026-06-21T10:00:00Z";
+    s.durationS = 42.0;
+    std::vector<TelemetryRow> samples;
+    for (int i = 0; i < 841; ++i) {
+        TelemetryRow r;
+        r.tS = i * 0.05;
+        r.posY = 2.0 + i;
+        r.altAgl = i;
+        r.batteryV = 8.2 - i * 1e-4;
+        samples.push_back(r);
+    }
+    samples[3].speed = std::nan("");  // Stored as NULL, read back as NaN.
+    ReplayRecord replay;
+    replay.missionKey = "m1";
+    replay.durationS = 42.0;
+    replay.ticks = 21000;
+    replay.metaJson = R"({"format": 1, "header": {}})";
+    replay.inputs = {'D', 'S', 'R', 'I', 1, 0x40, 0, 0, 1, 0, 0, 0xFF};
+
+    RecordingStore store(db);
+    const auto id = store.saveFlight(s, samples, replay, *attemptId);
+    ASSERT_TRUE(id) << id.error().message;
+
+    auto back = store.telemetry(*id);
+    ASSERT_TRUE(back);
+    ASSERT_EQ(back->size(), samples.size());
+    EXPECT_TRUE(std::isnan((*back)[3].speed));
+    (*back)[3].speed = samples[3].speed = 0.0;
+    EXPECT_EQ(*back, samples);
+
+    const auto stored = store.replay(*id);
+    ASSERT_TRUE(stored && *stored);
+    replay.sessionId = *id;
+    EXPECT_EQ(**stored, replay);
+
+    const auto sessions = SessionStore(db).recent();
+    ASSERT_TRUE(sessions && sessions->size() == 1);
+    EXPECT_EQ(sessions->front().missionKey, "m1");
+    EXPECT_TRUE(sessions->front().hasReplay);
+    const auto attempts = missions.attempts("m1");
+    ASSERT_TRUE(attempts && attempts->size() == 1);
+    EXPECT_EQ(attempts->front().sessionId, *id);
+
+    // Deleting the session takes its telemetry and replay with it.
+    EXPECT_TRUE(*SessionStore(db).remove(*id));
+    EXPECT_TRUE(store.telemetry(*id)->empty());
+    EXPECT_FALSE(store.replay(*id)->has_value());
+    EXPECT_FALSE(missions.attempts("m1")->front().sessionId.has_value());
+}
+
+TEST(StorageRecordings, AFailedSaveLeavesNothingBehind) {
+    DbConnection db = migratedDb();
+    RecordingStore store(db);
+    SessionRecord s;
+    s.startedAt = "2026-06-21T10:00:00Z";
+    ReplayRecord replay;
+    replay.metaJson = "not json";
+    EXPECT_FALSE(store.saveFlight(s, std::vector<TelemetryRow>(5), replay));
+    s.vehicleType = "boat";
+    EXPECT_FALSE(store.saveFlight(s, std::vector<TelemetryRow>(5), std::nullopt));
+    EXPECT_TRUE(SessionStore(db).recent()->empty());
+    QSqlQuery q = *db.prepare("SELECT COUNT(*) FROM telemetry_samples");
+    ASSERT_TRUE(q.exec() && q.next());
+    EXPECT_EQ(q.value(0).toInt(), 0);
+}
+
+}  // namespace
