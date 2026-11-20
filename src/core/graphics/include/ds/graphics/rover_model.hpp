@@ -9,6 +9,7 @@
 
 #include "ds/graphics/light.hpp"
 #include "ds/graphics/mesh.hpp"
+#include "ds/graphics/mesh_loader.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -81,9 +82,17 @@ public:
     /// @brief Position of headlight @p side (−1 left, +1 right) in the body frame.
     [[nodiscard]] glm::dvec3 headlightAt(double side) const;
 
+    /// @brief Bounds of the procedural body (with its camera), body frame: where a model file
+    /// is fitted.
+    [[nodiscard]] MeshBounds bodyBounds() const;
+    /// @brief Draws @p mesh (body frame) instead of the procedural body; the wheels and lights
+    /// stay. Null restores the procedural body.
+    void setBodyMesh(std::shared_ptr<const Mesh> mesh);
+
 private:
     RoverShape shape_;
     std::shared_ptr<const Mesh> body_;
+    std::shared_ptr<const Mesh> customBody_;
     std::shared_ptr<const Mesh> wheel_;
     std::shared_ptr<const Mesh> headlight_;
     std::shared_ptr<const Mesh> tailLight_;

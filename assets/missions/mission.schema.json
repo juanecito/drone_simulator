@@ -1199,6 +1199,12 @@
           "maximum": 2,
           "description": "Obstacles: Coulomb friction coefficient against the drone (default from the material: concrete 0.5, foliage 0.9, …)."
         },
+        "model": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]*\\.([gG][lL][tT][fF]|[gG][lL][bB]|[oO][bB][jJ])$",
+          "maxLength": 200,
+          "description": "Obstacles: mesh file drawn instead of the shape (glTF 2.0 `.gltf`/`.glb` or `.obj`), looked for in the mission's folder, then `~/.drone_simulation/models/` and the built-in models; fitted to the shape, which still stops the vehicles. No `..`."
+        },
         "order": {
           "type": "integer",
           "minimum": 0

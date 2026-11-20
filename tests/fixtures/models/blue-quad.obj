@@ -1,0 +1,8 @@
+# A 2 x 1 m quad on the ground, facing up.
+mtllib blue-quad.mtl
+v 0 0 0
+v 0 0 1
+v 2 0 1
+v 2 0 0
+usemtl blue
+f 1 2 3 4

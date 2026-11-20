@@ -12,23 +12,23 @@ astronomically correct day/night sky.
 - **Platform:** Debian 13 (amd64), distributed as a `.deb` package installed in `/opt/drone_simulator`
 - **Licence:** MIT — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-> **Status: milestone M5 (items and missions).** Fly a quadcopter over endless or bounded
-> procedural terrain under a physically based day/night sky. The flight model covers motors,
-> propellers and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence,
-> noisy sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight
-> controller. Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or
-> with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD, a UTM position
-> panel and a compass showing true and magnetic north (World Magnetic Model WMM2025). There
-> are three reference profiles and an editable Vehicle tab. **Missions** are JSON files: a
-> campaign of 16 built-in missions (aerial: basics, racing, operations; ground: four rover
-> missions) plus your own, each with a briefing, objectives on the HUD, flight rules, scoring
-> with stars, a debrief and your progress saved per user. The **Items** tab places gates,
-> obstacles, pads, zones, parking bays, ramps and bridges in the free-flight scene. The
-> **ground drone** (a 4WD skid-steer RC rover) is driven in free mode and in its own missions,
-> up ramps and over bridges, with its own HUD (pitch, roll and a rollover warning, slope,
-> wheel slip, odometer) and headlights that light the way at night (milestone M6 in progress:
-> a calibration wizard for ground controllers is next). Real terrain and weather arrive in
-> milestones M4 and M7–M8 (see the specification).
+> **Status: milestone M6 (ground drone).** Fly a quadcopter over endless or bounded procedural
+> terrain under a physically based day/night sky. The flight model covers motors, propellers
+> and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence, noisy
+> sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight controller.
+> Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or with the
+> keyboard, from FPV, chase and line-of-sight cameras, with an OSD, a UTM position panel and a
+> compass showing true and magnetic north (World Magnetic Model WMM2025). There are three
+> reference profiles and an editable Vehicle tab. **Missions** are JSON files: a campaign of
+> 16 built-in missions (aerial: basics, racing, operations; ground: four rover missions) plus
+> your own, each with a briefing, objectives on the HUD, flight rules, scoring with stars, a
+> debrief and your progress saved per user. The **Items** tab places gates, obstacles, pads,
+> zones, parking bays, ramps and bridges in the free-flight scene. The **ground drone** (a 4WD
+> skid-steer RC rover) is driven in free mode and in its own missions, up ramps and over
+> bridges, with its own HUD (pitch, roll and a rollover warning, slope, wheel slip, odometer)
+> and headlights that light the way at night. Vehicles and obstacles can be drawn from your
+> own glTF 2.0 or OBJ model files. Real terrain and weather arrive in milestones M4 and M7–M8
+> (see the specification).
 
 ## Quick start
 
@@ -112,6 +112,8 @@ rate.
   wind level they can handle; ground profiles their top speed, acceleration, steepest
   climbable slope per surface, static rollover angles and range. All parameters can be edited
   (*Apply* to use them) and saved as your own profile. Each type remembers its profile.
+  *Model: Choose…* draws the body from a glTF 2.0 (`.gltf`, `.glb`) or OBJ file, fitted to
+  the built-in body (wheels, propellers and lights stay); *Built-in* goes back.
 - **Settings › Controls:** choose the keyboard or a joystick (RC transmitter in USB joystick
   mode, or a gamepad), start from a preset (aerial: radio AETR/TAER, gamepad mode 1/2;
   ground: gamepad with the triggers or the sticks, radio AETR/TAER), run the calibration

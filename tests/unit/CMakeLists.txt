@@ -14,6 +14,7 @@ add_executable(ds_unit_tests
     items_test.cpp
     json_schema_test.cpp
     log_test.cpp
+    mesh_loader_test.cpp
     missions_test.cpp
     mission_play_test.cpp
     modules_test.cpp

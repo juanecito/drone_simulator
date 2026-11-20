@@ -114,9 +114,14 @@ void RoverModel::appendLights(const RoverVisualState& state, std::vector<SpotLig
     }
 }
 
+MeshBounds RoverModel::bodyBounds() const { return meshBounds(*body_); }
+
+void RoverModel::setBodyMesh(std::shared_ptr<const Mesh> mesh) { customBody_ = std::move(mesh); }
+
 void RoverModel::appendDrawItems(const RoverVisualState& state, std::vector<DrawItem>& out) const {
     const glm::dquat& q = state.orientation;
-    out.push_back({.mesh = body_, .position = state.position, .orientation = q});
+    out.push_back(
+        {.mesh = customBody_ ? customBody_ : body_, .position = state.position, .orientation = q});
     const std::size_t wheels = std::min(shape_.wheelHubs.size(), kRoverMaxWheels);
     for (std::size_t i = 0; i < wheels; ++i) {
         // Rolling forward turns the top of the wheel towards +x: a negative turn about +y.

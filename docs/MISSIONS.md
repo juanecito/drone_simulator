@@ -154,6 +154,14 @@ drone bounces off a person less than off a wall.
 
 `massKg`, `restitution` and `friction` on an obstacle replace these values for the whole item.
 
+**Model files.** `"model": "crate.obj"` draws an obstacle from a mesh file instead of its
+shape: glTF 2.0 (`.gltf`, `.glb`) or Wavefront OBJ (`.obj` with its `.mtl`), in the glTF axes
+(+Y up, front towards +Z). The model is scaled to fit the shape and rests on the ground; the
+shape still decides collisions and line of sight, so size the shape (`sizeM`, …) to match.
+Colours come from the materials (texture maps are ignored). The file is looked for in the
+mission's folder first, then in `~/.drone_simulation/models/` and the built-in models
+(`crate.obj`); `..` is not allowed. A missing file draws the shape and logs a warning.
+
 ## Objectives
 
 | Objective | Aerial | Ground | Completed when | Defaults |
@@ -547,6 +555,7 @@ Seeded weather generator settings (§4.2.3).
 | `massKg` | number |  | > 0 | Payload mass; for obstacles, replaces the typical mass of the figure (a light obstacle takes part of a heavy drone's impact). |
 | `restitution` | number |  | ≥ 0, ≤ 1 | Obstacles: fraction of the normal speed a drone keeps when it bounces off (default from the material: concrete 0.2, foliage 0.05, …). |
 | `friction` | number |  | ≥ 0, ≤ 2 | Obstacles: Coulomb friction coefficient against the drone (default from the material: concrete 0.5, foliage 0.9, …). |
+| `model` | string |  | max length 200, pattern `^[A-Za-z0-9_][A-Za-z0-9_./-]*\.([gG][lL][tT][fF]|[gG][lL][bB]|[oO][bB][jJ])$` | Obstacles: mesh file drawn instead of the shape (glTF 2.0 `.gltf`/`.glb` or `.obj`), looked for in the mission's folder, then `~/.drone_simulation/models/` and the built-in models; fitted to the shape, which still stops the vehicles. No `..`. |
 | `order` | integer |  | ≥ 0 |  |
 | `rampLengthM` | number |  | > 0 | Bridges: length of each approach ramp (default: a 12° slope up to the deck). |
 | `kerbs` | boolean |  |  | Bridges: kerbs along both sides of the deck (default true). |

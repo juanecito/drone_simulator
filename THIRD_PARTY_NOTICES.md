@@ -201,6 +201,14 @@ THE SOFTWARE.
   Debian package `libcurl4t64` (licence text in `/usr/share/doc/libcurl4t64/copyright`). Used only
   by `core/net` for requests to the data providers the user configures (§4.6).
 
+### Open Asset Import Library (Assimp) 5.4 (glTF 2.0 and OBJ model files)
+
+- © 2006-2024 assimp team — <https://github.com/assimp/assimp>
+- Used under the **BSD 3-Clause License**; linked dynamically and installed from the Debian
+  package `libassimp5` (licence text in `/usr/share/doc/libassimp5/copyright`). Used only by
+  `core/graphics` to read the vehicle and item model files the user or a mission names
+  (FR-GFX-12).
+
 ### OpenGL driver (libGL / libOpenGL / GLVND)
 
 Provided by the system graphics driver; no code is included.

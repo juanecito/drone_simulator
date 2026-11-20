@@ -130,6 +130,9 @@ struct GroundProfile {
     DriveControllerParams controller;                        ///< Drive controller.
     GroundLimits limits;                                     ///< Wading depth, stuck detection.
     CameraParams camera{.uptiltDeg = 5.0, .fovDeg = 110.0};  ///< FPV camera.
+    /// Model file drawn instead of the procedural body (FR-GFX-12): `.gltf`, `.glb` or `.obj`,
+    /// a name in the model folders or an absolute path; fitted to the body. Empty = procedural.
+    std::string modelFile;
 
     /// @brief Number of wheels of the layout.
     [[nodiscard]] int wheelCount() const noexcept;

@@ -466,6 +466,7 @@ private:
             {"order", {Gate, Waypoint}},
             {"rampLengthM", {Bridge}},
             {"kerbs", {Bridge}},
+            {"model", {Obstacle}},
         };
         const auto it = kAllowed.find(key);
         return it == kAllowed.end() || std::ranges::find(it->second, t) != it->second.end();
@@ -495,6 +496,13 @@ private:
                     key != "utm" && key != "local" && key != "altRef" && key != "headingDeg") {
                     item.properties[key] = value;
                 }
+            }
+            if (const auto model = item.properties.find("model");
+                model != item.properties.end() && model->is_string() &&
+                std::ranges::any_of(
+                    std::filesystem::path(model->get<std::string>()),
+                    [](const std::filesystem::path& part) { return part == ".."; })) {
+                error(path + ".model", "must not leave the model folders (\"..\")");
             }
             if (item.type == ItemType::PilotPosition && ++pilots > 1) {
                 error(path, "only one pilot position is allowed");

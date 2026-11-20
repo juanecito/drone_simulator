@@ -232,6 +232,7 @@ common::Result<AerialProfile> aerialProfileFromJson(const Json& json) {
     p.key = root.string("key");
     p.name = root.string("name");
     p.description = root.string("description", "");
+    p.modelFile = root.string("modelFile", "");
     if (root.has("layout")) {
         root.choice("layout", {"quad-x"});
     }
@@ -323,6 +324,9 @@ Json aerialProfileToJson(const AerialProfile& p) {
     j["key"] = p.key;
     j["name"] = p.name;
     j["description"] = p.description;
+    if (!p.modelFile.empty()) {
+        j["modelFile"] = p.modelFile;
+    }
     for (const ParamDescriptor& d : descriptors()) {
         const Json::json_pointer ptr{std::string(d.pointer)};
         if (d.kind == ParamKind::Integer) {
