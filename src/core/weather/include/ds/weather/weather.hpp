@@ -225,6 +225,34 @@ struct WeatherSettings {
 /// "overcast".
 [[nodiscard]] std::string_view coverName(double oktas) noexcept;
 
+/// @brief Snow is not plausible above this ground temperature, °C (FR-WX-05).
+inline constexpr double kSnowMaxTemperatureC = 4.0;
+/// @brief Fog and mist need at least this humidity, % (FR-WX-05).
+inline constexpr double kFogMinHumidityPct = 80.0;
+
+/// @brief A combination of parameters that cannot happen (error) or is unusual (warning).
+struct WeatherIssue {
+    bool error = false;   ///< Impossible rather than unusual.
+    std::string message;  ///< "snow at 25 °C is not possible (at most 4 °C)".
+    /// @brief Equality.
+    bool operator==(const WeatherIssue&) const = default;
+};
+
+/// @brief Plausibility checks of FR-WX-05 on conditions: snow or sleet above 4 °C, fog
+/// (a fog layer, or a visibility under 1 km without precipitation) under 80 % humidity,
+/// a thunderstorm with wind below level 2, a cloud base below the fog top, a layer whose top
+/// is not above its base. The mission loader checks the same on the mission's JSON.
+[[nodiscard]] std::vector<WeatherIssue> checkPlausibility(const WeatherConditions& conditions);
+
+/// @brief METAR sky-cover code of @p oktas: "FEW" (1–2), "SCT" (3–4), "BKN" (5–7), "OVC" (8);
+/// empty under half an okta.
+[[nodiscard]] std::string_view coverCode(double oktas) noexcept;
+
+/// @brief METAR present-weather group: intensity ("-" light, "+" heavy), "TS" for a
+/// thunderstorm, then "DZ", "RA", "SN" or "RASN" (sleet); "FG" (fog, under 1 km) or "BR"
+/// (mist) for a fog layer without precipitation; "HZ" for haze under 5 km. Empty otherwise.
+[[nodiscard]] std::string presentWeatherCode(const WeatherConditions& conditions);
+
 /// @brief Horizontal displacement, metres (east, north).
 struct Drift {
     double eastM = 0.0;   ///< Towards east.

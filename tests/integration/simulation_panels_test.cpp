@@ -320,6 +320,17 @@ TEST_F(SimulationPanelsTest, PanelsEditTheSimulation) {
     run(0.01);
     EXPECT_EQ(sim_->snapshot().windLevel, 6);
 
+    // The weather generator of the tab reaches the simulation (FR-WX-12) and the HUD.
+    auto* preset = environment.findChild<QComboBox*>(QStringLiteral("WeatherPresetCombo"));
+    ASSERT_NE(preset, nullptr);
+    preset->setCurrentIndex(preset->findData(QStringLiteral("overcast")));
+    emit preset->activated(preset->currentIndex());
+    run(0.01);
+    ASSERT_FALSE(sim_->snapshot().weather.clouds.empty());
+    EXPECT_GE(sim_->snapshot().weather.clouds.front().coverOktas, 7.5);
+    EXPECT_EQ(sim_->snapshot().windLevel, 6);  // The preset leaves the wind alone.
+    EXPECT_NE(sim_->hud().weather.text.find("OVC"), std::string::npos);
+
     app::ControlsPanel controls(*sim_, settings_.get());
     auto* device = controls.findChild<QComboBox*>(QStringLiteral("DeviceCombo"));
     ASSERT_NE(device, nullptr);
@@ -399,6 +410,43 @@ TEST_F(SimulationPanelsTest, KeyboardDrivesTheRoverAndIsRecorded) {
     EXPECT_EQ(sessions->front().vehicleType, "ground");
     EXPECT_EQ(sessions->front().vehicleProfileKey, "rover-4wd-3kg");
     EXPECT_GT(sessions->front().distanceM, 1.5);
+}
+
+TEST(HudPainter, PaintsTheWeatherUnderTheWind) {
+    // FR-WX-10: the weather line sits under the wind, in red in a thunderstorm, and the wind
+    // arrow moves below it.
+    sim::WorldSnapshot s;
+    s.hasVehicle = true;
+    s.telemetry.armed = true;
+    s.windLevel = 5;
+    s.windFromDeg = 250.0;
+    s.windMeanSpeedMs = 9.0;
+    s.windGustMs = 14.0;
+    s.weather.clouds = {{weather::CloudType::Cumulonimbus, 7.0, 900.0, 9000.0}};
+    s.weather.precipitation = {weather::PrecipitationType::Rain, 12.0};
+    s.weather.thunderstorm = true;
+    s.visibilityM = 2500.0;
+    const sim::HudModel hud = sim::buildHud(s, geo::LocalFrame({40.4, -3.7, 650.0}), {});
+    EXPECT_EQ(hud.weather.level, sim::HudLevel::Warning);
+
+    QImage image(1280, 720, QImage::Format_RGB32);
+    image.fill(QColor(70, 90, 120));
+    {
+        QPainter painter(&image);
+        app::paintHud(painter, image.rect(), hud, {});
+    }
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        image.save(QString::fromUtf8(dir) + QStringLiteral("/weather_hud.png"));
+    }
+    // Red text in the right half, below the middle (the weather line is the only red there).
+    int red = 0;
+    for (int y = image.height() / 2; y < image.height() * 3 / 4; ++y) {
+        for (int x = image.width() / 2; x < image.width(); ++x) {
+            const QColor c = image.pixelColor(x, y);
+            red += c.red() > 180 && c.green() < 90 && c.blue() < 90 ? 1 : 0;
+        }
+    }
+    EXPECT_GT(red, 50);
 }
 
 TEST(HudPainter, PaintsTheGroundGauges) {

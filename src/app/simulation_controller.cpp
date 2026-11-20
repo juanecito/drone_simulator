@@ -398,7 +398,7 @@ void SimulationController::createLoop() {
     c.air = lastEnvironment_.air;
     c.wind = lastEnvironment_.wind;
     c.windTable = windTable_;
-    c.weather = lastEnvironment_.weather;
+    c.weather = lastEnvironment_.weather.value_or(freeWeatherSettings(lastEnvironment_));
     c.weatherPresets = weatherPresets_;
     c.startPosition = home_;
     c.startHeadingRad = homeHeadingRad_;
@@ -944,11 +944,12 @@ void SimulationController::onTerrainChanged() {
 
 void SimulationController::onEnvironmentChanged() {
     const EnvironmentConfig& env = scene_->environment();
-    if (env.weather != lastEnvironment_.weather) {
-        // Entering or leaving a mission: the whole weather changes.
-        loop_->post([env](sim::World& w) {
-            w.setWeather(env.weather.value_or(weather::WeatherSettings::fromBasic(
-                env.air, env.wind, env.visibilityM, w.config().seed)));
+    if (env.weather != lastEnvironment_.weather ||
+        (!env.weather && env.freeWeather != lastEnvironment_.freeWeather)) {
+        // Entering or leaving a mission, or the free-mode generator changed (FR-WX-12): the
+        // whole weather changes; its clock keeps running.
+        loop_->post([settings = env.weather.value_or(freeWeatherSettings(env))](sim::World& w) {
+            w.setWeather(settings);
         });
     } else {
         if (env.wind != lastEnvironment_.wind) {

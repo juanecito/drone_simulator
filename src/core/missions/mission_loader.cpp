@@ -29,8 +29,8 @@ constexpr double kDefaultMaxAglM = 120.0;
 constexpr double kDefaultVlosDistanceM = 500.0;
 constexpr double kDefaultVlosHiddenS = 5.0;
 constexpr double kDefaultGraceS = 3.0;
-constexpr double kSnowMaxTemperatureC = 4.0;
-constexpr double kFogMinHumidityPct = 80.0;
+using weather::kFogMinHumidityPct;
+using weather::kSnowMaxTemperatureC;
 
 // ----- small JSON accessors (the schema has already checked the types) ----------------
 

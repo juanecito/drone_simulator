@@ -344,4 +344,91 @@ TEST(WindLevels, InterpolatedLevels) {
     EXPECT_EQ(t.interpolated(42.0), t.level(10));
 }
 
+TEST(WeatherPlausibility, FlagsImpossibleAndUnusualCombinations) {
+    WeatherConditions c = defaultConditions();
+    EXPECT_TRUE(checkPlausibility(c).empty());
+
+    c.precipitation = {PrecipitationType::Snow, 1.5};
+    c.air.temperatureC = 25.0;
+    auto issues = checkPlausibility(c);
+    ASSERT_EQ(issues.size(), 1U);
+    EXPECT_TRUE(issues[0].error);
+    EXPECT_EQ(issues[0].message, "snow at 25 °C is not possible (at most 4 °C)");
+    c.air.temperatureC = kSnowMaxTemperatureC;
+    EXPECT_TRUE(checkPlausibility(c).empty());
+
+    c = defaultConditions();
+    c.fog.topM = 80.0;
+    c.visibilityM = 200.0;
+    c.air.humidityPct = 30.0;
+    issues = checkPlausibility(c);
+    ASSERT_EQ(issues.size(), 1U);
+    EXPECT_TRUE(issues[0].error);
+    EXPECT_NE(issues[0].message.find("humidity"), std::string::npos);
+    // Thick haze is not fog.
+    c.fog = {0.0, true};
+    EXPECT_TRUE(checkPlausibility(c).empty());
+
+    c = defaultConditions();
+    c.thunderstorm = true;
+    c.windLevel = 1.0;
+    issues = checkPlausibility(c);
+    ASSERT_EQ(issues.size(), 1U);
+    EXPECT_FALSE(issues[0].error);
+
+    c = defaultConditions();
+    c.air.humidityPct = 99.0;
+    c.fog.topM = 150.0;
+    c.clouds = {{CloudType::Stratus, 8.0, 100.0, 50.0}};
+    issues = checkPlausibility(c);
+    ASSERT_EQ(issues.size(), 2U);  // Top below base, base below the fog top.
+    EXPECT_TRUE(issues[0].error && issues[1].error);
+}
+
+TEST(WeatherPlausibility, EveryPresetIsPlausible) {
+    for (const WeatherPreset& p : WeatherPresetTable::builtIn().presets()) {
+        WeatherSettings s;
+        s.preset = p.key;
+        if (p.key == "thunderstorm") {
+            s.overrides.windLevel = 4;  // The preset leaves the wind to the mission.
+        }
+        const WeatherConditions c = WeatherGenerator(s).plannedAt(0.0);
+        for (const WeatherIssue& issue : checkPlausibility(c)) {
+            ADD_FAILURE() << p.key << ": " << issue.message;
+        }
+    }
+}
+
+TEST(WeatherCodes, MetarCoverAndPresentWeather) {
+    EXPECT_EQ(coverCode(0.2), "");
+    EXPECT_EQ(coverCode(1.0), "FEW");
+    EXPECT_EQ(coverCode(4.0), "SCT");
+    EXPECT_EQ(coverCode(7.0), "BKN");
+    EXPECT_EQ(coverCode(8.0), "OVC");
+
+    WeatherConditions c = defaultConditions();
+    EXPECT_EQ(presentWeatherCode(c), "");
+    c.precipitation = {PrecipitationType::Drizzle, 0.1};
+    EXPECT_EQ(presentWeatherCode(c), "-DZ");
+    c.precipitation = {PrecipitationType::Rain, 4.0};
+    EXPECT_EQ(presentWeatherCode(c), "RA");
+    c.precipitation = {PrecipitationType::Snow, 4.0};
+    EXPECT_EQ(presentWeatherCode(c), "+SN");
+    c.precipitation = {PrecipitationType::Sleet, 0.5};
+    EXPECT_EQ(presentWeatherCode(c), "-RASN");
+    c.precipitation = {PrecipitationType::Rain, 12.0};
+    c.thunderstorm = true;
+    EXPECT_EQ(presentWeatherCode(c), "+TSRA");
+    c.precipitation = {};
+    EXPECT_EQ(presentWeatherCode(c), "TS");
+    c.thunderstorm = false;
+    c.fog.topM = 60.0;
+    c.visibilityM = 300.0;
+    EXPECT_EQ(presentWeatherCode(c), "FG");
+    c.visibilityM = 3000.0;
+    EXPECT_EQ(presentWeatherCode(c), "BR");
+    c.fog = {0.0, true};
+    EXPECT_EQ(presentWeatherCode(c), "HZ");
+}
+
 }  // namespace

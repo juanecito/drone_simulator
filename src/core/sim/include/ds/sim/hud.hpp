@@ -113,6 +113,10 @@ struct HudModel {
     HudItem home;                   ///< Distance and bearing to home.
     HudItem pilotDistance;          ///< Distance to the pilot (empty without a pilot position).
     HudItem wind;                   ///< Wind level and speed (empty when hidden).
+    /// Weather (FR-WX-10): METAR-style sky cover of the lowest layer, present weather,
+    /// visibility at the vehicle and the temperature, e.g. "WX BKN 900 m -RA VIS 6.0 km 12 °C".
+    /// Amber under 5 km visibility or with precipitation, red under 1 km or in a thunderstorm.
+    HudItem weather;
     HudItem timer;                  ///< Flight timer.
     HudItem clockLocal;             ///< Local time.
     HudItem clockUtc;               ///< UTC.
@@ -129,6 +133,14 @@ struct HudModel {
     std::optional<HudGround> ground;
     std::vector<HudMarker> markers;     ///< Guidance markers.
 };
+
+/// @brief Visibility under which the HUD weather is amber, m.
+inline constexpr double kVisibilityCautionM = 5000.0;
+/// @brief Visibility under which the HUD weather is red, m.
+inline constexpr double kVisibilityWarningM = 1000.0;
+
+/// @brief The HUD weather item for @p snapshot (part of buildHud()).
+[[nodiscard]] HudItem weatherItem(const WorldSnapshot& snapshot, bool imperial);
 
 /// @brief AGL thresholds of the flight-rule indicator (FR-GFX-14).
 inline constexpr double kAglCautionM = 100.0;

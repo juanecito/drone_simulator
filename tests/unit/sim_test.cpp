@@ -534,6 +534,43 @@ TEST(Hud, GroundDroneReadOutsAndWarnings) {
     EXPECT_FALSE(buildHud(s, frame, {}).ground.has_value());
 }
 
+TEST(Hud, WeatherItemInMetarStyle) {
+    WorldSnapshot s;
+    s.weather = weather::defaultConditions();
+    s.visibilityM = 50'000.0;
+    HudItem item = weatherItem(s, false);
+    EXPECT_EQ(item.text, "WX SKC VIS 50 km 15 °C");
+    EXPECT_EQ(item.level, HudLevel::Normal);
+
+    s.weather.clouds = {{weather::CloudType::Cirrus, 2.0, 7000.0, 7500.0},
+                        {weather::CloudType::Stratocumulus, 0.2, 500.0, 800.0}};
+    std::ranges::sort(s.weather.clouds, {}, &weather::CloudLayer::baseM);
+    s.weather.precipitation = {weather::PrecipitationType::Rain, 1.0};
+    s.weather.air.temperatureC = 12.4;
+    s.visibilityM = 6000.0;
+    item = weatherItem(s, false);
+    // The layer under half an okta does not show.
+    EXPECT_EQ(item.text, "WX FEW 7000 m -RA VIS 6 km 12 °C");
+    EXPECT_EQ(item.level, HudLevel::Caution);
+
+    s.weather.clouds = {{weather::CloudType::Cumulonimbus, 6.0, 900.0, 9000.0}};
+    s.weather.precipitation = {weather::PrecipitationType::Rain, 12.0};
+    s.weather.thunderstorm = true;
+    s.visibilityM = 2500.0;
+    item = weatherItem(s, true);
+    EXPECT_EQ(item.text, "WX BKN 2953 ft CB +TSRA VIS 1.6 mi 54 °F");
+    EXPECT_EQ(item.level, HudLevel::Warning);
+
+    // Inside the cloud the visibility at the vehicle is what counts.
+    s.weather = weather::defaultConditions();
+    s.visibilityM = weather::kInCloudVisibilityM;
+    item = weatherItem(s, false);
+    EXPECT_EQ(item.text, "WX SKC VIS 60 m 15 °C");
+    EXPECT_EQ(item.level, HudLevel::Warning);
+    s.hasVehicle = true;
+    EXPECT_EQ(buildHud(s, geo::LocalFrame({40.4, -3.7, 650.0}), {}).weather.text, item.text);
+}
+
 TEST(Hud, CompassUsesTheWorldMagneticModel) {
     using namespace std::chrono;
     const auto utc = [](year_month_day d, hours h) {

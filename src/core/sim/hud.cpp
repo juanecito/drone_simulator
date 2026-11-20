@@ -173,6 +173,43 @@ void buildGroundHud(const WorldSnapshot& s, const HudOptions& o, HudModel& h) {
 
 }  // namespace
 
+HudItem weatherItem(const WorldSnapshot& s, bool imperial) {
+    const weather::WeatherConditions& c = s.weather;
+    std::string text = "WX";
+    // The lowest layer that shows (METAR reports every layer; one fits the OSD).
+    for (const weather::CloudLayer& l : c.clouds) {
+        if (const std::string_view code = weather::coverCode(l.coverOktas); !code.empty()) {
+            text += std::format(" {} {}", code, length(l.baseM, imperial, 0));
+            if (l.type == weather::CloudType::Cumulonimbus) {
+                text += " CB";
+            }
+            break;
+        }
+    }
+    if (text == "WX") {
+        text += " SKC";
+    }
+    if (const std::string present = weather::presentWeatherCode(c); !present.empty()) {
+        text += " " + present;
+    }
+    const double v = s.visibilityM;
+    const std::string vis =
+        imperial ? std::format("{:.1f} mi", v / 1609.344)
+                 : (v < 5000.0 ? std::format("{:.0f} m", v) : std::format("{:.0f} km", v / 1000.0));
+    text += " VIS " + vis;
+    text += imperial ? std::format(" {:.0f} °F", c.air.temperatureC * 1.8 + 32.0)
+                     : std::format(" {:.0f} °C", c.air.temperatureC);
+    HudItem item{std::move(text)};
+    const bool wet =
+        c.precipitation.type != weather::PrecipitationType::None && c.precipitation.rateMmH > 0.0;
+    if (v < kVisibilityWarningM || c.thunderstorm) {
+        item.level = HudLevel::Warning;
+    } else if (v < kVisibilityCautionM || wet) {
+        item.level = HudLevel::Caution;
+    }
+    return item;
+}
+
 HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const HudOptions& o) {
     HudModel h;
     const physics::VehicleTelemetry& t = s.telemetry;
@@ -273,6 +310,7 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
                 common::wrapRadiansPi(common::degToRad(s.windFromDeg + 180.0) - s.attitude.yaw);
         }
     }
+    h.weather = weatherItem(s, o.imperial);
     const auto timer = static_cast<int>(t.armedTimeS);
     h.timer.text = std::format("{:02d}:{:02d}", timer / 60, timer % 60);
     if (auto local = astro::toLocalTime(s.utc, o.timeZone)) {

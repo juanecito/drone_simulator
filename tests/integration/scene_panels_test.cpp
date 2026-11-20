@@ -4,6 +4,7 @@
 // Scene adapter, Terrain tab and Environment tab (FR-TER-04a, FR-TER-09, FR-TER-10, FR-UI-06,
 // FR-AST-07). Runs on the offscreen platform; nothing here needs OpenGL.
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTimeEdit>
 #include <QDoubleSpinBox>
@@ -13,6 +14,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTemporaryDir>
 
@@ -112,6 +114,42 @@ TEST(SceneConfig, EnvironmentJsonRoundTripAndClamping) {
     const auto read = app::environmentFromJson(bad, {});
     EXPECT_EQ(read.visibilityM, app::kMinVisibilityM);
     EXPECT_EQ(read.timeZone, "UTC");
+}
+
+TEST(SceneConfig, FreeWeatherJsonRoundTripAndSettings) {
+    app::EnvironmentConfig env;
+    env.freeWeather.seed = 4242;
+    env.freeWeather.preset = "broken-clouds";
+    env.freeWeather.overrides.clouds =
+        std::vector<weather::CloudLayer>{{weather::CloudType::Stratocumulus, 6.0, 900.0, 1400.0}};
+    env.freeWeather.overrides.precipitation =
+        weather::Precipitation{weather::PrecipitationType::Rain, 4.0};
+    env.freeWeather.timeline = {{.atS = 300.0, .transitionS = 60.0, .preset = "heavy-rain"}};
+    env.freeWeather.timelineEnabled = false;
+    env.air.temperatureC = 9.0;
+    env.wind.level = 3;
+    env.visibilityM = 6000.0;
+    EXPECT_EQ(app::environmentFromJson(app::environmentToJson(env), {}), env);
+
+    // The air, wind and visibility of the tab complete the generator's settings.
+    const weather::WeatherSettings s = app::freeWeatherSettings(env);
+    EXPECT_EQ(s.overrides.temperatureC, 9.0);
+    EXPECT_EQ(s.overrides.windLevel, 3);
+    EXPECT_EQ(s.overrides.visibilityM, 6000.0);
+    const weather::WeatherConditions start = app::freeWeatherStart(env);
+    ASSERT_EQ(start.clouds.size(), 1U);
+    EXPECT_EQ(start.clouds[0].baseM, 900.0);
+    EXPECT_EQ(start.precipitation.type, weather::PrecipitationType::Rain);
+    EXPECT_DOUBLE_EQ(start.visibilityM, 6000.0);
+
+    // Old settings without a weather object, and broken ones, keep the default.
+    QJsonObject old = app::environmentToJson(env);
+    old.remove(QStringLiteral("weather"));
+    EXPECT_EQ(app::environmentFromJson(old, {}).freeWeather,
+              app::EnvironmentConfig::defaultFreeWeather());
+    old.insert(QStringLiteral("weather"), QJsonObject{{QStringLiteral("preset"), 7}});
+    EXPECT_EQ(app::environmentFromJson(old, {}).freeWeather,
+              app::EnvironmentConfig::defaultFreeWeather());
 }
 
 TEST(SceneConfig, BuiltInPresetsAreValid) {
@@ -285,6 +323,74 @@ TEST_F(ScenePanelsTest, EnvironmentPanelEditsExposureAndVisibility) {
     EXPECT_DOUBLE_EQ(scene_->environment().exposure.manualEv100, -4.0);
     child<QDoubleSpinBox>(panel, "VisibilitySpin")->setValue(0.8);
     EXPECT_DOUBLE_EQ(scene_->environment().visibilityM, 800.0);
+}
+
+TEST_F(ScenePanelsTest, EnvironmentPanelWeatherGenerator) {
+    EnvironmentPanel panel(*scene_);
+    auto* preset = child<QComboBox>(panel, "WeatherPresetCombo");
+    preset->setCurrentIndex(preset->findData(QStringLiteral("heavy-rain")));
+    emit preset->activated(preset->currentIndex());
+    const app::EnvironmentConfig& env = scene_->environment();
+    EXPECT_EQ(env.freeWeather.preset, "heavy-rain");
+    ASSERT_TRUE(env.freeWeather.overrides.precipitation.has_value());
+    EXPECT_EQ(env.freeWeather.overrides.precipitation->type, weather::PrecipitationType::Rain);
+    EXPECT_FALSE(env.freeWeather.overrides.clouds->empty());
+    EXPECT_LT(env.visibilityM, 10'000.0);  // The preset's visibility moved to the tab.
+    EXPECT_DOUBLE_EQ(env.air.humidityPct, 95.0);
+    // The widgets show it.
+    EXPECT_EQ(child<QComboBox>(panel, "PrecipitationCombo")->currentIndex(), 2);
+    EXPECT_EQ(child<QComboBox>(panel, "IntensityCombo")->currentIndex(), 2);
+    EXPECT_GT(child<QSpinBox>(panel, "CloudCover0")->value(), 0);
+    EXPECT_TRUE(child<QComboBox>(panel, "IntensityCombo")->isEnabled());
+
+    // Parameters edit the overrides.
+    child<QSpinBox>(panel, "CloudCover1")->setValue(3);
+    child<QSpinBox>(panel, "CloudBase1")->setValue(6000);
+    child<QSpinBox>(panel, "CloudTop1")->setValue(6500);
+    ASSERT_EQ(env.freeWeather.overrides.clouds->size(), 2U);
+    EXPECT_EQ(env.freeWeather.overrides.clouds->back().baseM, 6000.0);
+    auto* intensity = child<QComboBox>(panel, "IntensityCombo");
+    intensity->setCurrentIndex(0);
+    emit intensity->activated(0);
+    EXPECT_DOUBLE_EQ(
+        env.freeWeather.overrides.precipitation->rateMmH,
+        weather::intensityRateMmH(weather::PrecipitationType::Rain, weather::Intensity::Light));
+    child<QCheckBox>(panel, "ThunderstormCheck")->setChecked(true);
+    EXPECT_EQ(env.freeWeather.overrides.thunderstorm, true);
+
+    // Seed and Randomise.
+    child<QSpinBox>(panel, "WeatherSeedSpin")->setValue(77);
+    EXPECT_EQ(env.freeWeather.seed, 77U);
+    child<QPushButton>(panel, "WeatherRandomiseButton")->click();
+    EXPECT_NE(env.freeWeather.seed, 77U);  // 1 in a billion to fail.
+    EXPECT_LE(env.freeWeather.seed, app::kMaxWeatherSeed);
+
+    // Timeline on and off.
+    auto* timelinePreset = child<QComboBox>(panel, "TimelinePresetCombo");
+    EXPECT_FALSE(timelinePreset->isEnabled());
+    child<QCheckBox>(panel, "TimelineCheck")->setChecked(true);
+    EXPECT_TRUE(timelinePreset->isEnabled());
+    timelinePreset->setCurrentIndex(timelinePreset->findData(QStringLiteral("clear")));
+    emit timelinePreset->activated(timelinePreset->currentIndex());
+    child<QSpinBox>(panel, "TimelineAtSpin")->setValue(3);
+    ASSERT_EQ(env.freeWeather.timeline.size(), 1U);
+    EXPECT_TRUE(env.freeWeather.timelineEnabled);
+    EXPECT_EQ(env.freeWeather.timeline[0].preset, "clear");
+    EXPECT_DOUBLE_EQ(env.freeWeather.timeline[0].atS, 180.0);
+    child<QCheckBox>(panel, "TimelineCheck")->setChecked(false);
+    EXPECT_FALSE(env.freeWeather.timelineEnabled);
+    EXPECT_EQ(env.freeWeather.timeline.size(), 1U);  // Kept for when it is switched on again.
+
+    // The summary describes the start and flags implausible combinations (FR-WX-05).
+    auto* summary = child<QLabel>(panel, "WeatherSummaryLabel");
+    EXPECT_TRUE(summary->text().contains(QStringLiteral("rain")));
+    auto* precipitation = child<QComboBox>(panel, "PrecipitationCombo");
+    precipitation->setCurrentIndex(3);  // Snow.
+    emit precipitation->activated(3);
+    child<QDoubleSpinBox>(panel, "TemperatureSpin")->setValue(20.0);
+    EXPECT_TRUE(summary->text().contains(QStringLiteral("not possible")));
+    panel.resize(480, 1700);
+    saveImage(panel, "environment_panel_weather.png");
 }
 
 TEST(EnvironmentPanelText, PhaseNames) {

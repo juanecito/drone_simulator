@@ -488,16 +488,18 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
         groundGauges(p, {area.left() + margin, leftTop + 3.0 * line + 4.0 * options.scale}, g,
                      options.scale);
         column(p, {area.right() - margin, middle},
-               {&hud.speed, &g.slip, &g.odometer, &hud.home, &hud.pilotDistance, &hud.wind},
+               {&hud.speed, &g.slip, &g.odometer, &hud.home, &hud.pilotDistance, &hud.wind,
+                &hud.weather},
                Qt::AlignRight);
     } else {
         column(p, {area.left() + margin, leftTop},
                {&hud.altitudeAgl, &hud.altitudeAmsl, &hud.verticalSpeed}, Qt::AlignLeft);
         column(p, {area.right() - margin, middle},
-               {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind}, Qt::AlignRight);
+               {&hud.speed, &hud.home, &hud.pilotDistance, &hud.wind, &hud.weather},
+               Qt::AlignRight);
     }
     if (hud.windArrowRad) {
-        const double rows = hud.ground ? 7.0 : 5.0;
+        const double rows = hud.ground ? 8.0 : 6.0;
         windArrow(p, {area.right() - margin - 14.0 * options.scale, middle + rows * line},
                   12.0 * options.scale, *hud.windArrowRad);
     }

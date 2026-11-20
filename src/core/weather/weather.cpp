@@ -629,6 +629,76 @@ std::string_view coverName(double oktas) noexcept {
     return o <= 2.0 ? "few" : o <= 4.0 ? "scattered" : o <= 7.0 ? "broken" : "overcast";
 }
 
+std::vector<WeatherIssue> checkPlausibility(const WeatherConditions& c) {
+    std::vector<WeatherIssue> issues;
+    const PrecipitationType p = c.precipitation.type;
+    const double t = c.air.temperatureC;
+    if ((p == PrecipitationType::Snow || p == PrecipitationType::Sleet) &&
+        t > kSnowMaxTemperatureC) {
+        issues.push_back({true, std::format("{} at {:g} °C is not possible (at most {:g} °C)",
+                                            precipitationTypeName(p), t, kSnowMaxTemperatureC)});
+    }
+    const bool fog =
+        c.fog.topM > 0.0 || (c.visibilityM < 1000.0 && p == PrecipitationType::None && !c.fog.haze);
+    if (fog && c.air.humidityPct < kFogMinHumidityPct) {
+        issues.push_back({true, std::format("fog needs a humidity of at least {:g} % (got {:g} %)",
+                                            kFogMinHumidityPct, c.air.humidityPct)});
+    }
+    if (c.thunderstorm && c.windLevel < 2.0) {
+        issues.push_back({false, "a thunderstorm with calm wind is unusual (wind level below 2)"});
+    }
+    for (const CloudLayer& l : c.clouds) {
+        if (l.topM <= l.baseM) {
+            issues.push_back({true, std::format("a cloud layer's top ({:g} m) must be above its "
+                                                "base ({:g} m)",
+                                                l.topM, l.baseM)});
+        }
+        if (l.coverOktas >= 0.5 && c.fog.topM > 0.0 && l.baseM < c.fog.topM) {
+            issues.push_back({true, std::format("cloud base {:g} m is below the fog top {:g} m",
+                                                l.baseM, c.fog.topM)});
+        }
+    }
+    return issues;
+}
+
+std::string_view coverCode(double oktas) noexcept {
+    if (oktas < 0.5) {
+        return {};
+    }
+    const double o = std::round(oktas);
+    return o <= 2.0 ? "FEW" : o <= 4.0 ? "SCT" : o <= 7.0 ? "BKN" : "OVC";
+}
+
+std::string presentWeatherCode(const WeatherConditions& c) {
+    const Precipitation& p = c.precipitation;
+    std::string code;
+    if (p.type != PrecipitationType::None && p.rateMmH > 0.0) {
+        const Intensity i = intensityOf(p.type, p.rateMmH);
+        code = i == Intensity::Light ? "-" : i == Intensity::Heavy ? "+" : "";
+        if (c.thunderstorm) {
+            code += "TS";
+        }
+        switch (p.type) {
+            case PrecipitationType::Drizzle: code += "DZ"; break;
+            case PrecipitationType::Rain: code += "RA"; break;
+            case PrecipitationType::Snow: code += "SN"; break;
+            case PrecipitationType::Sleet: code += "RASN"; break;
+            case PrecipitationType::None: break;
+        }
+        return code;
+    }
+    if (c.thunderstorm) {
+        return "TS";
+    }
+    if (c.fog.topM > 0.0 && !c.fog.haze) {
+        return c.visibilityM < 1000.0 ? "FG" : "BR";
+    }
+    if (c.visibilityM < 5000.0) {
+        return c.visibilityM < 1000.0 && !c.fog.haze ? "FG" : "HZ";
+    }
+    return {};
+}
+
 std::string describe(const WeatherConditions& c, const WindLevelTable& windTable) {
     std::vector<std::string> parts;
     const int level = static_cast<int>(std::lround(c.windLevel));

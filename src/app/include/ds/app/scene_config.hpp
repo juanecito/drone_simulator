@@ -45,13 +45,30 @@ struct EnvironmentConfig {
     double visibilityM = 60'000.0;        ///< Meteorological visibility (fog / haze).
     weather::WindSettings wind;           ///< Wind level and direction (FR-WIND-01).
     weather::AirConditions air;           ///< Temperature, QNH and humidity at the ground.
-    /// Weather generator settings of a mission (FR-WX-01). Empty in free mode, where the
-    /// weather is a clear sky with the visibility, wind and air above. In a mission those
-    /// fields hold the mission's weather at its start (for display).
+    /// Free-mode weather generator (FR-WX-12): seed, base preset, the clouds,
+    /// precipitation, fog and thunderstorm as overrides, and the timeline. The air, wind and
+    /// visibility above complete it (freeWeatherSettings()).
+    weather::WeatherSettings freeWeather = defaultFreeWeather();
+    /// Weather generator settings of a mission (FR-WX-01). Empty in free mode, where
+    /// @ref freeWeather applies. In a mission the fields above hold the mission's weather at
+    /// its start (for display).
     std::optional<weather::WeatherSettings> weather;
+
+    /// @brief Clear sky, seed 1, no timeline.
+    [[nodiscard]] static weather::WeatherSettings defaultFreeWeather();
     /// @brief Equality.
     bool operator==(const EnvironmentConfig&) const = default;
 };
+
+/// @brief The weather generator settings of free mode: @ref EnvironmentConfig::freeWeather
+/// with the air, wind and visibility of @p config as overrides.
+[[nodiscard]] weather::WeatherSettings freeWeatherSettings(const EnvironmentConfig& config);
+
+/// @brief The conditions free mode starts with (the generator's plan at time 0).
+[[nodiscard]] weather::WeatherConditions freeWeatherStart(const EnvironmentConfig& config);
+
+/// @brief Largest seed the Environment tab offers (it is typed in and must survive JSON).
+inline constexpr std::uint64_t kMaxWeatherSeed = 999'999'999;
 
 /// @brief Valid visibility range, metres.
 inline constexpr double kMinVisibilityM = 50.0;

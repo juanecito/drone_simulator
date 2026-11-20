@@ -11,6 +11,8 @@
 #include <cmath>
 #include <format>
 
+#include "ds/common/json.hpp"
+
 namespace ds::app {
 namespace {
 
@@ -225,8 +227,42 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
     return c;
 }
 
+weather::WeatherSettings EnvironmentConfig::defaultFreeWeather() {
+    weather::WeatherSettings s;
+    s.seed = 1;
+    s.preset = "clear";
+    s.overrides.clouds = std::vector<weather::CloudLayer>{};
+    s.overrides.precipitation = weather::Precipitation{};
+    s.overrides.fog = weather::Fog{};
+    s.overrides.thunderstorm = false;
+    s.timelineEnabled = false;
+    return s;
+}
+
+weather::WeatherSettings freeWeatherSettings(const EnvironmentConfig& c) {
+    weather::WeatherSettings s = c.freeWeather;
+    weather::WeatherOverrides& o = s.overrides;
+    o.temperatureC = c.air.temperatureC;
+    o.pressureHpa = c.air.pressureHpa;
+    o.humidityPct = c.air.humidityPct;
+    o.dewPointC.reset();
+    o.windLevel = c.wind.level;
+    o.windFromDeg = c.wind.fromDeg;
+    o.visibilityM = c.visibilityM;
+    s.randomWindDirection = c.wind.randomDirection;
+    s.forecast = false;
+    return s;
+}
+
+weather::WeatherConditions freeWeatherStart(const EnvironmentConfig& c) {
+    return weather::WeatherGenerator(freeWeatherSettings(c)).plannedAt(0.0);
+}
+
 QJsonObject environmentToJson(const EnvironmentConfig& c) {
+    const QJsonObject weatherJson =
+        QJsonDocument::fromJson(QByteArray::fromStdString(c.freeWeather.toJson().dump())).object();
     return QJsonObject{
+        {QStringLiteral("weather"), weatherJson},
         {QStringLiteral("time"), QString::fromStdString(astro::formatUtc(c.time))},
         {QStringLiteral("timeZone"), QString::fromStdString(c.timeZone)},
         {QStringLiteral("animate"), c.animate},
@@ -288,6 +324,23 @@ EnvironmentConfig environmentFromJson(const QJsonObject& json, const Environment
                    kMinQnhHpa, kMaxQnhHpa);
     c.air.humidityPct = std::clamp(
         json.value(QStringLiteral("humidityPct")).toDouble(defaults.air.humidityPct), 0.0, 100.0);
+    if (const QJsonValue w = json.value(QStringLiteral("weather")); w.isObject()) {
+        const QByteArray text = QJsonDocument(w.toObject()).toJson(QJsonDocument::Compact);
+        if (auto parsed = common::parseJson(text.toStdString())) {
+            if (auto settings = weather::WeatherSettings::fromJson(*parsed)) {
+                // The free-mode overrides are always set; missing ones keep the defaults.
+                weather::WeatherSettings merged = *settings;
+                const weather::WeatherOverrides& d = defaults.freeWeather.overrides;
+                weather::WeatherOverrides& o = merged.overrides;
+                o.clouds = o.clouds ? o.clouds : d.clouds;
+                o.precipitation = o.precipitation ? o.precipitation : d.precipitation;
+                o.fog = o.fog ? o.fog : d.fog;
+                o.thunderstorm = o.thunderstorm ? o.thunderstorm : d.thunderstorm;
+                merged.seed = std::min(merged.seed, kMaxWeatherSeed);
+                c.freeWeather = merged;
+            }
+        }
+    }
     return c;
 }
 

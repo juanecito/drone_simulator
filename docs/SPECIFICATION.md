@@ -1935,8 +1935,8 @@ so Markdown pages appear in the generated site.
     come from it. The visibility used for VLOS is taken at the vehicle's height: 60 m inside
     a cloud layer of ≥ 4 oktas, the clear-air value above a ground fog layer. Free mode keeps
     the M3 Environment tab: its air, wind and visibility become a clear-sky setting
-    (`WeatherSettings::fromBasic`). The snapshot carries the conditions and cloud drift for
-    the rendering and the HUD.
+    (`WeatherSettings::fromBasic`; replaced by the full generator in step 4). The snapshot
+    carries the conditions and cloud drift for the rendering and the HUD.
   - *Missions:* the loader turns `environment.weather` into `WeatherSettings`; the mission
     scene shows its start conditions in the Environment tab; the briefing shows the summary of
     FR-WX-10 (`weather::describe`) and, with `forecast: true`, one line per timeline entry.
@@ -2023,6 +2023,34 @@ so Markdown pages appear in the generated site.
     following and spatial variation, FR-WX-04, are not modelled).
   - *Cost:* 9.9 ms per 1080p frame with broken clouds and heavy rain on an RTX A2000
     (5.9 ms clear), within NFR-PERF-01.
+- **Step 4 — The generator in free mode and on the HUD (done, FR-WX-12 M, FR-WX-05 M,
+  FR-WX-10 HUD):**
+  - *Settings:* `EnvironmentConfig::freeWeather` holds the free-mode generator settings — seed,
+    preset, and the clouds, precipitation, fog and thunderstorm as overrides that are always
+    set, plus one timeline entry and its on/off switch. The tab's temperature, QNH, humidity,
+    wind and visibility complete them (`freeWeatherSettings()`); the whole object is saved in
+    `scene.environment.weather` in the mission JSON form (older settings without it start
+    clear). Changing any of it calls `World::setWeather`, which rebuilds the generator
+    without restarting its clock; air, wind and visibility edits still change only their
+    members.
+  - *Environment tab:* a **Weather** group with the preset (loading it replaces the sky and
+    copies the air, wind and visibility it lists into their fields, so the fields always show
+    what flies), the seed with *Randomise*, three cloud layers (type, oktas, base, top; 0 oktas
+    = no layer), precipitation type and intensity (the representative rates of FR-WX-01),
+    visibility, fog top, thunderstorm, and the timeline: *Change to* a preset after N minutes
+    over M minutes. One entry covers free flying; missions keep the full timeline. Below it,
+    the FR-WX-10 summary of the start conditions and the plausibility checks.
+  - *Plausibility (FR-WX-05):* `weather::checkPlausibility` checks conditions (snow or sleet
+    above 4 °C, fog under 80 % humidity, a thunderstorm below wind level 2, a cloud top not
+    above its base, a cloud base below the fog top). The tab shows its findings in red
+    (impossible) or amber (unusual) without refusing the setting; the mission loader keeps
+    its checks on the JSON, now with the shared limits.
+  - *HUD (FR-WX-10):* a METAR-style line under the wind: the lowest layer of at least half an
+    okta (`FEW`/`SCT`/`BKN`/`OVC` and its base, `CB` for cumulonimbus, `SKC` without one), the
+    present weather (`-RA`, `+TSRA`, `SN`, `RASN`, `DZ`, `FG`, `BR`, `HZ`), the visibility at
+    the vehicle (60 m inside a cloud) and the temperature, e.g. *WX BKN 900 m -RA VIS 6 km
+    12 °C*. Amber under 5 km or with precipitation, red under 1 km or in a thunderstorm.
+    Heights in feet, visibility in miles and temperature in °F with imperial units.
 
 ---
 

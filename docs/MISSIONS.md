@@ -271,7 +271,11 @@ flashes of lightning.
 
 The **briefing** summarises the weather at the start, e.g. *Wind 270° level 4 (24 km/h,
 gusts 34) · broken clouds at 900 m · light rain · visibility 6.0 km · 12 °C · QNH 1009*. The
-timeline is listed only when `forecast` is true.
+timeline is listed only when `forecast` is true. During the flight the HUD shows the weather under the
+wind in METAR style, e.g. *WX BKN 900 m -RA VIS 6 km 12 °C* (amber under 5 km visibility or in
+precipitation, red under 1 km or in a thunderstorm). Outside missions the same generator is in
+the Environment tab: preset, seed with *Randomise*, cloud layers, precipitation, visibility,
+fog, thunderstorm and one timed change that can be switched off.
 
 ## Lifecycle
 

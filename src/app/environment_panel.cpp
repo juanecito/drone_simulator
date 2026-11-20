@@ -8,6 +8,7 @@
 #include <QDateTimeEdit>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -21,8 +22,10 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <random>
 
 #include "ds/app/scene_controller.hpp"
 #include "ds/astro/events.hpp"
@@ -48,6 +51,39 @@ LocalMs fromWall(const QDateTime& wall) {
 }
 
 QString degrees(double value) { return QString::number(value, 'f', 1) + QStringLiteral("°"); }
+
+const weather::WeatherPresetTable& presets() { return weather::WeatherPresetTable::builtIn(); }
+
+constexpr std::array<weather::CloudType, 5> kCloudTypes{
+    weather::CloudType::Cumulus, weather::CloudType::Stratocumulus, weather::CloudType::Stratus,
+    weather::CloudType::Cirrus, weather::CloudType::Cumulonimbus};
+constexpr std::array<weather::PrecipitationType, 5> kPrecipitationTypes{
+    weather::PrecipitationType::None, weather::PrecipitationType::Drizzle,
+    weather::PrecipitationType::Rain, weather::PrecipitationType::Snow,
+    weather::PrecipitationType::Sleet};
+constexpr std::array<weather::Intensity, 3> kIntensities{
+    weather::Intensity::Light, weather::Intensity::Moderate, weather::Intensity::Heavy};
+
+// Timeline entry of a free-mode weather that has none yet.
+weather::WeatherChange defaultChange() {
+    weather::WeatherChange c;
+    c.atS = 600.0;
+    c.transitionS = 300.0;
+    c.preset = "light-rain";
+    return c;
+}
+
+int presetIndex(QComboBox* combo, const std::string& key) {
+    return std::max(0, combo->findData(QString::fromStdString(key)));
+}
+
+void addPresets(QComboBox* combo) {
+    for (const weather::WeatherPreset& p : presets().presets()) {
+        combo->addItem(QString::fromStdString(p.name), QString::fromStdString(p.key));
+    }
+}
+
+QString escaped(const std::string& text) { return QString::fromStdString(text).toHtmlEscaped(); }
 
 }  // namespace
 
@@ -160,7 +196,7 @@ void EnvironmentPanel::buildUi() {
     skyForm->addRow(events_);
     layout->addWidget(skyBox);
 
-    auto* camBox = new QGroupBox(tr("Exposure and visibility"));
+    auto* camBox = new QGroupBox(tr("Exposure"));
     auto* camForm = new QFormLayout(camBox);
     exposureMode_ = new QComboBox;
     exposureMode_->setObjectName(QStringLiteral("ExposureModeCombo"));
@@ -186,28 +222,169 @@ void EnvironmentPanel::buildUi() {
     measured_ = new QLabel(QStringLiteral("—"));
     measured_->setObjectName(QStringLiteral("MeasuredEvLabel"));
     camForm->addRow(tr("Measured:"), measured_);
-    visibility_ = new QDoubleSpinBox;
-    visibility_->setObjectName(QStringLiteral("VisibilitySpin"));
-    visibility_->setRange(kMinVisibilityM / 1000.0, kMaxVisibilityM / 1000.0);
-    visibility_->setDecimals(2);
-    visibility_->setSuffix(tr(" km"));
-    visibility_->setKeyboardTracking(false);
-    visibility_->setToolTip(tr("Meteorological visibility: haze and fog."));
-    camForm->addRow(tr("Visibility:"), visibility_);
     const auto exposureChanged = [this] {
         EnvironmentConfig c = scene_->environment();
         c.exposure.mode = exposureMode_->currentIndex() == 1 ? graphics::ExposureMode::Manual
                                                              : graphics::ExposureMode::Auto;
         c.exposure.manualEv100 = manualEv_->value();
         c.exposure.compensationEv = compensation_->value();
-        c.visibilityM = visibility_->value() * 1000.0;
         apply(c);
     };
     connect(exposureMode_, &QComboBox::activated, this, exposureChanged);
     connect(manualEv_, &QDoubleSpinBox::valueChanged, this, exposureChanged);
     connect(compensation_, &QDoubleSpinBox::valueChanged, this, exposureChanged);
-    connect(visibility_, &QDoubleSpinBox::valueChanged, this, exposureChanged);
     layout->addWidget(camBox);
+
+    // Weather generator (FR-WX-12).
+    auto* wxBox = new QGroupBox(tr("Weather"));
+    auto* wxForm = new QFormLayout(wxBox);
+    preset_ = new QComboBox;
+    preset_->setObjectName(QStringLiteral("WeatherPresetCombo"));
+    addPresets(preset_);
+    preset_->setToolTip(
+        tr("Loads the preset's clouds, precipitation, visibility, fog and, when "
+           "it sets them, its temperature, humidity and wind."));
+    wxForm->addRow(tr("Preset:"), preset_);
+    connect(preset_, &QComboBox::activated, this, &EnvironmentPanel::onPresetChosen);
+
+    seed_ = new QSpinBox;
+    seed_->setObjectName(QStringLiteral("WeatherSeedSpin"));
+    seed_->setRange(0, static_cast<int>(kMaxWeatherSeed));
+    seed_->setKeyboardTracking(false);
+    seed_->setToolTip(
+        tr("Same seed and settings give the same weather (gusts, cloud shapes, "
+           "a random wind direction)."));
+    randomise_ = new QPushButton(tr("Randomise"));
+    randomise_->setObjectName(QStringLiteral("WeatherRandomiseButton"));
+    auto* seedRow = new QHBoxLayout;
+    seedRow->addWidget(seed_, 1);
+    seedRow->addWidget(randomise_);
+    wxForm->addRow(tr("Seed:"), seedRow);
+    connect(seed_, &QSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+    connect(randomise_, &QPushButton::clicked, this, [this] {
+        std::random_device device;
+        std::uniform_int_distribution<int> pick(1, static_cast<int>(kMaxWeatherSeed));
+        seed_->setValue(pick(device));  // Applies through valueChanged.
+    });
+
+    auto* cloudGrid = new QGridLayout;
+    cloudGrid->addWidget(new QLabel(tr("Type")), 0, 0);
+    cloudGrid->addWidget(new QLabel(tr("Oktas")), 0, 1);
+    cloudGrid->addWidget(new QLabel(tr("Base")), 0, 2);
+    cloudGrid->addWidget(new QLabel(tr("Top")), 0, 3);
+    for (std::size_t i = 0; i < clouds_.size(); ++i) {
+        CloudRow& r = clouds_[i];
+        const int gridRow = static_cast<int>(i) + 1;
+        r.type = new QComboBox;
+        r.type->setObjectName(QStringLiteral("CloudType%1").arg(i));
+        r.type->addItems(
+            {tr("Cumulus"), tr("Stratocumulus"), tr("Stratus"), tr("Cirrus"), tr("Cumulonimbus")});
+        r.cover = new QSpinBox;
+        r.cover->setObjectName(QStringLiteral("CloudCover%1").arg(i));
+        r.cover->setRange(0, 8);
+        r.cover->setToolTip(tr("Sky cover in eighths (0 = no layer)."));
+        r.base = new QSpinBox;
+        r.base->setObjectName(QStringLiteral("CloudBase%1").arg(i));
+        r.base->setRange(30, 15'000);
+        r.base->setSingleStep(100);
+        r.base->setSuffix(tr(" m"));
+        r.base->setToolTip(tr("Cloud base above the ground at the scene origin."));
+        r.top = new QSpinBox;
+        r.top->setObjectName(QStringLiteral("CloudTop%1").arg(i));
+        r.top->setRange(60, 16'000);
+        r.top->setSingleStep(100);
+        r.top->setSuffix(tr(" m"));
+        for (QSpinBox* spin : {r.cover, r.base, r.top}) {
+            spin->setKeyboardTracking(false);
+            connect(spin, &QSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+        }
+        connect(r.type, &QComboBox::activated, this, &EnvironmentPanel::onWeatherEdited);
+        cloudGrid->addWidget(r.type, gridRow, 0);
+        cloudGrid->addWidget(r.cover, gridRow, 1);
+        cloudGrid->addWidget(r.base, gridRow, 2);
+        cloudGrid->addWidget(r.top, gridRow, 3);
+    }
+    cloudGrid->setColumnStretch(0, 1);
+    wxForm->addRow(tr("Clouds:"), cloudGrid);
+
+    precipitation_ = new QComboBox;
+    precipitation_->setObjectName(QStringLiteral("PrecipitationCombo"));
+    precipitation_->addItems({tr("None"), tr("Drizzle"), tr("Rain"), tr("Snow"), tr("Sleet")});
+    intensity_ = new QComboBox;
+    intensity_->setObjectName(QStringLiteral("IntensityCombo"));
+    intensity_->addItems({tr("Light"), tr("Moderate"), tr("Heavy")});
+    auto* precipRow = new QHBoxLayout;
+    precipRow->addWidget(precipitation_, 1);
+    precipRow->addWidget(intensity_, 1);
+    wxForm->addRow(tr("Precipitation:"), precipRow);
+    connect(precipitation_, &QComboBox::activated, this, &EnvironmentPanel::onWeatherEdited);
+    connect(intensity_, &QComboBox::activated, this, &EnvironmentPanel::onWeatherEdited);
+
+    visibility_ = new QDoubleSpinBox;
+    visibility_->setObjectName(QStringLiteral("VisibilitySpin"));
+    visibility_->setRange(kMinVisibilityM / 1000.0, kMaxVisibilityM / 1000.0);
+    visibility_->setDecimals(2);
+    visibility_->setSuffix(tr(" km"));
+    visibility_->setKeyboardTracking(false);
+    visibility_->setToolTip(tr("Meteorological visibility at the ground: haze, fog, rain, snow."));
+    wxForm->addRow(tr("Visibility:"), visibility_);
+    connect(visibility_, &QDoubleSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+
+    fogTop_ = new QSpinBox;
+    fogTop_->setObjectName(QStringLiteral("FogTopSpin"));
+    fogTop_->setRange(0, 1000);
+    fogTop_->setSingleStep(10);
+    fogTop_->setSuffix(tr(" m"));
+    fogTop_->setSpecialValueText(tr("no fog layer"));
+    fogTop_->setKeyboardTracking(false);
+    fogTop_->setToolTip(tr("Top of a ground fog layer; the visibility above it is clear."));
+    wxForm->addRow(tr("Fog top:"), fogTop_);
+    connect(fogTop_, &QSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+
+    thunderstorm_ = new QCheckBox(tr("Thunderstorm"));
+    thunderstorm_->setObjectName(QStringLiteral("ThunderstormCheck"));
+    wxForm->addRow(QString(), thunderstorm_);
+    connect(thunderstorm_, &QCheckBox::toggled, this, &EnvironmentPanel::onWeatherEdited);
+
+    timeline_ = new QCheckBox(tr("Change to"));
+    timeline_->setObjectName(QStringLiteral("TimelineCheck"));
+    timeline_->setToolTip(tr("Timeline: the weather changes to this preset during the flight."));
+    timelinePreset_ = new QComboBox;
+    timelinePreset_->setObjectName(QStringLiteral("TimelinePresetCombo"));
+    addPresets(timelinePreset_);
+    auto* changeRow = new QHBoxLayout;
+    changeRow->addWidget(timeline_);
+    changeRow->addWidget(timelinePreset_, 1);
+    wxForm->addRow(tr("Timeline:"), changeRow);
+    timelineAt_ = new QSpinBox;
+    timelineAt_->setObjectName(QStringLiteral("TimelineAtSpin"));
+    timelineAt_->setRange(0, 24 * 60);
+    timelineAt_->setSuffix(tr(" min"));
+    timelineAt_->setKeyboardTracking(false);
+    timelineAt_->setToolTip(tr("Minutes after the start of the flight."));
+    timelineOver_ = new QSpinBox;
+    timelineOver_->setObjectName(QStringLiteral("TimelineOverSpin"));
+    timelineOver_->setRange(0, 6 * 60);
+    timelineOver_->setSuffix(tr(" min"));
+    timelineOver_->setKeyboardTracking(false);
+    timelineOver_->setToolTip(tr("Length of the change (0 = sudden)."));
+    auto* whenRow = new QHBoxLayout;
+    whenRow->addWidget(new QLabel(tr("after")));
+    whenRow->addWidget(timelineAt_, 1);
+    whenRow->addWidget(new QLabel(tr("over")));
+    whenRow->addWidget(timelineOver_, 1);
+    wxForm->addRow(QString(), whenRow);
+    connect(timeline_, &QCheckBox::toggled, this, &EnvironmentPanel::onWeatherEdited);
+    connect(timelinePreset_, &QComboBox::activated, this, &EnvironmentPanel::onWeatherEdited);
+    connect(timelineAt_, &QSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+    connect(timelineOver_, &QSpinBox::valueChanged, this, &EnvironmentPanel::onWeatherEdited);
+
+    weatherSummary_ = new QLabel;
+    weatherSummary_->setObjectName(QStringLiteral("WeatherSummaryLabel"));
+    weatherSummary_->setWordWrap(true);
+    weatherSummary_->setTextFormat(Qt::RichText);
+    wxForm->addRow(weatherSummary_);
+    layout->addWidget(wxBox);
 
     // Wind and air (FR-WIND-01, FR-PHY-05).
     auto* airBox = new QGroupBox(tr("Wind and air"));
@@ -277,9 +454,6 @@ void EnvironmentPanel::buildUi() {
     connect(humidity_, &QDoubleSpinBox::valueChanged, this, airChanged);
     layout->addWidget(airBox);
 
-    auto* note = new QLabel(tr("The weather generator arrives in milestone M7."));
-    note->setEnabled(false);
-    layout->addWidget(note);
     layout->addStretch();
 
     auto* scroll = new QScrollArea;
@@ -342,6 +516,55 @@ void EnvironmentPanel::refresh() {
         qnh_->setValue(env.air.pressureHpa);
         humidity_->setValue(env.air.humidityPct);
     }
+    {
+        // The weather widgets (FR-WX-12).
+        std::vector<QSignalBlocker> blockers;
+        for (QObject* w : std::initializer_list<QObject*>{
+                 preset_, seed_, precipitation_, intensity_, fogTop_, thunderstorm_, timeline_,
+                 timelinePreset_, timelineAt_, timelineOver_}) {
+            blockers.emplace_back(w);
+        }
+        for (CloudRow& r : clouds_) {
+            for (QObject* w : std::initializer_list<QObject*>{r.type, r.cover, r.base, r.top}) {
+                blockers.emplace_back(w);
+            }
+        }
+        const weather::WeatherSettings& fw = env.freeWeather;
+        const weather::WeatherOverrides& o = fw.overrides;
+        preset_->setCurrentIndex(presetIndex(preset_, fw.preset));
+        seed_->setValue(static_cast<int>(std::min(fw.seed, kMaxWeatherSeed)));
+        const std::vector<weather::CloudLayer> layers =
+            o.clouds.value_or(std::vector<weather::CloudLayer>{});
+        for (std::size_t i = 0; i < clouds_.size(); ++i) {
+            CloudRow& r = clouds_[i];
+            const weather::CloudLayer l =
+                i < layers.size() ? layers[i]
+                                  : weather::CloudLayer{.type = weather::CloudType::Cumulus,
+                                                        .coverOktas = 0.0,
+                                                        .baseM = 1000.0 + 2000.0 * double(i),
+                                                        .topM = 1500.0 + 2000.0 * double(i)};
+            const auto type = std::ranges::find(kCloudTypes, l.type) - kCloudTypes.begin();
+            r.type->setCurrentIndex(static_cast<int>(type));
+            r.cover->setValue(static_cast<int>(std::lround(l.coverOktas)));
+            r.base->setValue(static_cast<int>(std::lround(l.baseM)));
+            r.top->setValue(static_cast<int>(std::lround(l.topM)));
+        }
+        const weather::Precipitation p = o.precipitation.value_or(weather::Precipitation{});
+        precipitation_->setCurrentIndex(static_cast<int>(
+            std::ranges::find(kPrecipitationTypes, p.type) - kPrecipitationTypes.begin()));
+        intensity_->setCurrentIndex(static_cast<int>(
+            std::ranges::find(kIntensities, weather::intensityOf(p.type, p.rateMmH)) -
+            kIntensities.begin()));
+        fogTop_->setValue(static_cast<int>(std::lround(o.fog.value_or(weather::Fog{}).topM)));
+        thunderstorm_->setChecked(o.thunderstorm.value_or(false));
+        const weather::WeatherChange change =
+            fw.timeline.empty() ? defaultChange() : fw.timeline.front();
+        timeline_->setChecked(!fw.timeline.empty() && fw.timelineEnabled);
+        timelinePreset_->setCurrentIndex(presetIndex(timelinePreset_, change.preset));
+        timelineAt_->setValue(static_cast<int>(std::lround(change.atS / 60.0)));
+        timelineOver_->setValue(static_cast<int>(std::lround(change.transitionS / 60.0)));
+    }
+    updateWeatherSummary();
     updateWindInfo();
     updateEnabled();
     updateReadouts();
@@ -354,6 +577,110 @@ void EnvironmentPanel::updateEnabled() {
     compensation_->setEnabled(!manual);
     rate_->setEnabled(animate_->isChecked());
     windFrom_->setEnabled(!windRandom_->isChecked());
+    for (CloudRow& r : clouds_) {
+        const bool layer = r.cover->value() > 0;
+        r.type->setEnabled(layer);
+        r.base->setEnabled(layer);
+        r.top->setEnabled(layer);
+    }
+    intensity_->setEnabled(precipitation_->currentIndex() > 0);
+    for (QWidget* w :
+         std::initializer_list<QWidget*>{timelinePreset_, timelineAt_, timelineOver_}) {
+        w->setEnabled(timeline_->isChecked());
+    }
+}
+
+void EnvironmentPanel::onPresetChosen(int index) {
+    const auto& all = presets().presets();
+    if (index < 0 || static_cast<std::size_t>(index) >= all.size()) {
+        return;
+    }
+    const weather::WeatherPreset& p = all[static_cast<std::size_t>(index)];
+    const weather::WeatherOverrides& v = p.values;
+    EnvironmentConfig c = scene_->environment();
+    weather::WeatherSettings& fw = c.freeWeather;
+    fw.preset = p.key;
+    // A preset replaces the whole sky; its air and wind members, when it has them, go to the
+    // fields below (FR-WX-01: a preset sets only what it lists).
+    fw.overrides.clouds = v.clouds.value_or(std::vector<weather::CloudLayer>{});
+    fw.overrides.precipitation = v.precipitation.value_or(weather::Precipitation{});
+    fw.overrides.fog = v.fog.value_or(weather::Fog{});
+    fw.overrides.thunderstorm = v.thunderstorm.value_or(false);
+    c.visibilityM = std::clamp(v.visibilityM.value_or(weather::defaultConditions().visibilityM),
+                               kMinVisibilityM, kMaxVisibilityM);
+    if (v.temperatureC) {
+        c.air.temperatureC = std::clamp(*v.temperatureC, kMinTemperatureC, kMaxTemperatureC);
+    }
+    if (v.pressureHpa) {
+        c.air.pressureHpa = std::clamp(*v.pressureHpa, kMinQnhHpa, kMaxQnhHpa);
+    }
+    if (v.humidityPct) {
+        c.air.humidityPct = std::clamp(*v.humidityPct, 0.0, 100.0);
+    } else if (v.dewPointC) {
+        c.air.humidityPct = weather::humidityFromDewPoint(c.air.temperatureC, *v.dewPointC);
+    }
+    if (v.windLevel) {
+        c.wind.level = std::clamp(*v.windLevel, 0, weather::WindLevelTable::kLevelCount - 1);
+    }
+    if (v.windFromDeg) {
+        c.wind.fromDeg = *v.windFromDeg;
+    }
+    apply(c);
+}
+
+void EnvironmentPanel::onWeatherEdited() {
+    EnvironmentConfig c = scene_->environment();
+    weather::WeatherSettings& fw = c.freeWeather;
+    weather::WeatherOverrides& o = fw.overrides;
+    fw.seed = static_cast<std::uint64_t>(seed_->value());
+    std::vector<weather::CloudLayer> layers;
+    for (const CloudRow& r : clouds_) {
+        if (r.cover->value() > 0) {
+            layers.push_back({.type = kCloudTypes[static_cast<std::size_t>(
+                                  std::clamp(r.type->currentIndex(), 0, 4))],
+                              .coverOktas = static_cast<double>(r.cover->value()),
+                              .baseM = static_cast<double>(r.base->value()),
+                              .topM = static_cast<double>(r.top->value())});
+        }
+    }
+    std::ranges::stable_sort(layers, {}, &weather::CloudLayer::baseM);
+    o.clouds = std::move(layers);
+    const auto type = kPrecipitationTypes[static_cast<std::size_t>(
+        std::clamp(precipitation_->currentIndex(), 0, 4))];
+    const auto intensity =
+        kIntensities[static_cast<std::size_t>(std::clamp(intensity_->currentIndex(), 0, 2))];
+    o.precipitation =
+        weather::Precipitation{type, type == weather::PrecipitationType::None
+                                         ? 0.0
+                                         : weather::intensityRateMmH(type, intensity)};
+    weather::Fog fog = o.fog.value_or(weather::Fog{});
+    fog.topM = fogTop_->value();
+    o.fog = fog;
+    o.thunderstorm = thunderstorm_->isChecked();
+    c.visibilityM = visibility_->value() * 1000.0;
+    weather::WeatherChange change = fw.timeline.empty() ? defaultChange() : fw.timeline.front();
+    change.preset = timelinePreset_->currentData().toString().toStdString();
+    change.atS = timelineAt_->value() * 60.0;
+    change.transitionS = timelineOver_->value() * 60.0;
+    fw.timeline = {change};
+    fw.timelineEnabled = timeline_->isChecked();
+    apply(c);
+    updateEnabled();
+}
+
+void EnvironmentPanel::updateWeatherSummary() {
+    const EnvironmentConfig& env = scene_->environment();
+    // In a mission the panel is read only and shows the mission's weather at its start.
+    const weather::WeatherConditions start =
+        env.weather ? weather::WeatherGenerator(*env.weather).plannedAt(0.0)
+                    : freeWeatherStart(env);
+    QString text = escaped(weather::describe(start, weather::WindLevelTable::builtIn()));
+    for (const weather::WeatherIssue& issue : weather::checkPlausibility(start)) {
+        text += QStringLiteral("<br><span style=\"color:%1\">%2: %3</span>")
+                    .arg(issue.error ? QStringLiteral("#d03030") : QStringLiteral("#c08000"),
+                         issue.error ? tr("Not plausible") : tr("Unusual"), escaped(issue.message));
+    }
+    weatherSummary_->setText(text);
 }
 
 void EnvironmentPanel::updateWindInfo() {
