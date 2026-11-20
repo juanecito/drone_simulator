@@ -8,6 +8,7 @@ add_executable(ds_unit_tests
     astro_test.cpp
     command_line_test.cpp
     file_terrain_test.cpp
+    online_terrain_test.cpp
     flight_test.cpp
     geo_test.cpp
     ground_test.cpp

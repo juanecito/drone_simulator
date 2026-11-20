@@ -30,6 +30,8 @@ enum class TerrainErrorCode {
     TooLarge,           ///< Over the size limits of FR-TER-F08 / FR-TER-I08.
     NotSupported,       ///< Valid but not supported in this version (e.g. DSM).
     Cancelled,          ///< Cancelled by the user.
+    NotCached,          ///< Online data not downloaded yet (FR-TER-O09).
+    ProviderError,      ///< Unknown provider or dataset, or unusable provider data.
 };
 
 /// @brief A terrain failure; the message names the file and the JSON path where useful.

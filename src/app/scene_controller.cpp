@@ -41,8 +41,10 @@ common::Result<void> validateTerrain(const TerrainConfig& config) {
         if (auto valid = terrain::validate(config.params); !valid) {
             return valid;
         }
-    } else if (config.file.files.empty()) {
+    } else if (config.kind == TerrainKind::File && config.file.files.empty()) {
         return common::makeError("choose at least one elevation file");
+    } else if (config.kind == TerrainKind::Online && config.online.provider.empty()) {
+        return common::makeError("choose an elevation provider");
     }
     if (config.extent) {
         if (auto valid = terrain::validate(*config.extent); !valid) {
@@ -55,8 +57,11 @@ common::Result<void> validateTerrain(const TerrainConfig& config) {
 }  // namespace
 
 SceneController::SceneController(SettingsController* settings, std::filesystem::path assetDirectory,
-                                 QObject* parent)
-    : QObject(parent), settings_(settings), assetDirectory_(std::move(assetDirectory)) {
+                                 DataServices* data, QObject* parent)
+    : QObject(parent),
+      settings_(settings),
+      assetDirectory_(std::move(assetDirectory)),
+      data_(data) {
     terrain_ = builtInPresets().front().config;
     environment_.time = nowUtc();
     // The system zone, if the time-zone database knows it (it can be "UTC" in containers).
@@ -99,14 +104,17 @@ void SceneController::loadSaved() {
 }
 
 common::Result<void> SceneController::applyTerrain(const TerrainConfig& config) {
-    auto built = buildTerrain(config);
+    auto built = buildTerrain(config, data_);
     if (!built) {
         return std::unexpected(built.error());
     }
     terrain_ = config;
-    terrain_.origin = built->origin;  // File terrain: the origin found in the data.
+    terrain_.origin = built->origin;  // File and online terrain: the origin in use.
     source_ = built->source;
     metadata_ = std::move(built->metadata);
+    online_ = std::move(built->online);
+    stream_ = std::move(built->stream);
+    dataHash_ = std::move(built->dataHash);
     attribution_ = std::move(built->attribution);
     streamer_.reset();
     terrain::StreamerSettings settings;
@@ -132,6 +140,19 @@ common::Result<void> SceneController::applyTerrain(const TerrainConfig& config) 
     exposureReset_ = true;
     log::info("Terrain: {}", source_->describe());
     return {};
+}
+
+void SceneController::focusTerrain(double x, double z) {
+    if (stream_) {
+        stream_->focus(x, z);
+    }
+}
+
+std::optional<terrain::OnlineStreamStatus> SceneController::onlineStatus() const {
+    if (!stream_) {
+        return std::nullopt;
+    }
+    return stream_->status();
 }
 
 void SceneController::applyTerrainOrDefault(const TerrainConfig& config) {

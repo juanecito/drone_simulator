@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -79,6 +80,7 @@ std::string fileList(std::span<const std::filesystem::path> files) {
 struct RasterSource::Layout {
     std::string datasetPath;  // File, or the in-memory VRT of a mosaic.
     std::string vrtPath;      // In-memory VRT to delete ("" if none).
+    std::vector<std::string> memFiles;  // In-memory payloads to delete.
     std::span<const char* const> drivers;
     int band = 1;
     std::array<double, 6> inverse{};  // Georeferenced → pixel.
@@ -128,6 +130,61 @@ RasterSource::~RasterSource() {
     if (!layout_->vrtPath.empty()) {
         VSIUnlink(layout_->vrtPath.c_str());
     }
+    for (const std::string& file : layout_->memFiles) {
+        VSIUnlink(file.c_str());
+    }
+}
+
+TerrainResult<std::shared_ptr<RasterSource>> RasterSource::openMemory(
+    std::span<const std::string> payloads, const RasterOptions& options, std::string_view label) {
+    gdal::ensureInitialised();
+    std::vector<std::string> names;
+    auto unlinkAll = [&names] {
+        for (const std::string& n : names) {
+            VSIUnlink(n.c_str());
+        }
+    };
+    for (const std::string& payload : payloads) {
+        const std::string name = gdal::uniqueMemPath("payload", ".tif");
+        auto* buffer = static_cast<GByte*>(VSIMalloc(std::max<std::size_t>(payload.size(), 1)));
+        if (buffer == nullptr) {
+            unlinkAll();
+            return terrainError(TerrainErrorCode::TooLarge, "out of memory for the elevation data");
+        }
+        std::memcpy(buffer, payload.data(), payload.size());
+        VSILFILE* f = VSIFileFromMemBuffer(name.c_str(), buffer,
+                                           static_cast<vsi_l_offset>(payload.size()), TRUE);
+        if (f == nullptr) {
+            VSIFree(buffer);
+            unlinkAll();
+            return terrainError(TerrainErrorCode::CorruptData, "cannot hold the elevation data");
+        }
+        VSIFCloseL(f);
+        names.push_back(name);
+    }
+    std::vector<std::filesystem::path> paths(names.begin(), names.end());
+    auto source = open(paths, options);
+    if (!source) {
+        unlinkAll();
+        TerrainError e = source.error();
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            const std::string file = std::filesystem::path(names[i]).filename().string();
+            const std::string piece =
+                names.size() == 1 ? std::string(label) : std::format("{} piece {}", label, i + 1);
+            for (std::size_t at = e.message.find(file); at != std::string::npos;
+                 at = e.message.find(file, at + piece.size())) {
+                e.message.replace(at, file.size(), piece);
+            }
+        }
+        return std::unexpected(std::move(e));
+    }
+    (*source)->layout_->memFiles = std::move(names);
+    // "elevation raster <files> (<format>, …)" ⇒ "<label> (<format>, …)".
+    std::string& d = (*source)->description_;
+    if (const std::size_t at = d.find(" ("); at != std::string::npos) {
+        d = std::string(label) + d.substr(at);
+    }
+    return source;
 }
 
 TerrainResult<std::unique_ptr<RasterSource::Reader>> RasterSource::makeReader() const {
@@ -436,7 +493,7 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     for (const std::filesystem::path& file : files) {
         const std::string name = file.filename().string();
         std::error_code ec;
-        if (!std::filesystem::is_regular_file(file, ec)) {
+        if (!file.string().starts_with("/vsimem/") && !std::filesystem::is_regular_file(file, ec)) {
             return terrainError(TerrainErrorCode::FileNotFound,
                                 std::format("elevation file \"{}\" not found", name));
         }
@@ -667,7 +724,8 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
         const double v = l.inverse[3] + l.inverse[4] * X + l.inverse[5] * Y;
         return u >= 0.0 && v >= 0.0 && u <= l.width && v <= l.height;
     };
-    if (!covered(0.0, 0.0)) {
+    const bool originCovered = covered(0.0, 0.0);
+    if (!originCovered && !(options.unbounded && options.originAltitudeM)) {
         return terrainError(TerrainErrorCode::NotCovered,
                             std::format("the origin {:.6f}, {:.6f} is outside the elevation data",
                                         origin.latitudeDeg, origin.longitudeDeg));
@@ -711,7 +769,7 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     }
 
     std::array<double, 1> originHeight{};
-    {
+    if (originCovered) {
         const double zero = 0.0;
         source->sampleAmsl(reader, std::span(&zero, 1), std::span(&zero, 1), 1, originHeight);
     }
@@ -731,7 +789,9 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
         }
         return true;
     };
-    if (options.extent) {
+    if (options.unbounded) {
+        source->unbounded_ = true;  // A piece of a larger surface: no extent of its own.
+    } else if (options.extent) {
         if (!rectangleCovered(0.5 * options.extent->widthM, 0.5 * options.extent->lengthM)) {
             return terrainError(TerrainErrorCode::NotCovered,
                                 std::format("the extent {:.0f} × {:.0f} m around the origin is "
@@ -777,7 +837,7 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     }
 
     source->release(std::move(*first));
-    if (options.edge == EdgeMode::Fade) {
+    if (options.edge == EdgeMode::Fade && !options.unbounded) {
         source->fadeBandM_ = std::min(RasterOptions::kFadeBandM,
                                       0.1 * std::min(meta.extent.widthM, meta.extent.lengthM));
     }

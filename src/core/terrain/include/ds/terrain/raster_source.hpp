@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ds/geo/coordinates.hpp"
@@ -49,6 +50,10 @@ struct RasterOptions {
     EdgeMode edge = EdgeMode::Cliff;
     /// Width of the fade band, metres.
     static constexpr double kFadeBandM = 500.0;
+    /// A piece of a larger surface (an online streaming block): the source has no extent and
+    /// the origin may lie outside the data, in which case @ref originAltitudeM is required.
+    /// The caller only queries points the data covers.
+    bool unbounded = false;
 };
 
 /// @brief What the metadata view shows about elevation data (FR-TER-O12).
@@ -90,6 +95,13 @@ public:
     [[nodiscard]] static TerrainResult<std::shared_ptr<RasterSource>> open(
         std::span<const std::filesystem::path> files, const RasterOptions& options = {});
 
+    /// @brief Opens rasters held in memory, e.g. GeoTIFF payloads of an online provider
+    /// (FR-TER-O03: decoded through GDAL's `/vsimem/`). They are validated like files;
+    /// @p label names them in messages ("OpenTopography COP30").
+    [[nodiscard]] static TerrainResult<std::shared_ptr<RasterSource>> openMemory(
+        std::span<const std::string> payloads, const RasterOptions& options,
+        std::string_view label);
+
     ~RasterSource() override;
     RasterSource(const RasterSource&) = delete;
     RasterSource& operator=(const RasterSource&) = delete;
@@ -99,7 +111,9 @@ public:
     [[nodiscard]] double height(double x, double z) const override;
     void sampleGrid(double x0, double z0, double step, int cols, int rows,
                     std::span<double> out) const override;
-    [[nodiscard]] std::optional<Extent> extent() const override { return metadata_.extent; }
+    [[nodiscard]] std::optional<Extent> extent() const override {
+        return unbounded_ ? std::nullopt : std::optional<Extent>(metadata_.extent);
+    }
     [[nodiscard]] std::string describe() const override;
 
     /// @brief Metadata of the data and the scene placement.
@@ -131,6 +145,7 @@ private:
     double originAltitude_ = 0.0;
     double fallbackAmsl_ = 0.0;
     double fadeBandM_ = 0.0;  // 0 ⇒ no fading.
+    bool unbounded_ = false;
     mutable std::mutex readersMutex_;
     mutable std::vector<std::unique_ptr<Reader>> readers_;
     mutable std::atomic<std::uint64_t> readErrors_{0};

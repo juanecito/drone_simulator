@@ -7,7 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <utility>
+
+#include "ds/app/data_services.hpp"
 
 namespace ds::app {
 namespace {
@@ -26,12 +29,46 @@ const BuiltInPreset* findPreset(std::string_view name) {
 
 }  // namespace
 
-std::optional<std::string> unplayableReason(const missions::MissionDefinition& mission) {
+namespace {
+
+std::optional<std::string> onlineUnplayable(const missions::MissionDefinition& mission,
+                                            DataServices* data) {
+    if (data == nullptr) {
+        return "online elevation data is not available in this session";
+    }
+    auto config = missionTerrain(mission);
+    if (!config) {
+        return config.error().message;
+    }
+    auto request = onlineRequest(*config, *data);
+    if (!request) {
+        return request.error().message;
+    }
+    auto area = terrain::onlineRequiredArea(*request);
+    if (!area) {
+        return area.error().message;
+    }
+    const net::ProviderConfig& p = request->provider;
+    if (p.requiresKey && !data->hasApiKey(p.key)) {
+        // Without a key only an area downloaded earlier can be flown.
+        auto dataset = terrain::onlineDataset(*request);
+        auto estimate =
+            data->client().estimateDownload(p, dataset ? (*dataset)->id : std::string(), *area);
+        if (!estimate || estimate->uncachedRequests > 0) {
+            return std::format("{} needs an API key ({}) to download the mission area", p.name,
+                               DataServices::keyVariable(p.key));
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+std::optional<std::string> unplayableReason(const missions::MissionDefinition& mission,
+                                            DataServices* data) {
     switch (mission.terrain.source) {
         case missions::TerrainSource::Procedural: break;
-        case missions::TerrainSource::Online:
-            return "online terrain needs the online elevation source, not available in this "
-                   "build yet (milestone M4)";
+        case missions::TerrainSource::Online: return onlineUnplayable(mission, data);
         case missions::TerrainSource::File:
             if (!mission.terrain.file) {
                 return "the mission has no elevation files";
@@ -93,6 +130,24 @@ common::Result<TerrainConfig> missionTerrain(const missions::MissionDefinition& 
     const missions::TerrainSpec& t = mission.terrain;
     if (t.source == missions::TerrainSource::File) {
         return fileMissionTerrain(mission);
+    }
+    if (t.source == missions::TerrainSource::Online) {
+        if (!t.origin) {
+            return common::makeError("online terrain needs a geographic origin");
+        }
+        TerrainConfig config;
+        config.kind = TerrainKind::Online;
+        config.online.provider = t.elevationProvider;
+        config.online.dataset = t.dataset;
+        config.online.edge = terrain::EdgeMode::Cliff;
+        config.origin = {t.origin->latitudeDeg, t.origin->longitudeDeg, 0.0};
+        if (t.originAltitudeRef == items::AltitudeRef::Amsl) {
+            config.online.originAltitudeM = t.originAltitudeM;
+            config.origin.heightM = t.originAltitudeM;
+        }
+        config.extent = t.extent.value_or(
+            terrain::Extent{kDefaultOnlineMissionExtentM, kDefaultOnlineMissionExtentM});
+        return config;
     }
     if (t.source != missions::TerrainSource::Procedural) {
         return common::makeError(unplayableReason(mission).value_or("unsupported terrain source"));

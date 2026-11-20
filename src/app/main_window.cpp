@@ -31,6 +31,7 @@
 
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/controls_panel.hpp"
+#include "ds/app/data_services.hpp"
 #include "ds/app/environment_panel.hpp"
 #include "ds/app/history_panel.hpp"
 #include "ds/app/items_controller.hpp"
@@ -79,8 +80,8 @@ QString fromView(std::string_view text) {
 }  // namespace
 
 MainWindow::MainWindow(SettingsController* settings, MissionsController* missions,
-                       QWidget* parent)
-    : QMainWindow(parent), settings_(settings), missions_(missions) {
+                       DataServices* services, QWidget* parent)
+    : QMainWindow(parent), settings_(settings), missions_(missions), data_(services) {
     setWindowTitle(fromView(common::kApplicationName));
     setObjectName(QStringLiteral("MainWindow"));
     resize(1280, 800);
@@ -89,9 +90,10 @@ MainWindow::MainWindow(SettingsController* settings, MissionsController* mission
         // Built-in missions only: no user folder is touched.
         missions_ = new MissionsController(
             MissionFolders{.assetDir = assets, .userDir = {}, .libraryDir = {}},
-            settings_ != nullptr ? &settings_->storage() : nullptr, this);
+            settings_ != nullptr ? &settings_->storage() : nullptr, data_, this);
     }
-    scene_ = new SceneController(settings_, assets, this);
+    missions_->setDataServices(data_);  // No reload if it already has them.
+    scene_ = new SceneController(settings_, assets, data_, this);
     const char* noJoysticks = std::getenv("DS_NO_JOYSTICKS");
     simulation_ = new SimulationController(*scene_, settings_, assets,
                                            noJoysticks == nullptr || *noJoysticks == '\0', this);
@@ -515,8 +517,8 @@ void MainWindow::startMission(const std::string& key) {
     const physics::VehicleType type =
         row->ground ? physics::VehicleType::Ground : physics::VehicleType::Aerial;
     const bool keyboardOnly = !simulation_->joystickMapping(type).has_value();
-    briefing_ = new MissionBriefingDialog(*row, missions_->entry(*row),
-                                          simulation_->profiles(type), keyboardOnly, this);
+    briefing_ = new MissionBriefingDialog(*row, missions_->entry(*row), simulation_->profiles(type),
+                                          keyboardOnly, data_, this);
     briefing_->setAttribute(Qt::WA_DeleteOnClose);
     connect(briefing_, &QDialog::finished, this, [this, key](int result) {
         // Closed: no longer "the open briefing", even before Qt deletes it.
@@ -581,10 +583,33 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
         }
         terrainHash = (*prepared)->terrainDataHash;
     }
+    // Online terrain: the whole area is cached before PreFlight, so a scored attempt never
+    // depends on the network (FR-TER-O09); offered here with its cost in provider calls.
+    if (mission.terrain.source == missions::TerrainSource::Online) {
+        if (data_ == nullptr) {
+            return common::makeError("online elevation data is not available in this session");
+        }
+        auto config = missionTerrain(mission);
+        if (!config) {
+            return std::unexpected(config.error());
+        }
+        auto request = onlineRequest(*config, *data_);
+        if (!request) {
+            return std::unexpected(request.error());
+        }
+        auto cached = ensureOnlineData(this, *data_, *request);
+        if (!cached) {
+            return std::unexpected(cached.error());
+        }
+        if (!*cached) {
+            return common::makeError("cancelled");
+        }
+    }
     if (auto started = simulation_->startMission(mission, *profile, missionDir); !started) {
         return started;
     }
-    missionTerrainHash_ = terrainHash;
+    // FR-TER-O14: online terrain records the hash of the downloaded data it was flown on.
+    missionTerrainHash_ = terrainHash.empty() ? scene_->terrainDataHash() : terrainHash;
     missionKey_ = key;
     lastAttemptId_.reset();
     // Fly full view (FR-UI-04): the panel comes back after the mission.
@@ -666,7 +691,7 @@ void MainWindow::showDebrief() {
     }
     const MissionRow* next = missions_->nextMission(missionKey_);
     debrief_ = new MissionDebriefDialog(*mission, *status.result, status.path, bestBefore_,
-                                        next != nullptr, this);
+                                        next != nullptr, data_, this);
     debrief_->setAttribute(Qt::WA_DeleteOnClose);
     const std::string nextKey = next != nullptr ? next->key : std::string();
     connect(debrief_, &QDialog::finished, this, [this, nextKey] {

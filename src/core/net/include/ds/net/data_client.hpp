@@ -111,6 +111,10 @@ public:
     /// @brief Fetches one bounding box. Returns 0 if the request was answered at once.
     RequestId fetch(const ProviderConfig& provider, const BBoxRequest& request, double priority,
                     PayloadCallback callback);
+    /// @brief The cached payload of one bounding box, without any request (fresh or stale; the
+    /// cache checks its SHA-256). nullopt if it is not cached.
+    [[nodiscard]] NetResult<std::optional<Payload>> cached(const ProviderConfig& provider,
+                                                           const BBoxRequest& request);
     /// @brief Cancels a fetch.
     void cancel(RequestId id) { http_->cancel(id); }
 

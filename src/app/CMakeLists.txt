@@ -11,6 +11,7 @@ add_library(ds_app_ui STATIC
     asset_paths.cpp
     command_line.cpp
     controls_panel.cpp
+    data_services.cpp
     environment_panel.cpp
     history_panel.cpp
     hud_painter.cpp
@@ -38,6 +39,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/asset_paths.hpp
     include/ds/app/command_line.hpp
     include/ds/app/controls_panel.hpp
+    include/ds/app/data_services.hpp
     include/ds/app/environment_panel.hpp
     include/ds/app/history_panel.hpp
     include/ds/app/hud_painter.hpp
@@ -70,6 +72,7 @@ target_link_libraries(ds_app_ui PUBLIC
     ds::geo
     ds::astro
     ds::terrain
+    ds::net
     ds::graphics
     ds::storage
     ds::weather

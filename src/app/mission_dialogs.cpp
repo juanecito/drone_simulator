@@ -140,12 +140,13 @@ std::vector<glm::dvec2> footprint(const items::Item& item) {
 
 // --- Map ------------------------------------------------------------------------------------
 
-common::Result<MissionMapData> missionMapData(const missions::MissionDefinition& mission) {
+common::Result<MissionMapData> missionMapData(const missions::MissionDefinition& mission,
+                                              DataServices* services) {
     auto config = missionTerrain(mission);
     if (!config) {
         return std::unexpected(config.error());
     }
-    auto built = buildTerrain(*config);
+    auto built = buildTerrain(*config, services);
     if (!built) {
         return std::unexpected(built.error());
     }
@@ -628,7 +629,8 @@ QString debriefHtml(const missions::MissionDefinition& m, const missions::Missio
 MissionBriefingDialog::MissionBriefingDialog(const MissionRow& row,
                                              const missions::CatalogEntry& entry,
                                              const QList<VehicleProfileInfo>& profiles,
-                                             bool keyboardOnly, QWidget* parent)
+                                             bool keyboardOnly, DataServices* services,
+                                             QWidget* parent)
     : QDialog(parent) {
     const missions::MissionDefinition& m = *entry.load.definition;
     setWindowTitle(tr("Briefing — %1").arg(qs(m.title)));
@@ -637,7 +639,7 @@ MissionBriefingDialog::MissionBriefingDialog(const MissionRow& row,
 
     auto* map = new MissionMapWidget;
     map->setObjectName(QStringLiteral("BriefingMap"));
-    if (auto mapData = missionMapData(m)) {
+    if (auto mapData = missionMapData(m, services)) {
         map->setData(std::move(*mapData));
     }
     text_ = new QTextBrowser;
@@ -714,7 +716,7 @@ MissionDebriefDialog::MissionDebriefDialog(const missions::MissionDefinition& mi
                                            const missions::MissionResult& result,
                                            std::vector<glm::dvec3> path,
                                            const std::optional<storage::MissionAttemptRecord>& best,
-                                           bool hasNext, QWidget* parent)
+                                           bool hasNext, DataServices* services, QWidget* parent)
     : QDialog(parent) {
     setWindowTitle(tr("Debrief — %1").arg(qs(mission.title)));
     setObjectName(QStringLiteral("MissionDebriefDialog"));
@@ -722,7 +724,7 @@ MissionDebriefDialog::MissionDebriefDialog(const missions::MissionDefinition& mi
 
     auto* map = new MissionMapWidget;
     map->setObjectName(QStringLiteral("DebriefMap"));
-    if (auto mapData = missionMapData(mission)) {
+    if (auto mapData = missionMapData(mission, services)) {
         mapData->path = std::move(path);
         map->setData(std::move(*mapData));
     }

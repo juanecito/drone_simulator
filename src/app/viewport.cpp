@@ -185,6 +185,7 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     const graphics::Camera camera =
         (sim != nullptr && vehicleView) ? sim->vehicleCamera() : scene_->camera();
 
+    scene_->focusTerrain(camera.position.x, camera.position.z);  // Online blocks ahead.
     const auto chunks =
         scene_->streamer().update(camera.position.x, camera.position.y, camera.position.z);
     const TerrainConfig& terrainConfig = scene_->terrain();

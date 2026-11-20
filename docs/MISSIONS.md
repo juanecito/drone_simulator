@@ -124,6 +124,24 @@ accepted by the validator, but they are not playable until the lidar rasterizer 
   best of the debrief only counts attempts flown on the same data.
 - **Attribution:** `attribution` is shown at the bottom right of the view.
 
+### Terrain from an online provider
+
+With `"source": "online"`, the terrain is downloaded from an elevation provider, first
+**OpenTopography**: `elevationProvider` is the provider key (`"opentopography"`), `dataset`
+its dataset (e.g. `"COP30"`, else the provider's default). `origin` is required.
+
+- **Area:** the terrain is the `extent` around the origin, or 10 km × 10 km without one. It is
+  downloaded when the mission starts, after a question showing the number of calls and how
+  many are left today. From then on it is in the cache and the mission also works offline.
+- **API key:** OpenTopography needs a free personal key. Until Settings › Data providers
+  arrives, set it in the environment before starting the simulator:
+  `DS_API_KEY_OPENTOPOGRAPHY=<your key>`. Without a key a mission is *unavailable* unless
+  its area is already cached.
+- **Origin:** as for files: with `altRef` `"AMSL"` that altitude is height 0, otherwise the
+  ground at the origin is.
+- **Scores:** the attempt records the hash of the downloaded data; personal bests only compare
+  attempts on the same data.
+
 Item **polygons** (`surveyArea`, `noFlyZone`, `geofence`) are lists of `[x, z]` offsets in
 metres from the item position, in the same engine frame, rotated by the item's `headingDeg`.
 Headings are degrees clockwise from true north.
@@ -354,7 +372,7 @@ file and its data) copy a mission into your folder and select it.
 | Operations | Restricted airspace | fly around a no-fly zone |
 | Operations | Dusk patrol | after sunset, lights on, visual line of sight |
 | Operations | Valley relay | alpine terrain, ridges hiding the drone |
-| Real terrain | Montserrat ridge | online terrain (needs the online elevation source, M4) |
+| Real terrain | Montserrat ridge | online terrain (needs an OpenTopography API key) |
 
 The first mission of each chapter is open; each further one needs a star on the one before.
 

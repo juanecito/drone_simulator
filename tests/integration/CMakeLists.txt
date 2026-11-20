@@ -47,4 +47,4 @@ ds_add_integration_test(ds_mission_flight_tests FORCE_OFFSCREEN SOURCES mission_
 target_compile_definitions(ds_mission_flight_tests PRIVATE
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 ds_add_integration_test(ds_mission_flow_tests FORCE_OFFSCREEN SOURCES mission_flow_test.cpp
-    file_terrain_test.cpp)
+    file_terrain_test.cpp online_terrain_test.cpp)

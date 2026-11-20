@@ -34,6 +34,7 @@ struct StreamerStats {
     std::size_t cachedBytes = 0;   ///< Their memory use.
     std::size_t inFlight = 0;      ///< Jobs queued or running.
     std::size_t generated = 0;     ///< Meshes built since creation.
+    std::size_t stale = 0;         ///< Cached meshes waiting to be rebuilt (changed data).
 };
 
 /// @brief Keeps the chunks around the camera generated, using a WorkerPool.
@@ -42,6 +43,10 @@ struct StreamerStats {
 /// threads never wait for them (FR-TER-05). Least-recently-used meshes beyond the cache limit
 /// are dropped. The destructor abandons queued jobs; jobs that are already running finish on
 /// their own and their results are discarded.
+///
+/// When the source's data changes (HeightSource::revision()), cached meshes that overlap a
+/// changed rectangle (or sample it through their normal apron) are marked stale: they are
+/// still drawn, and rebuilt in the background with the new data.
 class TerrainStreamer {
 public:
     /// @brief Streams @p source with @p layout on @p pool (which must outlive the streamer).
@@ -78,10 +83,15 @@ private:
     struct CacheEntry {
         std::shared_ptr<const ChunkMesh> mesh;
         std::uint64_t lastUsed = 0;
+        std::uint64_t revision = 0;  // Source revision the mesh was built from.
+        bool stale = false;          // Overlaps data that changed since.
     };
 
     void collect();
     void evict();
+    void applyChanges();
+    void submit(const ChunkId& id, double priority);
+    [[nodiscard]] bool touches(const ChunkId& id, const ChangedArea& change) const noexcept;
 
     std::shared_ptr<const HeightSource> source_;
     ChunkLayout layout_;
@@ -93,6 +103,8 @@ private:
     std::size_t cachedBytes_ = 0;
     std::size_t generated_ = 0;
     std::uint64_t frame_ = 0;
+    std::uint64_t seenRevision_ = 0;
+    std::vector<ChangedArea> changes_;  // Recent changes, oldest first.
 };
 
 }  // namespace ds::terrain

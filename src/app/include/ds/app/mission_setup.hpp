@@ -28,11 +28,12 @@ struct MissionScene {
 };
 
 /// @brief Why this build cannot fly @p mission, or nullopt if it can.
-/// @details Online terrain and LAS/LAZ elevation files need later M4 steps; elevation rasters
-/// are playable once the mission loader has found every file. Both vehicle types are
-/// playable.
+/// @details LAS/LAZ elevation files need a later M4 step; elevation rasters are playable once
+/// the mission loader has found every file. Online terrain needs @p data and a known
+/// provider and dataset covering the area, and either an API key (the area is downloaded at
+/// launch) or the area already cached (FR-MIS-02). Both vehicle types are playable.
 [[nodiscard]] std::optional<std::string> unplayableReason(
-    const missions::MissionDefinition& mission);
+    const missions::MissionDefinition& mission, DataServices* data = nullptr);
 
 /// @brief The mission's weather at its start (FR-WX-01), with values outside the ranges of the
 /// Environment tab clamped.
@@ -43,6 +44,8 @@ struct MissionScene {
 /// elevation rasters the loader resolved, with the mission's band, CRS, datum, attribution,
 /// origin (an AMSL origin altitude is kept, an AGL one puts the ground at the origin at
 /// height 0) and extent; the origin of the returned config is only known once it is built.
+/// Online: the provider and dataset at the mission's origin (required), with its extent or a
+/// kDefaultOnlineMissionExtentM square (the area must be downloaded before PreFlight).
 [[nodiscard]] common::Result<TerrainConfig> missionTerrain(
     const missions::MissionDefinition& mission);
 

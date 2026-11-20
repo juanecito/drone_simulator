@@ -5,15 +5,18 @@
 #include <QMessageBox>
 #include <QSurfaceFormat>
 
+#include <filesystem>
+#include <memory>
 #include <print>
 #include <string>
 #include <vector>
 
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/command_line.hpp"
+#include "ds/app/data_services.hpp"
 #include "ds/app/main_window.hpp"
-#include "ds/app/missions_controller.hpp"
 #include "ds/app/mission_validation.hpp"
+#include "ds/app/missions_controller.hpp"
 #include "ds/app/opengl_check.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/app/user_storage.hpp"
@@ -140,9 +143,28 @@ int main(int argc, char* argv[]) {
     } else {
         ds::log::warn("No user missions: {}", dataDir.error().message);
     }
-    ds::app::MissionsController missions(missionFolders, storage->service.get());
+    // §4.6: providers, network, tile cache and call ledger for online terrain. The cache
+    // lives next to the database; without a data folder it goes to a temporary folder.
+    std::unique_ptr<ds::app::DataServices> data;
+    {
+        ds::app::DataServicesOptions dataOptions;
+        if (const auto dataDir = ds::storage::prepareDataDirectory(ds::storage::homeDirectory())) {
+            dataOptions.dataDirectory = *dataDir;
+        } else {
+            dataOptions.dataDirectory =
+                std::filesystem::temp_directory_path() / "drone_simulator_cache";
+        }
+        dataOptions.providerPresets = ds::app::findAssetDirectory() / "providers";
+        dataOptions.userStorage = storage->service.get();
+        if (auto created = ds::app::DataServices::create(dataOptions)) {
+            data = std::move(*created);
+        } else {
+            ds::log::error("Online terrain unavailable: {}", created.error().message);
+        }
+    }
+    ds::app::MissionsController missions(missionFolders, storage->service.get(), data.get());
 
-    ds::app::MainWindow window(&settings, &missions);
+    ds::app::MainWindow window(&settings, &missions, data.get());
     QObject::connect(&window, &ds::app::MainWindow::fatalError, &app,
                      [&window](const QString& message) {
                          showFatalError(&window, message);

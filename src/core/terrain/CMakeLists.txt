@@ -9,6 +9,7 @@ ds_add_core_module(terrain
         height_source.cpp
         module.cpp
         noise.cpp
+        online_terrain.cpp
         procedural_source.cpp
         query.cpp
         raster_source.cpp

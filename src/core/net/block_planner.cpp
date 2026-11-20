@@ -100,38 +100,63 @@ NetResult<std::vector<GeoRect>> planExtentRequests(const GeoRect& area,
                     std::format("the area needs more than {} requests", kMaxPieces));
 }
 
+namespace {
+
+// Number of blocks in the latitude band @p row of the grid.
+struct Band {
+    double south = 0.0;
+    double north = 0.0;
+    double mid = 0.0;
+    int cols = 1;
+    double dLon = 360.0;
+};
+
+Band band(std::int32_t row, double blockSizeKm) noexcept {
+    const double dLat = blockSizeKm / kKmPerDegree;
+    Band b;
+    b.south = std::max(-90.0, row * dLat);
+    b.north = std::min(90.0, (row + 1) * dLat);
+    b.mid = 0.5 * (b.south + b.north);
+    const double bandWidthKm = 360.0 * kKmPerDegree * std::cos(b.mid * kDegToRad);
+    b.cols = std::max(1, static_cast<int>(std::lround(bandWidthKm / blockSizeKm)));
+    b.dLon = 360.0 / b.cols;
+    return b;
+}
+
+GeoRect blockRect(const Band& b, std::int32_t col) noexcept {
+    const double west = -180.0 + (col * b.dLon);
+    return GeoRect{west, b.south, col + 1 == b.cols ? 180.0 : west + b.dLon, b.north};
+}
+
+std::int32_t rowOf(double latDeg, double blockSizeKm) noexcept {
+    const double dLat = blockSizeKm / kKmPerDegree;
+    return static_cast<std::int32_t>(std::floor(std::clamp(latDeg, -90.0, 90.0 - 1e-9) / dLat));
+}
+
+}  // namespace
+
 std::vector<Block> blocksAround(double latDeg, double lonDeg, double radiusKm, double blockSizeKm) {
     std::vector<Block> out;
     if (!(blockSizeKm > 0.0) || !(radiusKm >= 0.0)) {
         return out;
     }
-    const double dLat = blockSizeKm / kKmPerDegree;
-    const auto rowOf = [&](double lat) {
-        return static_cast<std::int32_t>(std::floor(lat / dLat));
-    };
     const double reach = radiusKm + blockSizeKm;  // Centre within radius ⇒ block within this.
-    const std::int32_t rowMin = rowOf(std::max(-90.0, latDeg - (reach / kKmPerDegree)));
-    const std::int32_t rowMax = rowOf(std::min(90.0 - 1e-9, latDeg + (reach / kKmPerDegree)));
+    const std::int32_t rowMin = rowOf(latDeg - (reach / kKmPerDegree), blockSizeKm);
+    const std::int32_t rowMax = rowOf(latDeg + (reach / kKmPerDegree), blockSizeKm);
     for (std::int32_t row = rowMin; row <= rowMax; ++row) {
-        const double south = std::max(-90.0, row * dLat);
-        const double north = std::min(90.0, (row + 1) * dLat);
-        const double mid = 0.5 * (south + north);
-        const double bandWidthKm = 360.0 * kKmPerDegree * std::cos(mid * kDegToRad);
-        const int cols = std::max(1, static_cast<int>(std::lround(bandWidthKm / blockSizeKm)));
-        const double dLon = 360.0 / cols;
+        const Band b = band(row, blockSizeKm);
         const double reachLon =
-            std::min(180.0, reach / (kKmPerDegree * std::max(0.01, std::cos(mid * kDegToRad))));
+            std::min(180.0, reach / (kKmPerDegree * std::max(0.01, std::cos(b.mid * kDegToRad))));
         const auto colMin =
-            static_cast<std::int32_t>(std::floor((lonDeg - reachLon + 180.0) / dLon));
+            static_cast<std::int32_t>(std::floor((lonDeg - reachLon + 180.0) / b.dLon));
         const auto colMax =
-            static_cast<std::int32_t>(std::floor((lonDeg + reachLon + 180.0) / dLon));
+            static_cast<std::int32_t>(std::floor((lonDeg + reachLon + 180.0) / b.dLon));
         for (std::int32_t c = colMin; c <= colMax; ++c) {
-            const std::int32_t col = ((c % cols) + cols) % cols;  // Wrap around the antimeridian.
-            const double west = -180.0 + (col * dLon);
-            const GeoRect rect{west, south, col + 1 == cols ? 180.0 : west + dLon, north};
-            const double d = greatCircleKm(latDeg, lonDeg, mid, west + (0.5 * dLon));
-            if (d <= radiusKm && std::ranges::none_of(out, [&](const Block& b) {
-                    return b.key == BlockKey{row, col};
+            const std::int32_t col = ((c % b.cols) + b.cols) % b.cols;  // Wrap at ±180°.
+            const GeoRect rect = blockRect(b, col);
+            const double d = greatCircleKm(latDeg, lonDeg, b.mid, rect.west + (0.5 * b.dLon));
+            if (d <= radiusKm && std::ranges::none_of(out, [&](const Block& blk) {
+                    return blk.key == BlockKey{row, col};
                 })) {
                 out.push_back(Block{BlockKey{row, col}, rect, d});
             }
@@ -139,6 +164,19 @@ std::vector<Block> blocksAround(double latDeg, double lonDeg, double radiusKm, d
     }
     std::ranges::sort(out, {}, &Block::distanceKm);
     return out;
+}
+
+BlockKey blockAt(double latDeg, double lonDeg, double blockSizeKm) noexcept {
+    const std::int32_t row = rowOf(latDeg, blockSizeKm);
+    const Band b = band(row, blockSizeKm);
+    auto col = static_cast<std::int32_t>(std::floor((lonDeg + 180.0) / b.dLon));
+    col = std::clamp(col, 0, b.cols - 1);
+    return BlockKey{row, col};
+}
+
+GeoRect blockRect(const BlockKey& key, double blockSizeKm) noexcept {
+    const Band b = band(key.row, blockSizeKm);
+    return blockRect(b, key.col);
 }
 
 }  // namespace ds::net

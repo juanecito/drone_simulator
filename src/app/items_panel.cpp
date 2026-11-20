@@ -257,7 +257,7 @@ void ItemsPanel::refresh() {
     const std::optional<items::ItemId> keep = selectedItem();
     shown_.clear();
     if (mission) {
-        if (auto map = missionMapData(*simulation_->mission())) {
+        if (auto map = missionMapData(*simulation_->mission(), scene_->dataServices())) {
             shown_ = std::move(map->items);
         }
         note_->setText(

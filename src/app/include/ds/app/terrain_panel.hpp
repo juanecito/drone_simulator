@@ -17,11 +17,12 @@ class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QSpinBox;
+class QTimer;
 
 /// @file
-/// @brief Terrain tab (SPECIFICATION §4.11): presets, source (procedural parameters or
-/// elevation files with their metadata), dimensions, geographic origin, *Regenerate* and a 2D
-/// height preview.
+/// @brief Terrain tab (SPECIFICATION §4.11): presets, source (procedural parameters,
+/// elevation files, or an online provider with area download and quota), metadata,
+/// dimensions, geographic origin, *Regenerate* and a 2D height preview.
 /// @ingroup app
 
 namespace ds::app {
@@ -42,8 +43,13 @@ public:
     void setFormConfig(const TerrainConfig& config);
     /// @brief Applies the form to the scene; shows the error, if any, in the panel.
     bool regenerate();
+    /// @brief Downloads the online data of the form (FR-TER-O09) without applying it; shows
+    /// the outcome in the panel. True if the data is cached afterwards.
+    bool downloadArea();
     /// @brief Renders a shaded height map of @p config, @p size pixels square.
     [[nodiscard]] static QImage renderPreview(const TerrainConfig& config, int size);
+    /// @brief Renders a shaded height map of @p source, @p size pixels square.
+    [[nodiscard]] static QImage renderPreview(const terrain::HeightSource& source, int size);
 
 private:
     void buildUi();
@@ -56,6 +62,12 @@ private:
     void showStatus(const QString& text, bool error);
     void addFiles();
     void updateMetadata();
+    void fillProviders();
+    void fillDatasets();
+    void updateQuota();
+    // Downloads the online data of @p config if needed; false (with the status shown) if it
+    // is not cached afterwards.
+    bool ensureDownloaded(const TerrainConfig& config);
 
     SceneController* scene_;
     QComboBox* presets_ = nullptr;
@@ -90,6 +102,13 @@ private:
     QLineEdit* datum_ = nullptr;
     QLineEdit* attribution_ = nullptr;
     QComboBox* fileEdge_ = nullptr;
+    QGroupBox* onlineBox_ = nullptr;
+    QComboBox* provider_ = nullptr;
+    QComboBox* dataset_ = nullptr;
+    QComboBox* onlineEdge_ = nullptr;
+    QPushButton* download_ = nullptr;
+    QLabel* quota_ = nullptr;
+    QTimer* refresh_ = nullptr;
     QLabel* metadata_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* preview_ = nullptr;

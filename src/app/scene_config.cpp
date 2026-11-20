@@ -11,6 +11,7 @@
 #include <cmath>
 #include <format>
 
+#include "ds/app/data_services.hpp"
 #include "ds/common/json.hpp"
 
 namespace ds::app {
@@ -132,11 +133,50 @@ common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
     return f;
 }
 
+QJsonObject onlineToJson(const OnlineTerrainConfig& o) {
+    QJsonObject json{
+        {QStringLiteral("provider"), QString::fromStdString(o.provider)},
+        {QStringLiteral("dataset"), QString::fromStdString(o.dataset)},
+        {QStringLiteral("edge"), edgeName(o.edge)},
+    };
+    if (o.originAltitudeM) {
+        json.insert(QStringLiteral("originAltM"), *o.originAltitudeM);
+    }
+    return json;
+}
+
+common::Result<OnlineTerrainConfig> onlineFromJson(const QJsonObject& json) {
+    OnlineTerrainConfig o;
+    o.provider = json.value(QStringLiteral("provider")).toString().toStdString();
+    if (o.provider.empty()) {
+        return common::makeError("an online terrain needs an elevation provider");
+    }
+    o.dataset = json.value(QStringLiteral("dataset")).toString().toStdString();
+    const auto edge =
+        edgeFromName(json.value(QStringLiteral("edge")).toString(QStringLiteral("cliff")));
+    if (!edge || *edge == terrain::EdgeMode::Water) {
+        return common::makeError("'edge' must be \"cliff\" or \"fade\" for online terrain");
+    }
+    o.edge = *edge;
+    if (auto r = readOptional(json, "originAltM", o.originAltitudeM); !r) {
+        return std::unexpected(r.error());
+    }
+    return o;
+}
+
+QString sourceName(TerrainKind kind) {
+    switch (kind) {
+        case TerrainKind::File: return QStringLiteral("file");
+        case TerrainKind::Online: return QStringLiteral("online");
+        default: return QStringLiteral("procedural");
+    }
+}
+
 }  // namespace
 
 bool TerrainConfig::operator==(const TerrainConfig& o) const noexcept {
-    return kind == o.kind && file == o.file && presetKey == o.presetKey && params == o.params &&
-           extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
+    return kind == o.kind && file == o.file && online == o.online && presetKey == o.presetKey &&
+           params == o.params && extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
            origin.longitudeDeg == o.origin.longitudeDeg && origin.heightM == o.origin.heightM;
 }
 
@@ -238,8 +278,7 @@ common::Result<terrain::ProceduralParams> paramsFromJson(const QJsonObject& json
 QJsonObject terrainToJson(const TerrainConfig& c) {
     QJsonObject json{
         {QStringLiteral("preset"), QString::fromStdString(c.presetKey)},
-        {QStringLiteral("source"),
-         c.kind == TerrainKind::File ? QStringLiteral("file") : QStringLiteral("procedural")},
+        {QStringLiteral("source"), sourceName(c.kind)},
         {QStringLiteral("params"), paramsToJson(c.params)},
         {QStringLiteral("origin"), QJsonObject{{QStringLiteral("lat"), c.origin.latitudeDeg},
                                                {QStringLiteral("lon"), c.origin.longitudeDeg},
@@ -252,6 +291,9 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
     }
     if (c.kind == TerrainKind::File) {
         json.insert(QStringLiteral("file"), fileToJson(c.file));
+    }
+    if (c.kind == TerrainKind::Online) {
+        json.insert(QStringLiteral("online"), onlineToJson(c.online));
     }
     return json;
 }
@@ -268,6 +310,13 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
         }
         c.kind = TerrainKind::File;
         c.file = std::move(*file);
+    } else if (source == QLatin1String("online")) {
+        auto online = onlineFromJson(json.value(QStringLiteral("online")).toObject());
+        if (!online) {
+            return std::unexpected(online.error());
+        }
+        c.kind = TerrainKind::Online;
+        c.online = std::move(*online);
     } else if (source != QLatin1String("procedural")) {
         return common::makeError(
             std::format("terrain source '{}' is not available yet", source.toStdString()));
@@ -427,7 +476,7 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     storage::TerrainPresetRecord r;
     r.key = key;
     r.name = name;
-    r.sourceType = c.kind == TerrainKind::File ? "file" : "procedural";
+    r.sourceType = sourceName(c.kind).toStdString();
     r.seed = c.params.seed;
     r.originLatDeg = c.origin.latitudeDeg;
     r.originLonDeg = c.origin.longitudeDeg;
@@ -440,12 +489,15 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     if (c.kind == TerrainKind::File) {
         params.insert(QStringLiteral("file"), fileToJson(c.file));
     }
+    if (c.kind == TerrainKind::Online) {
+        params.insert(QStringLiteral("online"), onlineToJson(c.online));
+    }
     r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
     return r;
 }
 
 common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecord& r) {
-    if (r.sourceType != "procedural" && r.sourceType != "file") {
+    if (r.sourceType != "procedural" && r.sourceType != "file" && r.sourceType != "online") {
         return common::makeError(std::format(
             "preset '{}' uses the '{}' source, which is not available yet", r.name, r.sourceType));
     }
@@ -467,6 +519,14 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         }
         c.kind = TerrainKind::File;
         c.file = std::move(*file);
+    } else if (r.sourceType == "online") {
+        auto online = onlineFromJson(doc.object().value(QStringLiteral("online")).toObject());
+        if (!online) {
+            return common::makeError(
+                std::format("preset '{}': {}", r.name, online.error().message));
+        }
+        c.kind = TerrainKind::Online;
+        c.online = std::move(*online);
     }
     c.presetKey = r.key;
     c.params = std::move(*params);
@@ -480,8 +540,46 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
     return c;
 }
 
-common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config) {
+common::Result<terrain::OnlineTerrainRequest> onlineRequest(const TerrainConfig& config,
+                                                            const DataServices& data) {
+    const net::ProviderConfig* provider = data.provider(config.online.provider);
+    if (provider == nullptr) {
+        return common::makeError(
+            std::format("unknown elevation provider \"{}\"", config.online.provider));
+    }
+    terrain::OnlineTerrainRequest r;
+    r.provider = *provider;
+    r.dataset = config.online.dataset;
+    r.origin = geo::LatLon{config.origin.latitudeDeg, config.origin.longitudeDeg};
+    r.originAltitudeM = config.online.originAltitudeM;
+    r.extent = config.extent;
+    r.edge = config.online.edge;
+    return r;
+}
+
+common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config, DataServices* data) {
     BuiltTerrain built;
+    if (config.kind == TerrainKind::Online) {
+        if (data == nullptr) {
+            return common::makeError("online elevation data is not available here");
+        }
+        auto request = onlineRequest(config, *data);
+        if (!request) {
+            return std::unexpected(request.error());
+        }
+        auto opened = terrain::openOnlineTerrain(data->client(), *request);
+        if (!opened) {
+            return common::makeError(opened.error().message);
+        }
+        built.source = std::move(opened->source);
+        built.stream = std::move(opened->stream);
+        built.metadata = std::move(opened->data);
+        built.origin = built.metadata->origin;
+        built.attribution = opened->online.attribution;
+        built.online = std::move(opened->online);
+        built.dataHash = std::move(opened->dataHash);
+        return built;
+    }
     if (config.kind == TerrainKind::Procedural) {
         auto source = terrain::ProceduralSource::create(config.params, config.extent);
         if (!source) {

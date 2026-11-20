@@ -241,11 +241,14 @@ TEST(MissionSetup, ProfileIsTheMissionsOwn) {
     EXPECT_EQ(asked, "survey-1500g");
 }
 
-TEST(MissionSetup, OnlineTerrainIsNotPlayableYetGroundVehiclesAre) {
+TEST(MissionSetup, OnlineTerrainNeedsDataServicesGroundVehiclesArePlayable) {
     auto online = parse(kMission);
     online.terrain.source = missions::TerrainSource::Online;
-    EXPECT_NE(app::unplayableReason(online).value_or("").find("M4"), std::string::npos);
-    EXPECT_FALSE(app::missionTerrain(online).has_value());
+    online.terrain.elevationProvider = "opentopography";
+    // Without the data services (tests, no cache folder) online missions are unavailable.
+    EXPECT_NE(app::unplayableReason(online).value_or("").find("not available"), std::string::npos);
+    online.terrain.origin.reset();
+    EXPECT_FALSE(app::missionTerrain(online).has_value());  // Online terrain needs an origin.
     auto ground = parse(kMission);
     ground.vehicle.type = physics::VehicleType::Ground;
     EXPECT_FALSE(app::unplayableReason(ground).has_value());

@@ -762,7 +762,7 @@ common::Result<std::unique_ptr<missions::MissionRunner>> SimulationController::e
 common::Result<void> SimulationController::startMission(const missions::MissionDefinition& m,
                                                         const physics::VehicleProfile& profile,
                                                         const std::filesystem::path& missionDir) {
-    if (auto reason = unplayableReason(m)) {
+    if (auto reason = unplayableReason(m, scene_->dataServices())) {
         return common::makeError(*reason);
     }
     if (physics::profileType(profile) != m.vehicle.type) {

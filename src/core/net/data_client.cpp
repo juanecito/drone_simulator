@@ -294,6 +294,31 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
     return http_->submit(std::move(http), std::move(onDone));
 }
 
+NetResult<std::optional<Payload>> DataClient::cached(const ProviderConfig& provider,
+                                                     const BBoxRequest& request) {
+    const DatasetConfig* dataset =
+        provider.dataset(request.dataset.empty() ? provider.defaultDataset : request.dataset);
+    if (dataset == nullptr) {
+        return netError(NetErrorCode::InvalidRequest, std::format("unknown dataset \"{}\" for {}",
+                                                                  request.dataset, provider.name));
+    }
+    if (cache_ == nullptr || !provider.allowCache) {
+        return std::optional<Payload>{};
+    }
+    auto key = cacheKey(provider, *dataset, request.area);
+    if (!key) {
+        return std::unexpected(key.error());
+    }
+    auto got = cache_->get(provider.key, *key, clock_());
+    if (!got) {
+        return std::unexpected(got.error());
+    }
+    if (!*got) {
+        return std::optional<Payload>{};
+    }
+    return std::optional{fromCached(std::move(**got))};
+}
+
 NetResult<DownloadEstimate> DataClient::estimateDownload(const ProviderConfig& provider,
                                                          std::string_view datasetId,
                                                          const GeoRect& area) {

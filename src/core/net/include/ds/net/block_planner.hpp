@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -51,5 +52,20 @@ struct Block {
 /// number of blocks of nearly @p blockSizeKm width at the band's middle latitude.
 [[nodiscard]] std::vector<Block> blocksAround(double latDeg, double lonDeg, double radiusKm,
                                               double blockSizeKm);
+
+/// @brief The block of the grid of blocksAround() that contains (@p latDeg, @p lonDeg).
+[[nodiscard]] BlockKey blockAt(double latDeg, double lonDeg, double blockSizeKm) noexcept;
+
+/// @brief Geographic extent of block @p key of the grid of blocksAround().
+[[nodiscard]] GeoRect blockRect(const BlockKey& key, double blockSizeKm) noexcept;
+
+/// @brief Hash of a BlockKey (for unordered containers).
+struct BlockKeyHash {
+    /// @brief Hash value.
+    std::size_t operator()(const BlockKey& k) const noexcept {
+        return (static_cast<std::size_t>(static_cast<std::uint32_t>(k.row)) << 32U) ^
+               static_cast<std::uint32_t>(k.col);
+    }
+};
 
 }  // namespace ds::net

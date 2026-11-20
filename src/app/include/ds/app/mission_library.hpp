@@ -5,6 +5,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "ds/app/mission_validation.hpp"
@@ -27,6 +29,8 @@ struct MissionFolders {
     std::filesystem::path assetDir;  ///< Holds `missions/` (schema, built-in pack) and `default-missions/`.
     std::filesystem::path userDir;   ///< `~/.drone_simulation/missions` ("" ⇒ no user missions).
     std::filesystem::path libraryDir;  ///< `~/.drone_simulation/library` (may be empty).
+    /// Data providers known besides the built-in presets (the user's own, FR-NET-02).
+    std::set<std::string> extraProviders;
 };
 
 /// @brief The missions found at start-up.

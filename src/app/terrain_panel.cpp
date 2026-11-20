@@ -22,11 +22,13 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardItemModel>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
 
+#include "ds/app/data_services.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/common/random.hpp"
 #include "ds/terrain/procedural_source.hpp"
@@ -95,6 +97,20 @@ TerrainPanel::TerrainPanel(SceneController& scene, QWidget* parent)
     updateMetadata();
     updatePreview();
     connect(scene_, &SceneController::presetsChanged, this, &TerrainPanel::reloadPresets);
+    connect(scene_, &SceneController::terrainChanged, this, [this] {
+        updateMetadata();
+        updatePreview();
+    });
+    // Streaming online terrain: blocks arrive in the background.
+    refresh_ = new QTimer(this);
+    refresh_->setInterval(2000);
+    connect(refresh_, &QTimer::timeout, this, [this] {
+        if (isVisible() && scene_->onlineStatus()) {
+            updateMetadata();
+            updateQuota();
+        }
+    });
+    refresh_->start();
 }
 
 void TerrainPanel::buildUi() {
@@ -125,7 +141,9 @@ void TerrainPanel::buildUi() {
     source_ = new QComboBox;
     source_->setObjectName(QStringLiteral("SourceCombo"));
     source_->addItems({tr("Procedural"), tr("Online elevation"), tr("Elevation file")});
-    disableItem(source_, 1, tr("Available in a later step of milestone M4."));
+    if (scene_->dataServices() == nullptr || scene_->dataServices()->elevationProviders().empty()) {
+        disableItem(source_, 1, tr("No online elevation provider is available."));
+    }
     form->addRow(tr("Source:"), source_);
     connect(source_, &QComboBox::currentIndexChanged, this, &TerrainPanel::updateEnabled);
     dimensions_ = new QComboBox;
@@ -189,12 +207,50 @@ void TerrainPanel::buildUi() {
     fileEdge_->addItem(tr("Clamp edge"), static_cast<int>(terrain::EdgeMode::Cliff));
     fileEdge_->addItem(tr("Fade to lowest height"), static_cast<int>(terrain::EdgeMode::Fade));
     fform->addRow(tr("Edge:"), fileEdge_);
+    layout->addWidget(fileBox_);
+
+    // Online elevation (FR-TER-O01 … O18).
+    onlineBox_ = new QGroupBox(tr("Online elevation"));
+    onlineBox_->setObjectName(QStringLiteral("OnlineBox"));
+    auto* oform2 = new QFormLayout(onlineBox_);
+    provider_ = new QComboBox;
+    provider_->setObjectName(QStringLiteral("ProviderCombo"));
+    oform2->addRow(tr("Provider:"), provider_);
+    dataset_ = new QComboBox;
+    dataset_->setObjectName(QStringLiteral("DatasetCombo"));
+    oform2->addRow(tr("Dataset:"), dataset_);
+    onlineEdge_ = new QComboBox;
+    onlineEdge_->setObjectName(QStringLiteral("OnlineEdgeCombo"));
+    onlineEdge_->addItem(tr("Clamp edge"), static_cast<int>(terrain::EdgeMode::Cliff));
+    onlineEdge_->addItem(tr("Fade to lowest height"), static_cast<int>(terrain::EdgeMode::Fade));
+    oform2->addRow(tr("Edge:"), onlineEdge_);
+    download_ = new QPushButton(tr("Download Area…"));
+    download_->setObjectName(QStringLiteral("DownloadAreaButton"));
+    download_->setToolTip(
+        tr("Downloads the terrain area (with custom dimensions) or the block around the origin "
+           "into the cache, for offline use."));
+    oform2->addRow(download_);
+    quota_ = new QLabel;
+    quota_->setObjectName(QStringLiteral("QuotaLabel"));
+    quota_->setWordWrap(true);
+    oform2->addRow(quota_);
+    auto* privacy = new QLabel(tr("The requested area is visible to the provider."));
+    privacy->setWordWrap(true);
+    privacy->setEnabled(false);
+    oform2->addRow(privacy);
+    layout->addWidget(onlineBox_);
+    connect(provider_, &QComboBox::currentIndexChanged, this, [this] {
+        fillDatasets();
+        updateQuota();
+    });
+    connect(download_, &QPushButton::clicked, this, [this] { downloadArea(); });
+    fillProviders();
+
     metadata_ = new QLabel;
     metadata_->setObjectName(QStringLiteral("MetadataLabel"));
     metadata_->setWordWrap(true);
     metadata_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    fform->addRow(metadata_);
-    layout->addWidget(fileBox_);
+    layout->addWidget(metadata_);
 
     // Procedural parameters.
     auto* proc = new QGroupBox(tr("Procedural"));
@@ -391,6 +447,15 @@ TerrainConfig TerrainPanel::formConfig() const {
             f.origin = geo::LatLon{latitude_->value(), longitude_->value()};
             f.originAltitudeM = altitude_->value();
         }
+    } else if (source_->currentIndex() == 1) {
+        c.kind = TerrainKind::Online;
+        OnlineTerrainConfig& o = c.online;
+        o.provider = provider_->currentData().toString().toStdString();
+        o.dataset = dataset_->currentData().toString().toStdString();
+        o.edge = static_cast<terrain::EdgeMode>(onlineEdge_->currentData().toInt());
+        if (!autoOrigin_->isChecked()) {
+            o.originAltitudeM = altitude_->value();
+        }
     }
     return c;
 }
@@ -417,7 +482,20 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     latitude_->setValue(c.origin.latitudeDeg);
     longitude_->setValue(c.origin.longitudeDeg);
     altitude_->setValue(c.origin.heightM);
-    source_->setCurrentIndex(c.kind == TerrainKind::File ? 2 : 0);
+    source_->setCurrentIndex(c.kind == TerrainKind::File     ? 2
+                             : c.kind == TerrainKind::Online ? 1
+                                                             : 0);
+    if (c.kind == TerrainKind::Online) {
+        if (const int i = provider_->findData(QString::fromStdString(c.online.provider)); i >= 0) {
+            provider_->setCurrentIndex(i);
+        }
+        fillDatasets();
+        if (const int i = dataset_->findData(QString::fromStdString(c.online.dataset)); i >= 0) {
+            dataset_->setCurrentIndex(i);
+        }
+        onlineEdge_->setCurrentIndex(
+            std::max(onlineEdge_->findData(static_cast<int>(c.online.edge)), 0));
+    }
     files_->clear();
     for (const auto& file : c.file.files) {
         const QString path = QString::fromStdString(file.string());
@@ -431,7 +509,8 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     datum_->setText(QString::fromStdString(c.file.verticalDatum));
     attribution_->setText(QString::fromStdString(c.file.attribution));
     fileEdge_->setCurrentIndex(std::max(fileEdge_->findData(static_cast<int>(c.file.edge)), 0));
-    autoOrigin_->setChecked(c.kind == TerrainKind::File && !c.file.origin);
+    autoOrigin_->setChecked((c.kind == TerrainKind::File && !c.file.origin) ||
+                            (c.kind == TerrainKind::Online && !c.online.originAltitudeM));
     const int index = presets_->findData(QString::fromStdString(c.presetKey));
     presets_->setCurrentIndex(std::max(index, 0));
     updateEnabled();
@@ -449,14 +528,18 @@ bool TerrainPanel::regenerate() {
             updateEnabled();
         }
     }
+    if (config.kind == TerrainKind::Online && !ensureDownloaded(config)) {
+        return false;
+    }
     if (auto applied = scene_->setTerrain(config); !applied) {
         showStatus(QString::fromStdString(applied.error().message), true);
         return false;
     }
-    showStatus(
-        config.kind == TerrainKind::File ? tr("Elevation files loaded.") : tr("Terrain generated."),
-        false);
-    if (config.kind == TerrainKind::File) {
+    showStatus(config.kind == TerrainKind::File     ? tr("Elevation files loaded.")
+               : config.kind == TerrainKind::Online ? tr("Online elevation loaded.")
+                                                    : tr("Terrain generated."),
+               false);
+    if (config.kind != TerrainKind::Procedural) {
         // The origin found in the data.
         const geo::Geodetic& o = scene_->terrain().origin;
         latitude_->setValue(o.latitudeDeg);
@@ -464,8 +547,108 @@ bool TerrainPanel::regenerate() {
         altitude_->setValue(o.heightM);
     }
     updateMetadata();
+    updateQuota();
     updatePreview();
     return true;
+}
+
+bool TerrainPanel::ensureDownloaded(const TerrainConfig& config) {
+    DataServices* services = scene_->dataServices();
+    if (services == nullptr) {
+        showStatus(tr("Online elevation data is not available here."), true);
+        return false;
+    }
+    auto request = onlineRequest(config, *services);
+    if (!request) {
+        showStatus(QString::fromStdString(request.error().message), true);
+        return false;
+    }
+    auto cached = ensureOnlineData(this, *services, *request);
+    updateQuota();
+    if (!cached) {
+        showStatus(QString::fromStdString(cached.error().message), true);
+        return false;
+    }
+    if (!*cached) {
+        showStatus(tr("Download cancelled."), true);
+        return false;
+    }
+    return true;
+}
+
+bool TerrainPanel::downloadArea() {
+    const TerrainConfig config = formConfig();
+    if (config.kind != TerrainKind::Online) {
+        return false;
+    }
+    if (!ensureDownloaded(config)) {
+        return false;
+    }
+    showStatus(tr("The area is in the cache (also offline)."), false);
+    return true;
+}
+
+void TerrainPanel::fillProviders() {
+    const QSignalBlocker blocker(provider_);
+    provider_->clear();
+    if (DataServices* services = scene_->dataServices()) {
+        for (const net::ProviderConfig* p : services->elevationProviders()) {
+            provider_->addItem(QString::fromStdString(p->name), QString::fromStdString(p->key));
+        }
+    }
+    fillDatasets();
+    updateQuota();
+}
+
+void TerrainPanel::fillDatasets() {
+    const QSignalBlocker blocker(dataset_);
+    dataset_->clear();
+    DataServices* services = scene_->dataServices();
+    const net::ProviderConfig* p =
+        services != nullptr ? services->provider(provider_->currentData().toString().toStdString())
+                            : nullptr;
+    if (p == nullptr) {
+        return;
+    }
+    for (const net::DatasetConfig& d : p->datasets) {
+        dataset_->addItem(QString::fromStdString(d.name), QString::fromStdString(d.id));
+        const int i = dataset_->count() - 1;
+        dataset_->setItemData(
+            i,
+            tr("%1 m · %2%3")
+                .arg(d.resolutionM, 0, 'g', 3)
+                .arg(d.verticalDatum.empty() ? tr("datum unknown")
+                                             : QString::fromStdString(d.verticalDatum))
+                .arg(d.verified ? QString() : tr(" · request format not verified yet")),
+            Qt::ToolTipRole);
+    }
+    dataset_->setCurrentIndex(
+        std::max(dataset_->findData(QString::fromStdString(p->defaultDataset)), 0));
+}
+
+void TerrainPanel::updateQuota() {
+    DataServices* services = scene_->dataServices();
+    const net::ProviderConfig* p =
+        services != nullptr ? services->provider(provider_->currentData().toString().toStdString())
+                            : nullptr;
+    if (p == nullptr) {
+        quota_->clear();
+        return;
+    }
+    QStringList parts;
+    if (const auto q = services->quota(*p)) {
+        parts << tr("%1 of %2 calls left today").arg(q->remaining).arg(q->limit);
+    }
+    if (p->requiresKey) {
+        parts << (services->hasApiKey(p->key)
+                      ? tr("API key set")
+                      : tr("no API key (set %1)")
+                            .arg(QString::fromStdString(DataServices::keyVariable(p->key))));
+    }
+    if (services->http().offline()) {
+        parts << tr("offline: cached data only");
+    }
+    quota_->setText(parts.join(QStringLiteral(" · ")));
 }
 
 void TerrainPanel::addFiles() {
@@ -496,6 +679,57 @@ void TerrainPanel::updateMetadata() {
         return;
     }
     QStringList lines;
+    if (const auto& online = scene_->onlineMetadata()) {
+        // FR-TER-O12: provider, protocol, CRS, coverage, resolution, cached area, heights.
+        lines << tr("Provider: %1 (%2) · %3")
+                     .arg(QString::fromStdString(online->providerName))
+                     .arg(QString::fromStdString(online->protocol))
+                     .arg(QString::fromStdString(online->datasetName));
+        lines << tr("Resolution: %1 m · %2%3 · CRS %4")
+                     .arg(online->resolutionM, 0, 'g', 3)
+                     .arg(online->verticalDatum.empty()
+                              ? tr("datum unknown")
+                              : QString::fromStdString(online->verticalDatum))
+                     .arg(online->ellipsoidal ? tr(" (ellipsoidal)") : QString())
+                     .arg(
+                         QString::fromStdString(meta->crsCode.empty() ? meta->crs : meta->crsCode));
+        lines << (online->coverage ? tr("Coverage: %1° … %2° N, %3° … %4° E")
+                                         .arg(online->coverage->south)
+                                         .arg(online->coverage->north)
+                                         .arg(online->coverage->west)
+                                         .arg(online->coverage->east)
+                                   : tr("Coverage: worldwide"));
+        if (const auto status = scene_->onlineStatus()) {
+            lines
+                << tr("Streaming %1 km blocks: %2 loaded, %3 loading (%4 MB) · heights %5 … %6 m")
+                       .arg(scene_->dataServices() != nullptr &&
+                                    scene_->dataServices()->provider(online->providerKey)
+                                ? scene_->dataServices()->provider(online->providerKey)->blockSizeKm
+                                : 0.0)
+                       .arg(status->loadedBlocks)
+                       .arg(status->pendingBlocks)
+                       .arg(static_cast<double>(status->bytes) / 1.0e6, 0, 'f', 1)
+                       .arg(status->minHeightM, 0, 'f', 1)
+                       .arg(status->maxHeightM, 0, 'f', 1);
+            if (!status->lastError.empty()) {
+                lines << tr("Last problem: %1").arg(QString::fromStdString(status->lastError));
+            }
+        } else {
+            lines << tr("Cached area: %1 × %2 km in %3 request(s), %4 MB · heights %5 … %6 m")
+                         .arg(online->area.widthKm(), 0, 'f', 1)
+                         .arg(online->area.heightKm(), 0, 'f', 1)
+                         .arg(online->pieces)
+                         .arg(static_cast<double>(online->bytes) / 1.0e6, 0, 'f', 1)
+                         .arg(meta->minHeightM, 0, 'f', 1)
+                         .arg(meta->maxHeightM, 0, 'f', 1);
+            lines << tr("Terrain: %1 × %2 km")
+                         .arg(meta->extent.widthM / 1000.0, 0, 'f', 2)
+                         .arg(meta->extent.lengthM / 1000.0, 0, 'f', 2);
+        }
+        lines << tr("Attribution: %1").arg(QString::fromStdString(online->attribution));
+        metadata_->setText(lines.join(QLatin1Char('\n')));
+        return;
+    }
     lines << tr("Format: %1, %2 file(s), %3 × %4 px%5")
                  .arg(QString::fromStdString(meta->format))
                  .arg(meta->fileCount)
@@ -525,13 +759,17 @@ void TerrainPanel::updateMetadata() {
 void TerrainPanel::updateEnabled() {
     const bool custom = dimensions_->currentIndex() == 1;
     const bool file = source_->currentIndex() == 2;
-    procedural_->setVisible(!file);
+    const bool online = source_->currentIndex() == 1;
+    procedural_->setVisible(!file && !online);
     fileBox_->setVisible(file);
-    autoOrigin_->setVisible(file);
-    const bool manualOrigin = !file || !autoOrigin_->isChecked();
-    latitude_->setEnabled(manualOrigin);
-    longitude_->setEnabled(manualOrigin);
-    altitude_->setEnabled(manualOrigin);
+    onlineBox_->setVisible(online);
+    autoOrigin_->setVisible(file || online);
+    autoOrigin_->setText(online ? tr("At ground level")
+                                : tr("Centre of the data, at ground level"));
+    const bool automatic = (file || online) && autoOrigin_->isChecked();
+    latitude_->setEnabled(!(file && automatic));
+    longitude_->setEnabled(!(file && automatic));
+    altitude_->setEnabled(!automatic);
     removeFile_->setEnabled(!files_->selectedItems().isEmpty());
     widthKm_->setEnabled(custom);
     lengthKm_->setEnabled(custom);
@@ -547,17 +785,21 @@ void TerrainPanel::showStatus(const QString& text, bool error) {
 }
 
 void TerrainPanel::updatePreview() {
-    preview_->setPixmap(QPixmap::fromImage(renderPreview(scene_->terrain(), kPreviewSize)));
+    preview_->setPixmap(QPixmap::fromImage(renderPreview(*scene_->source(), kPreviewSize)));
 }
 
 QImage TerrainPanel::renderPreview(const TerrainConfig& config, int size) {
-    QImage image(size, size, QImage::Format_RGB32);
     auto built = buildTerrain(config);
     if (!built) {
+        QImage image(size, size, QImage::Format_RGB32);
         image.fill(Qt::darkGray);
         return image;
     }
-    const terrain::HeightSource& source = *built->source;
+    return renderPreview(*built->source, size);
+}
+
+QImage TerrainPanel::renderPreview(const terrain::HeightSource& source, int size) {
+    QImage image(size, size, QImage::Format_RGB32);
     const auto extent = source.extent();
     const double extentM = extent ? std::max(extent->widthM, extent->lengthM) : kUnboundedPreviewM;
     const std::vector<float> heights =

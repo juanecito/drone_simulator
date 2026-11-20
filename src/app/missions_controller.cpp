@@ -11,6 +11,7 @@
 #include <tuple>
 #include <utility>
 
+#include "ds/app/data_services.hpp"
 #include "ds/app/mission_setup.hpp"
 #include "ds/common/log.hpp"
 #include "ds/storage/mission_store.hpp"
@@ -54,8 +55,9 @@ QString chapterTitle(std::string_view chapter) {
 }
 
 MissionsController::MissionsController(MissionFolders folders, storage::StorageService* storage,
-                                       QObject* parent)
+                                       DataServices* data, QObject* parent)
     : QObject(parent), folders_(std::move(folders)), storage_(storage) {
+    useDataServices(data);
     reload();
 }
 
@@ -66,6 +68,24 @@ const MissionRow* MissionsController::find(std::string_view key) const noexcept 
 
 const missions::CatalogEntry& MissionsController::entry(const MissionRow& row) const {
     return library_->entries.at(row.entry);
+}
+
+void MissionsController::setDataServices(DataServices* data) {
+    if (data == data_) {
+        return;
+    }
+    useDataServices(data);
+    reload();
+}
+
+void MissionsController::useDataServices(DataServices* data) {
+    data_ = data;
+    folders_.extraProviders.clear();
+    if (data_ != nullptr) {
+        for (const net::ProviderConfig& p : data_->providers()) {
+            folders_.extraProviders.insert(p.key);
+        }
+    }
 }
 
 void MissionsController::reload() {
@@ -106,7 +126,7 @@ void MissionsController::reload() {
             if (!e.load.unavailable.empty()) {
                 row.status = MissionStatus::Unavailable;
                 row.statusDetail = e.load.unavailable.front();
-            } else if (auto reason = unplayableReason(*d)) {
+            } else if (auto reason = unplayableReason(*d, data_)) {
                 row.status = MissionStatus::Unavailable;
                 row.statusDetail = std::move(*reason);
             }

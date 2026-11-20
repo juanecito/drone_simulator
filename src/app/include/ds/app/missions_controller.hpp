@@ -29,6 +29,8 @@ class StorageService;
 
 namespace ds::app {
 
+class DataServices;
+
 /// @brief Whether a mission can be started.
 enum class MissionStatus {
     Available,    ///< Valid, playable and unlocked.
@@ -62,12 +64,16 @@ class MissionsController final : public QObject {
 
 public:
     /// @brief Loads the missions of @p folders (see loadMissionLibrary()). @p storage may be
-    /// null (no index, no progress); if given it must outlive the controller.
+    /// null (no index, no progress); if given it must outlive the controller, as must @p data
+    /// (see setDataServices()).
     MissionsController(MissionFolders folders, storage::StorageService* storage,
-                       QObject* parent = nullptr);
+                       DataServices* data = nullptr, QObject* parent = nullptr);
 
     /// @brief Rescans the folders and re-reads the progress (FR-MIS-01a); emits missionsChanged().
     void reload();
+    /// @brief Uses @p data to tell whether online-terrain missions are playable (provider,
+    /// API key or cached area, FR-MIS-02) and reloads the list. Null ⇒ they are unavailable.
+    void setDataServices(DataServices* data);
 
     /// @brief The missions, in display order.
     [[nodiscard]] const std::vector<MissionRow>& missions() const noexcept { return rows_; }
@@ -108,8 +114,11 @@ signals:
     void missionsChanged();
 
 private:
+    void useDataServices(DataServices* data);
+
     MissionFolders folders_;
     storage::StorageService* storage_;
+    DataServices* data_ = nullptr;
     std::optional<MissionLibrary> library_;
     std::vector<MissionRow> rows_;
     QString loadError_;

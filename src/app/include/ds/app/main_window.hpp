@@ -32,6 +32,7 @@ class QTabWidget;
 
 namespace ds::app {
 
+class DataServices;
 class EnvironmentPanel;
 class HistoryPanel;
 class MissionBriefingDialog;
@@ -58,9 +59,12 @@ public:
     ///        saved again when the window closes (FR-UI-03).
     /// @param missions The mission list for the Missions tab, or null: the window then lists
     ///        the built-in missions only (tests). If given, it must outlive the window.
+    /// @param data Providers, network and cache for online terrain, or null (no online
+    ///        terrain). If given, it must outlive the window.
     /// @param parent Parent widget, normally null.
     explicit MainWindow(SettingsController* settings = nullptr,
-                        MissionsController* missions = nullptr, QWidget* parent = nullptr);
+                        MissionsController* missions = nullptr, DataServices* data = nullptr,
+                        QWidget* parent = nullptr);
     /// @brief Stops the simulation before the scene it depends on is destroyed.
     ~MainWindow() override;
 
@@ -152,6 +156,7 @@ private:
     SceneController* scene_ = nullptr;
     SimulationController* simulation_ = nullptr;
     MissionsController* missions_ = nullptr;
+    DataServices* data_ = nullptr;
     Viewport* viewport_ = nullptr;
     EnvironmentPanel* environmentPanel_ = nullptr;
     HistoryPanel* historyPanel_ = nullptr;

@@ -48,9 +48,10 @@ class SceneController final : public QObject {
 
 public:
     /// @brief Creates the scene; @p settings may be null (nothing is saved, no user presets).
-    /// @p assetDirectory holds `sky/bsc5.csv`.
+    /// @p assetDirectory holds `sky/bsc5.csv`. @p data gives online terrain its providers and
+    /// cache (null ⇒ no online terrain); it must outlive the scene.
     SceneController(SettingsController* settings, std::filesystem::path assetDirectory,
-                    QObject* parent = nullptr);
+                    DataServices* data = nullptr, QObject* parent = nullptr);
     ~SceneController() override;
 
     SceneController(const SceneController&) = delete;
@@ -99,7 +100,21 @@ public:
     /// @brief True while the simulation drives the clock.
     [[nodiscard]] bool timeFollowsSimulation() const noexcept { return externalClock_; }
 
-    /// @brief Metadata of file terrain (FR-TER-O12); empty for procedural terrain.
+    /// @brief Requests the online blocks around world (@p x, @p z) (streaming online terrain;
+    /// call it every frame with the camera position, FR-TER-O06). No-op otherwise.
+    void focusTerrain(double x, double z);
+    /// @brief The data services (null if online terrain is not available).
+    [[nodiscard]] DataServices* dataServices() const noexcept { return data_; }
+    /// @brief Provider metadata of online terrain (FR-TER-O12); empty otherwise.
+    [[nodiscard]] const std::optional<terrain::OnlineMetadata>& onlineMetadata() const noexcept {
+        return online_;
+    }
+    /// @brief State of block streaming (online terrain without extent); empty otherwise.
+    [[nodiscard]] std::optional<terrain::OnlineStreamStatus> onlineStatus() const;
+    /// @brief Hash of the online data in use (FR-TER-O14; bounded online terrain), else "".
+    [[nodiscard]] const std::string& terrainDataHash() const noexcept { return dataHash_; }
+
+    /// @brief Metadata of file and online terrain (FR-TER-O12); empty for procedural terrain.
     [[nodiscard]] const std::optional<terrain::SourceMetadata>& terrainMetadata() const noexcept {
         return metadata_;
     }
@@ -151,12 +166,16 @@ private:
 
     SettingsController* settings_;
     std::filesystem::path assetDirectory_;
+    DataServices* data_;
     common::WorkerPool pool_;
     terrain::ChunkLayout layout_;
     TerrainConfig terrain_;
     EnvironmentConfig environment_;
     std::shared_ptr<const terrain::HeightSource> source_;
     std::optional<terrain::SourceMetadata> metadata_;
+    std::optional<terrain::OnlineMetadata> online_;
+    std::shared_ptr<terrain::OnlineStreamSource> stream_;
+    std::string dataHash_;
     std::string attribution_;
     std::unique_ptr<terrain::TerrainStreamer> streamer_;
     std::unique_ptr<terrain::TerrainQuery> query_;

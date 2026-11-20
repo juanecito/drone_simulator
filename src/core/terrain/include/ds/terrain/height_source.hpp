@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 /// @defgroup terrain Terrain
 /// @brief Height sources, chunked level-of-detail meshes, streaming and height queries
@@ -37,10 +39,23 @@ struct Extent {
     bool operator==(const Extent&) const = default;
 };
 
+/// @brief A world rectangle whose heights changed (data that arrived later, e.g. an online
+/// elevation block).
+struct ChangedArea {
+    std::uint64_t revision = 0;  ///< Source revision that brought the change.
+    double minX = 0.0;           ///< West edge.
+    double minZ = 0.0;           ///< North edge (smaller z).
+    double maxX = 0.0;           ///< East edge.
+    double maxZ = 0.0;           ///< South edge.
+};
+
 /// @brief Source of terrain heights in the world frame (x = east, z = −north, metres from the
 /// geographic origin; heights in metres relative to the origin altitude).
-/// @details Implementations are immutable after construction and safe to call from several
-/// threads at once (chunk workers and physics). Heights must be deterministic (FR-TER-03).
+/// @details Implementations are safe to call from several threads at once (chunk workers and
+/// physics). Heights must be deterministic (FR-TER-03). Most sources are immutable after
+/// construction; a source whose data arrives later (online blocks) raises revision() and lists
+/// the changed rectangles in changesSince(), so meshes built earlier can be rebuilt. Heights
+/// outside the changed rectangles never change.
 class HeightSource {
 public:
     HeightSource() = default;
@@ -69,6 +84,15 @@ public:
 
     /// @brief Height above which the ground is snow-covered (material classification).
     [[nodiscard]] virtual double snowLine() const { return 1.0e9; }
+
+    /// @brief Revision of the data, 0 for sources that never change.
+    [[nodiscard]] virtual std::uint64_t revision() const noexcept { return 0; }
+
+    /// @brief Rectangles changed by the revisions after @p revision, oldest first.
+    [[nodiscard]] virtual std::vector<ChangedArea> changesSince(std::uint64_t revision) const {
+        (void)revision;
+        return {};
+    }
 
     /// @brief Short human-readable description (logs, UI).
     [[nodiscard]] virtual std::string describe() const = 0;

@@ -46,6 +46,8 @@ common::Result<MissionLibrary> loadMissionLibrary(const MissionFolders& folders,
     }
     MissionLibrary library;
     library.validation = std::move(*validation);
+    library.validation->context.providers.insert(folders.extraProviders.begin(),
+                                                 folders.extraProviders.end());
 
     if (!folders.userDir.empty()) {
         const auto installed = missions::installDefaultMissions(

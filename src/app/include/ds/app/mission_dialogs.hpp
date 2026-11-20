@@ -32,6 +32,8 @@ class QTextBrowser;
 
 namespace ds::app {
 
+class DataServices;
+
 struct MissionRow;
 struct VehicleProfileInfo;
 
@@ -46,9 +48,10 @@ struct MissionMapData {
     std::vector<glm::dvec3> path;                          ///< Flight path (debrief).
 };
 
-/// @brief Builds the map data of @p mission (opens file terrain; see unplayableReason()).
+/// @brief Builds the map data of @p mission (opens file terrain, and online terrain from the
+/// cache of @p data; see unplayableReason()).
 [[nodiscard]] common::Result<MissionMapData> missionMapData(
-    const missions::MissionDefinition& mission);
+    const missions::MissionDefinition& mission, DataServices* data = nullptr);
 
 /// @brief Top-down map: shaded terrain, items, take-off point, pilot and flight path; north up.
 class MissionMapWidget final : public QWidget {
@@ -97,10 +100,11 @@ public:
     /// @param profiles Profiles the pilot may choose when the mission allows it.
     /// @param keyboardOnly True if no controller is set up: a mission without
     ///        `allowKeyboard` cannot be flown then.
+    /// @param services Data services for the map of online terrain (may be null).
     /// @param parent Parent widget.
     MissionBriefingDialog(const MissionRow& row, const missions::CatalogEntry& entry,
                           const QList<VehicleProfileInfo>& profiles, bool keyboardOnly,
-                          QWidget* parent = nullptr);
+                          DataServices* services = nullptr, QWidget* parent = nullptr);
 
     /// @brief Profile chosen ("" ⇒ the mission's own).
     [[nodiscard]] QString chosenProfile() const;
@@ -129,11 +133,12 @@ public:
     /// @param path Its flight path.
     /// @param best The personal best before this attempt.
     /// @param hasNext Enables *Next mission*.
+    /// @param services Data services for the map of online terrain (may be null).
     /// @param parent Parent widget.
     MissionDebriefDialog(const missions::MissionDefinition& mission,
                          const missions::MissionResult& result, std::vector<glm::dvec3> path,
                          const std::optional<storage::MissionAttemptRecord>& best, bool hasNext,
-                         QWidget* parent = nullptr);
+                         DataServices* services = nullptr, QWidget* parent = nullptr);
 
     /// @brief The button pressed (Back if the dialog was closed).
     [[nodiscard]] Choice choice() const noexcept { return choice_; }

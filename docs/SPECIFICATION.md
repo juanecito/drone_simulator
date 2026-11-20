@@ -1721,6 +1721,45 @@ so Markdown pages appear in the generated site.
     of the viewport. Debrief screenshots don't exist yet.
   - *Not done:* the DEM-file mission of the built-in pack and its licensed data (step 9);
     opening LAS/LAZ files from the Terrain tab (step 6).
+- **Step 4 — online elevation terrain (done, FR-TER-O01, O09, O12–O18, FR-NET-07):**
+  - *Bounded terrain (with an extent):* the area needed is the extent plus a 300 m margin.
+    It is fetched in as few requests as the provider's limits allow (FR-TER-O16), and the
+    pieces are opened from the cache as one surface in GDAL memory files.
+    - Opening never uses the network. `ensureOnlineData()` first asks, with the number of
+      calls and *"uses N of your M remaining calls today"* (FR-TER-O17). It then downloads
+      behind a progress dialog with *Cancel*; the pieces are pinned in the cache.
+    - The terrain data hash is the SHA-256 of the provider, dataset and piece hashes. A
+      restart in offline mode opens the same data and gives identical heights.
+  - *Streaming (no extent):* the world is cut into the provider's fixed blocks
+    (`blockSizeKm`). The block under the origin must be downloaded first; the blocks within
+    one block size of the camera follow in the background, at most two at a time.
+    - Physics and rendering never wait. Where no block has arrived yet, the height is the
+      lowest height of the origin block.
+    - Each arrival raises the source's *revision* with the changed area. The streamer keeps
+      drawing the old meshes there and rebuilds them (`StreamerStats::stale`).
+    - Failed blocks are retried after 2 min, never when the quota is used up. The reason is
+      shown in the metadata view.
+  - *Missions:* online missions are playable when the provider and dataset are known and cover
+    the origin, and when an API key is set or the area is already cached (FR-MIS-02).
+    - Missions are always bounded: the mission's extent, or 10 km × 10 km. The area is
+      downloaded at launch, before PreFlight.
+    - The attempt records the terrain data hash (FR-TER-O14). The mission loader also knows
+      the providers of the user database.
+  - *API keys (FR-NET-07, interim):* `DS_API_KEY_<PROVIDER>`, e.g.
+    `DS_API_KEY_OPENTOPOGRAPHY`, else the copy in the user database. Entering keys in the
+    UI (keyring) is step 5.
+  - *Terrain tab:* the *Online elevation* source has:
+    - provider, dataset and edge;
+    - *Download Area…* (also offline later);
+    - a line with the calls left today, the key state and offline mode;
+    - a privacy note.
+
+    The metadata view shows the provider, protocol, dataset, resolution, datum, CRS,
+    coverage, cached area or streaming blocks, height range and attribution (FR-TER-O12).
+  - *Data services:* the tile cache index is `cache.db` next to the user database, in memory
+    if the Qt SQLite driver is missing. The cache is at `~/.drone_simulation/cache` (5 GB).
+  - *Not done:* Settings › Data providers and the keyring (step 5); procedural fill beyond
+    the data (S).
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

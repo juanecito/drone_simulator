@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <utility>
 
@@ -14,8 +15,15 @@ namespace ds::terrain {
 struct TerrainStreamer::Shared {
     std::atomic<bool> cancelled{false};
     std::mutex mutex;
-    std::vector<std::shared_ptr<const ChunkMesh>> finished;
+    std::vector<std::pair<std::shared_ptr<const ChunkMesh>, std::uint64_t>> finished;
 };
+
+namespace {
+
+// Changes kept to check meshes that were being built when they arrived.
+constexpr std::size_t kMaxChanges = 512;
+
+}  // namespace
 
 TerrainStreamer::TerrainStreamer(std::shared_ptr<const HeightSource> source,
                                  const ChunkLayout& layout, common::WorkerPool& pool,
@@ -32,25 +40,72 @@ TerrainStreamer::TerrainStreamer(std::shared_ptr<const HeightSource> source,
 
 TerrainStreamer::~TerrainStreamer() { shared_->cancelled = true; }
 
+bool TerrainStreamer::touches(const ChunkId& id, const ChangedArea& change) const noexcept {
+    const ChunkBounds b = chunkBounds(layout_, id);
+    const double apron = layout_.spacing(id.lod);  // Normals sample one step outside.
+    return b.minX - apron <= change.maxX && b.maxX + apron >= change.minX &&
+           b.minZ - apron <= change.maxZ && b.maxZ + apron >= change.minZ;
+}
+
 void TerrainStreamer::collect() {
-    std::vector<std::shared_ptr<const ChunkMesh>> finished;
+    std::vector<std::pair<std::shared_ptr<const ChunkMesh>, std::uint64_t>> finished;
     {
         const std::scoped_lock lock(shared_->mutex);
         finished.swap(shared_->finished);
     }
-    for (auto& mesh : finished) {
+    for (auto& [mesh, revision] : finished) {
         const ChunkId id = mesh->id;  // Read before the move below.
         inFlight_.erase(id);
-        cachedBytes_ += mesh->byteSize();
         ++generated_;
-        cache_[id] = CacheEntry{std::move(mesh), frame_};
+        // Data that arrived while the mesh was being built makes it stale at once.
+        const bool stale = std::ranges::any_of(changes_, [&](const ChangedArea& c) {
+            return c.revision > revision && touches(id, c);
+        });
+        if (const auto old = cache_.find(id); old != cache_.end() && old->second.mesh) {
+            cachedBytes_ -= old->second.mesh->byteSize();  // A rebuilt mesh replaces it.
+        }
+        cachedBytes_ += mesh->byteSize();
+        cache_[id] = CacheEntry{std::move(mesh), frame_, revision, stale};
     }
+}
+
+void TerrainStreamer::applyChanges() {
+    const std::uint64_t revision = source_->revision();
+    if (revision == seenRevision_) {
+        return;
+    }
+    for (const ChangedArea& change : source_->changesSince(seenRevision_)) {
+        for (auto& [id, entry] : cache_) {
+            if (!entry.stale && entry.revision < change.revision && touches(id, change)) {
+                entry.stale = true;
+            }
+        }
+        changes_.push_back(change);
+    }
+    if (changes_.size() > kMaxChanges) {
+        changes_.erase(changes_.begin(), changes_.begin() + static_cast<std::ptrdiff_t>(
+                                                                changes_.size() - kMaxChanges));
+    }
+    seenRevision_ = revision;
+}
+
+void TerrainStreamer::submit(const ChunkId& id, double priority) {
+    pool_->submit(priority, [source = source_, layout = layout_, id, shared = shared_] {
+        if (shared->cancelled) {
+            return;
+        }
+        const std::uint64_t revision = source->revision();  // Before reading any height.
+        auto mesh = std::make_shared<const ChunkMesh>(buildChunkMesh(*source, layout, id));
+        const std::scoped_lock lock(shared->mutex);
+        shared->finished.emplace_back(std::move(mesh), revision);
+    });
 }
 
 std::vector<std::shared_ptr<const ChunkMesh>> TerrainStreamer::update(double x, double y,
                                                                       double z) {
     ++frame_;
     collect();
+    applyChanges();
 
     const ChunkSelection selection = selectChunks(
         layout_, source_->extent(), x, y, z, settings_.selection,
@@ -70,20 +125,30 @@ std::vector<std::shared_ptr<const ChunkMesh>> TerrainStreamer::update(double x, 
         if (!inFlight_.insert(id).second) {
             continue;  // Already queued.
         }
-        pool_->submit(priority, [source = source_, layout = layout_, id, shared = shared_] {
-            if (shared->cancelled) {
-                return;
-            }
-            auto mesh = std::make_shared<const ChunkMesh>(buildChunkMesh(*source, layout, id));
-            const std::scoped_lock lock(shared->mutex);
-            shared->finished.push_back(std::move(mesh));
-        });
+        submit(id, priority);
     }
 
     std::vector<std::shared_ptr<const ChunkMesh>> meshes;
     meshes.reserve(selection.render.size());
     for (const ChunkId& id : selection.render) {
         meshes.push_back(cache_.at(id).mesh);
+    }
+    // Stale meshes used this frame (drawn, or split parents whose height range guides the
+    // selection) stay in use until their rebuild arrives, queued after the missing chunks.
+    if (std::ranges::any_of(cache_, [](const auto& e) { return e.second.stale; })) {
+        for (const auto& [id, entry] : cache_) {
+            if (inFlight_.size() >= settings_.maxInFlight) {
+                break;
+            }
+            if (!entry.stale || entry.lastUsed != frame_ || inFlight_.contains(id)) {
+                continue;
+            }
+            inFlight_.insert(id);
+            const ChunkBounds b = chunkBounds(layout_, id);
+            const double dx = 0.5 * (b.minX + b.maxX) - x;
+            const double dz = 0.5 * (b.minZ + b.maxZ) - z;
+            submit(id, 1.0 + std::sqrt(dx * dx + dz * dz) / layout_.size(id.lod) + id.lod * 0.01);
+        }
     }
     evict();
     return meshes;
@@ -115,7 +180,9 @@ void TerrainStreamer::evict() {
 }
 
 StreamerStats TerrainStreamer::stats() const {
-    return {cache_.size(), cachedBytes_, inFlight_.size(), generated_};
+    const auto stale = static_cast<std::size_t>(
+        std::ranges::count_if(cache_, [](const auto& e) { return e.second.stale; }));
+    return {cache_.size(), cachedBytes_, inFlight_.size(), generated_, stale};
 }
 
 }  // namespace ds::terrain
