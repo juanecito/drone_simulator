@@ -131,8 +131,8 @@ void buildGroundHud(const WorldSnapshot& s, const HudOptions& o, HudModel& h) {
                        : transfer >= kRolloverCaution               ? HudLevel::Caution
                                                                     : HudLevel::Normal;
     ground.roll.level = ground.stability;
-    ground.slope.text =
-        std::format("SLOPE {:.0f}° {}", g.slopeDeg, physics::surfaceMaterialName(g.surface));
+    ground.slope.text = std::format("SLOPE {:.0f}° {}", g.slopeDeg,
+                                    physics::surfaceDescription(g.surface, g.cover));
     ground.slip.text = std::format("SLIP {:.0f}%", 100.0 * g.maxSlip);
     ground.slip.level = slipLevel(g.maxSlip);
     ground.odometer.text = "ODO " + length(g.odometerM, o.imperial, 0);

@@ -57,6 +57,8 @@ struct EnvironmentSample {
     double qnhHpa = 1013.25;            ///< Altimeter setting.
     double ambientC = 15.0;             ///< Air temperature, °C (battery cooling).
     Vec3 wind{0.0};                     ///< Wind velocity, world frame.
+    weather::Precipitation precipitation;  ///< Rain or snow falling (FR-WX-06).
+    weather::GroundCover groundCover;      ///< Wet ground and snow (FR-WX-07).
     Vec3 groundPoint{0.0};              ///< Terrain point under the vehicle (x, height, z).
     GroundSample ground;  ///< Surface under the vehicle (terrain or a deck; local plane).
     std::optional<double> waterLevelM;  ///< World height of the water surface, if any.
@@ -150,6 +152,7 @@ struct GroundTelemetry {
     double loadTransfer = 0.0;
     double maxSlip = 0.0;                              ///< Largest wheel slip.
     SurfaceMaterial surface = SurfaceMaterial::Grass;  ///< Material under the vehicle.
+    weather::GroundCover cover;                        ///< Wetness and snow on it.
     bool rolledOver = false;                           ///< On its side or roof.
     double stuckS = 0.0;                               ///< Time without progress under power.
     bool inWater = false;                              ///< Deeper than the wading depth.

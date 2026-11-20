@@ -15,6 +15,8 @@
 #include "ds/physics/powertrain.hpp"
 #include "ds/physics/rigid_body.hpp"
 
+#include "fixture_csv.hpp"
+
 namespace {
 
 using namespace ds::physics;
@@ -283,6 +285,44 @@ TEST(Battery, CoulombCountingAndTemperature) {
         hot.update(60.0, 20.0, 0.01);
     }
     EXPECT_GT(hot.temperatureC(), 21.0);
+}
+
+// NFR-REAL-11: delivered capacity and loaded voltage in the cold follow the datasheet-type
+// curves of tests/fixtures/battery/temperature_curves.csv (0.5 C to 3.0 V per cell).
+TEST(Battery, ColdDischargeFollowsTheDatasheetCurves) {
+    const ds::test::CsvTable table("battery/temperature_curves.csv");
+    ASSERT_GE(table.size(), 10U);
+    for (std::size_t row = 0; row < table.size(); ++row) {
+        const bool lipo = table.text(row, "chemistry") == "lipo";
+        const double ambient = table.number(row, "temperatureC");
+        BatteryParams p;
+        p.chemistry = lipo ? Chemistry::LiPo : Chemistry::LiIon;
+        p.cellsInSeries = 1;
+        // A 5 Ah pouch cell and a 2 Ah 18650 cell, as in the reference profiles.
+        p.capacityAh = lipo ? 5.0 : 2.0;
+        p.cellResistanceOhm = lipo ? 0.005 : 0.030;
+        p.heatCapacityJPerK = lipo ? 100.0 : 45.0;
+        p.coolingWPerK = lipo ? 0.5 : 0.25;
+        Battery b(p, ambient);
+        const double current = 0.5 * p.capacityAh;
+        double midVoltage = 0.0;
+        for (int s = 0; s < 4 * 3600 && !b.depleted(); ++s) {
+            b.update(current, ambient, 1.0);
+            if (midVoltage == 0.0 && b.consumedMah() >= 500.0 * p.capacityAh) {
+                midVoltage = b.voltage();
+            }
+        }
+        const double delivered = b.consumedMah() / (1000.0 * p.capacityAh);
+        const double expected = table.number(row, "capacityFraction");
+        const std::string where =
+            table.text(row, "chemistry") + " at " + table.text(row, "temperatureC") + " °C";
+        EXPECT_NEAR(delivered, expected, 0.10 * expected) << where;
+        // The voltage must be within 10 % (NFR-REAL-11); 3 % is checked so that the sag in the
+        // cold actually follows the curve.
+        EXPECT_NEAR(midVoltage, table.number(row, "midVoltageV"),
+                    0.03 * table.number(row, "midVoltageV"))
+            << where;
+    }
 }
 
 TEST(Battery, WarningsAreHeldThenLatchedAndDepletionStopsOutput) {

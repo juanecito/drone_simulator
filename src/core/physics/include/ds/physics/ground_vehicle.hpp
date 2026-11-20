@@ -143,6 +143,7 @@ private:
     double waterDepth_ = 0.0;
     double slopeDeg_ = 0.0;
     SurfaceMaterial surface_ = SurfaceMaterial::Grass;
+    weather::GroundCover cover_;  // Wet ground and snow (FR-WX-07).
     bool crashed_ = false;
     bool rolledOver_ = false;
     bool inWater_ = false;

@@ -1,0 +1,17 @@
+# NFR-REAL-11: discharge at 0.5 C and constant ambient temperature to 3.0 V per cell.
+# Representative values of the "discharge at different temperatures" curves published in
+# generic LiPo pouch-cell and cylindrical Li-ion (18650) datasheets: delivered capacity as a
+# fraction of the 25 °C rating, and the loaded cell voltage half-way through the rated
+# capacity. Not taken from one specific product; check against the datasheet of the cells
+# a profile models before relying on them (docs/FLIGHT_MODEL.md).
+chemistry,temperatureC,capacityFraction,midVoltageV
+lipo,-20,0.60,3.45
+lipo,-10,0.75,3.62
+lipo,0,0.85,3.72
+lipo,25,1.00,3.80
+lipo,40,1.00,3.82
+liion,-20,0.62,3.20
+liion,-10,0.77,3.42
+liion,0,0.86,3.56
+liion,25,1.00,3.68
+liion,40,1.00,3.70

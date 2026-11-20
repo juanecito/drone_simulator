@@ -77,7 +77,12 @@ constexpr std::array<CurvePoint, 7> kLiIonCapacity{{{-20.0, 0.65},
 
 constexpr double kKelvin = 273.15;
 constexpr double kArrheniusK = 2257.0;      // R(0 °C) ≈ 2·R(25 °C).
-constexpr double kPolarisationShare = 0.5;  // RC-branch resistance relative to R0.
+constexpr double kPolarisationShare = 0.5;  // RC-branch resistance relative to R0 at 25 °C.
+// The RC branch stands for charge transfer and diffusion, which slow down much more in the
+// cold than the ohmic resistance: Ea/R ≈ 6000 K for LiPo pouch cells, ≈ 5000 K for
+// cylindrical Li-ion cells (whose ohmic resistance is already higher).
+constexpr double kLiPoPolarisationK = 6000.0;
+constexpr double kLiIonPolarisationK = 5000.0;
 constexpr double kPolarisationTauS = 15.0;
 constexpr double kWarningHoldS = 1.0;
 // The ESCs cut off only after the loaded voltage stays below the cut-off for this long, so a
@@ -98,6 +103,12 @@ double capacityFactor(Chemistry chemistry, double temperatureC) noexcept {
 double resistanceFactor(double temperatureC) noexcept {
     const double t = std::clamp(temperatureC, -40.0, 80.0) + kKelvin;
     return std::exp(kArrheniusK * (1.0 / t - 1.0 / (25.0 + kKelvin)));
+}
+
+double polarisationFactor(Chemistry chemistry, double temperatureC) noexcept {
+    const double t = std::clamp(temperatureC, -40.0, 80.0) + kKelvin;
+    const double k = chemistry == Chemistry::LiPo ? kLiPoPolarisationK : kLiIonPolarisationK;
+    return std::exp(k * (1.0 / t - 1.0 / (25.0 + kKelvin)));
 }
 
 const char* chemistryName(Chemistry chemistry) noexcept {
@@ -151,7 +162,8 @@ void Battery::update(double currentA, double ambientC, double dt) {
     current_ = std::max(0.0, currentA);
     const double r0 = packResistance();
     // RC branch: V_rc → I·R1 with time constant τ.
-    const double r1 = kPolarisationShare * r0;
+    const double r1 = kPolarisationShare * params_.cellResistanceOhm * params_.cellsInSeries *
+                      polarisationFactor(params_.chemistry, temperatureC_);
     polarisationV_ += (current_ * r1 - polarisationV_) * (1.0 - std::exp(-dt / kPolarisationTauS));
     voltage_ = std::max(0.0, openCircuitVoltage() - current_ * r0 - polarisationV_);
     consumedAh_ += current_ * dt / 3600.0;

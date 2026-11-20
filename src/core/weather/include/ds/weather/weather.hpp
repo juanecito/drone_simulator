@@ -233,10 +233,32 @@ struct Drift {
     bool operator==(const Drift&) const = default;
 };
 
+/// @brief State of the ground left by the weather (FR-WX-07), the same everywhere.
+struct GroundCover {
+    double wetness = 0.0;     ///< 0 dry … 1 soaked (about 1 mm of rain).
+    double snowDepthM = 0.0;  ///< Fresh snow lying on the ground, m.
+    /// @brief Equality.
+    bool operator==(const GroundCover&) const = default;
+};
+
+/// @brief Ground at the start of a session in @p conditions: soaked if it is raining
+/// (drizzle, rain, sleet), damp in fog or at ≥ 97 % humidity, and covered with the snow of
+/// about three hours of snowfall (1 to 30 cm) if it is snowing at ≤ 1 °C.
+[[nodiscard]] GroundCover initialGroundCover(const WeatherConditions& conditions) noexcept;
+/// @brief Advances @p cover by @p dt seconds in @p conditions: rain wets (1 mm soaks), dry
+/// air dries (30 min time constant at 50 % humidity, slower in humid air, none while it
+/// rains), snow at ≤ 1 °C settles at 10 mm of snow per mm of water, and above 0 °C it melts
+/// (5 mm per °C and hour), keeping the ground wet.
+void updateGroundCover(GroundCover& cover, const WeatherConditions& conditions, double dt) noexcept;
+/// @brief Mean fall speed of the precipitation, m/s (drizzle 2, rain 5–8 growing with the
+/// rate, sleet 4, snow 1).
+[[nodiscard]] double fallSpeedMs(const Precipitation& precipitation) noexcept;
+
 /// @brief The weather at one moment of a session.
 struct WeatherState {
     double timeS = 0.0;            ///< Seconds since the start.
     WeatherConditions conditions;  ///< Current conditions, fluctuations included.
+    GroundCover ground;            ///< Wet ground and snow cover.
     std::array<Drift, kMaxCloudLayers> cloudDrift{};  ///< How far each layer has moved.
 };
 

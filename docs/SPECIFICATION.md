@@ -1940,6 +1940,32 @@ so Markdown pages appear in the generated site.
   - *Missions:* the loader turns `environment.weather` into `WeatherSettings`; the mission
     scene shows its start conditions in the Environment tab; the briefing shows the summary of
     FR-WX-10 (`weather::describe`) and, with `forecast: true`, one line per timeline entry.
+- **Step 2 — Weather effects on the vehicles (done, FR-WX-06/07/08 M, NFR-REAL-11 battery):**
+  - *Ground state:* the generator keeps a uniform `GroundCover` (wetness 0–1 and snow depth):
+    soaked by 1 mm of rain, drying with 30 min at 50 % humidity (slower when humid, not while
+    raining), snow settling at ≤ 1 °C (10:1) and melting at 5 mm/(°C·h); a session that starts
+    in rain or snow starts on wet or snow-covered ground. Spatial variation (FR-WX-04, S) is
+    not modelled.
+  - *Ground drones:* `surfaceProperties(material, cover)` blends each material towards its wet
+    grip and rolling resistance (wet asphalt μ 0.6, dirt to mud, firmer wet sand, slush) and
+    snow ≥ 2 cm turns any surface to snow with extra rolling resistance; the HUD and Simulation
+    tab say `wet grass` or `snow`. Water ingress above an IP rating (S) is left for the failure
+    step.
+  - *Aerial drones:* a rain film (≤ 0.1 mm over twice the drag areas, τ 60 s wetting / 300 s
+    drying) adds mass at the CoG; the drops' momentum flux acts on the drag areas (well under
+    1 % of the weight in heavy rain). Motor failures from rain above the IP rating (S) and
+    icing (C) are left for later.
+  - *Battery (FR-WX-08, NFR-REAL-11):* the polarisation branch now has its own, steeper
+    temperature law (Ea/R 6000 K LiPo, 5000 K Li-ion), so the voltage sags in the cold as on
+    the datasheet curves; a test discharges cells at 0.5 C from −20 to 40 °C against
+    representative curves (`tests/fixtures/battery/temperature_curves.csv`, not taken from one
+    product: an open item to check against a real datasheet).
+  - *Found while testing:* the accelerometer of the simulated multirotors sees the tilt only
+    through drag, and the reference profiles' rotor drag (≈ 0.04 s⁻¹) is weaker than measured
+    on real quadrotors (0.1–0.6 s⁻¹). After a hard bank in Angle mode without a GPS fix the
+    true attitude drifts by ≈ 0.5°/s with the estimate level. The Angle-mode test now checks
+    the self-levelling 1 s after centring; the drift is left for the NFR-REAL step (8), since
+    changing the rotor drag moves every validated flight figure.
 
 ---
 

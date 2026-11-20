@@ -690,6 +690,82 @@ std::string describe(const WeatherConditions& c, const WindLevelTable& windTable
     return out;
 }
 
+// --- Ground ----------------------------------------------------------------------------------
+
+namespace {
+
+constexpr double kSoakingRainMm = 1.0;
+constexpr double kDryingTimeS = 1800.0;  // At 50 % humidity.
+constexpr double kMaxDryingTimeS = 21'600.0;
+constexpr double kSnowPerWater = 10.0;  // Fresh snow depth per water equivalent.
+constexpr double kSnowMaxC = 1.0;
+constexpr double kMeltMPerDegreeHour = 0.005;
+constexpr double kInitialSnowHours = 3.0;
+
+bool liquid(PrecipitationType type) noexcept {
+    return type == PrecipitationType::Drizzle || type == PrecipitationType::Rain ||
+           type == PrecipitationType::Sleet;
+}
+
+bool settles(const WeatherConditions& c) noexcept {
+    return (c.precipitation.type == PrecipitationType::Snow ||
+            c.precipitation.type == PrecipitationType::Sleet) &&
+           c.air.temperatureC <= kSnowMaxC && c.precipitation.rateMmH > 0.0;
+}
+
+}  // namespace
+
+GroundCover initialGroundCover(const WeatherConditions& c) noexcept {
+    GroundCover g;
+    const double rate = c.precipitation.rateMmH;
+    if (liquid(c.precipitation.type) && rate > 0.0) {
+        g.wetness = 1.0;
+    } else if ((c.fog.topM > 0.0 && c.visibilityM < 1000.0) || c.air.humidityPct >= 97.0) {
+        g.wetness = 0.3;
+    }
+    if (settles(c)) {
+        g.snowDepthM = std::clamp(rate * kSnowPerWater * kInitialSnowHours / 1000.0, 0.01, 0.30);
+        g.wetness = c.air.temperatureC > 0.0 ? 0.6 : 0.0;
+    }
+    return g;
+}
+
+void updateGroundCover(GroundCover& g, const WeatherConditions& c, double dt) noexcept {
+    if (dt <= 0.0) {
+        return;
+    }
+    const double hours = dt / 3600.0;
+    const double rate = c.precipitation.rateMmH;
+    const bool raining = liquid(c.precipitation.type) && rate > 0.0;
+    if (raining) {
+        g.wetness = std::min(1.0, g.wetness + rate * hours / kSoakingRainMm);
+    } else {
+        const double dryness = std::max(0.05, 1.0 - c.air.humidityPct / 100.0);
+        const double tau = std::min(kMaxDryingTimeS, kDryingTimeS * 0.5 / dryness);
+        g.wetness *= std::exp(-dt / tau);
+    }
+    if (settles(c)) {
+        g.snowDepthM += rate * kSnowPerWater * hours / 1000.0;
+    } else if (g.snowDepthM > 0.0 && c.air.temperatureC > 0.0) {
+        g.snowDepthM =
+            std::max(0.0, g.snowDepthM - kMeltMPerDegreeHour * c.air.temperatureC * hours);
+        g.wetness = std::max(g.wetness, 0.6);  // Melt water.
+    }
+}
+
+double fallSpeedMs(const Precipitation& p) noexcept {
+    switch (p.type) {
+        case PrecipitationType::None: return 0.0;
+        case PrecipitationType::Drizzle: return 2.0;
+        case PrecipitationType::Rain:
+            // Larger drops in heavier rain (median diameter grows with the rate).
+            return std::clamp(5.0 + 1.9 * std::log10(std::max(p.rateMmH, 0.1)), 3.5, 9.0);
+        case PrecipitationType::Sleet: return 4.0;
+        case PrecipitationType::Snow: return 1.0;
+    }
+    return 0.0;
+}
+
 // --- Generator -------------------------------------------------------------------------------
 
 WeatherGenerator::WeatherGenerator() : WeatherGenerator(WeatherSettings{}) {}
@@ -789,6 +865,7 @@ double WeatherGenerator::windSpeedAt(double level, double heightAglM) const noex
 void WeatherGenerator::restart() {
     state_ = WeatherState{};
     state_.conditions = conditionsAt(0.0);
+    state_.ground = initialGroundCover(plannedAt(0.0));  // The hours before: no fluctuation.
 }
 
 void WeatherGenerator::moveClouds(double dt) {
@@ -810,6 +887,7 @@ const WeatherState& WeatherGenerator::advance(double dt) {
         moveClouds(dt);
         state_.timeS += dt;
         state_.conditions = conditionsAt(state_.timeS);
+        updateGroundCover(state_.ground, state_.conditions, dt);
     }
     return state_;
 }

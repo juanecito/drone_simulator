@@ -340,6 +340,7 @@ void GroundVehicle::sampleTerrain(const EnvironmentSample& env) {
         pointPlanes_[k] = plane(pointWorld(points_[k].body));
     }
     surface_ = env.ground.material;
+    cover_ = env.groundCover;
     slopeDeg_ = common::radToDeg(std::acos(std::clamp(centre.normal.y, -1.0, 1.0)));
     waterLevel_ = env.waterLevelM;
     waterDepth_ = env.waterLevelM ? std::max(0.0, *env.waterLevelM - env.ground.heightM) : 0.0;
@@ -441,7 +442,7 @@ Wrench GroundVehicle::evaluate(const RigidBodyState& s, const WheelArray& omega,
                 const double kx = sx / denom;
                 const double ky = sy / denom;
                 slip = std::hypot(kx, ky);
-                const SurfaceProperties sp = surfaceProperties(g.material);
+                const SurfaceProperties sp = surfaceProperties(g.material, cover_);
                 const double mu = sp.peakFriction * p.tyre.gripScale;
                 double fx = 0.0;
                 double fy = 0.0;
@@ -525,7 +526,7 @@ Wrench GroundVehicle::evaluate(const RigidBodyState& s, const WheelArray& omega,
         const double vn = glm::dot(vp, n);
         const double fn = std::max(0.0, kc * depth - damping * vn);
         const Vec3 vt = vp - vn * n;
-        const double mu = kBodyFriction * surfaceProperties(g.material).peakFriction;
+        const double mu = kBodyFriction * surfaceProperties(g.material, cover_).peakFriction;
         const Vec3 ft =
             -mu * fn * vt / std::sqrt(glm::dot(vt, vt) + kBodySlideSmoothing * kBodySlideSmoothing);
         const Vec3 f = fn * n + ft;
@@ -834,6 +835,7 @@ VehicleTelemetry GroundVehicle::telemetry() const {
     g.cruiseSetpointMs = controller_.cruiseSetpoint();
     g.slopeDeg = slopeDeg_;
     g.surface = surface_;
+    g.cover = cover_;
     g.rolledOver = rolledOver_;
     g.stuckS = stuckTimer_;
     g.inWater = inWater_;

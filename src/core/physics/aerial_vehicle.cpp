@@ -57,7 +57,7 @@ AerialVehicle::AerialVehicle(const AerialProfile& profile, std::uint64_t seed)
 
 void AerialVehicle::updateMassProperties() {
     const FrameParams& f = profile_.frame;
-    const double m0 = f.massKg;
+    const double m0 = f.massKg + waterInMassKg_;  // Water spread over the frame.
     const double mp = payloadMassKg_;
     mass_.massKg = m0 + mp;
     const Vec3 c = mp > 0.0 ? payloadOffset_ * (mp / mass_.massKg) : Vec3(0.0);
@@ -89,6 +89,46 @@ void AerialVehicle::attachPayload(double massKg, const Vec3& offsetBody, double 
 }
 
 void AerialVehicle::releasePayload() { attachPayload(0.0, Vec3(0.0), 0.0); }
+
+namespace {
+
+// Rain on the airframe (FR-WX-06): a film of about 0.1 mm over the wetted surface (taken as
+// twice the sum of the drag areas), thinner in light rain; it builds up in about a minute and
+// is blown off in about five once the rain stops.
+constexpr double kFilmThicknessM = 1e-4;
+constexpr double kWaterDensity = 1000.0;
+constexpr double kWettingTimeS = 60.0;
+constexpr double kDryingTimeS = 300.0;
+constexpr double kFilmReferenceRateMmH = 4.0;
+
+bool liquidPrecipitation(const weather::Precipitation& p) noexcept {
+    return p.rateMmH > 0.0 && (p.type == weather::PrecipitationType::Drizzle ||
+                               p.type == weather::PrecipitationType::Rain ||
+                               p.type == weather::PrecipitationType::Sleet);
+}
+
+}  // namespace
+
+Vec3 AerialVehicle::precipitationForce(const RigidBodyState& s,
+                                       const EnvironmentSample& env) const noexcept {
+    const weather::Precipitation& p = env.precipitation;
+    const double fall = weather::fallSpeedMs(p);
+    if (p.rateMmH <= 0.0 || fall <= 0.0) {
+        return Vec3(0.0);
+    }
+    const double content = p.rateMmH / 3600.0 / fall;  // kg of water per m³ of air.
+    const Vec3 drops = env.wind + Vec3(0.0, -fall, 0.0);
+    const Vec3 relative = drops - s.velocity;
+    const double speed = glm::length(relative);
+    if (speed < 1e-9) {
+        return Vec3(0.0);
+    }
+    const Vec3 dir = worldToBody(s.orientation, relative / speed);
+    const FrameParams& f = profile_.frame;
+    const double area = std::abs(dir.x) * f.dragAreaForwardM2 + std::abs(dir.y) * f.dragAreaSideM2 +
+                        std::abs(dir.z) * f.dragAreaVerticalM2;
+    return content * speed * area * relative;
+}
 
 double AerialVehicle::restHeightM() const noexcept {
     return profile_.frame.gearHeightM - mass_.centreOfMassOffset.z;
@@ -122,6 +162,11 @@ void AerialVehicle::reset(const Vec3& position, double headingRad, const Environ
     loads_ = {};
     battery_.reset(env.ambientC);
     sensors_.reset();
+    waterMassKg_ = 0.0;
+    if (waterInMassKg_ != 0.0) {
+        waterInMassKg_ = 0.0;
+        updateMassProperties();
+    }
     estimator_.reset(headingRad, pressureAltitudeM(env.air.pressurePa, env.qnhHpa));
     controller_.reset();
     random_ = common::GaussianRandom(common::mix64(seed_ ^ 0x56454849434C45ULL));  // "VEHICLE"
@@ -250,7 +295,7 @@ Wrench AerialVehicle::computeWrench(const RigidBodyState& s, const EnvironmentSa
     drag.dragAreaSideM2 += payloadDragArea_;
     drag.dragAreaVerticalM2 += payloadDragArea_;
     forceBody += bodyDrag(drag, airBody, rho);
-    w.forceWorld = s.orientation * forceBody;
+    w.forceWorld = s.orientation * forceBody + precipitationForce(s, env);
     w.torqueBody = torque;
 
     // Ground contact: penalty spring–damper with regularised Coulomb friction (FR-PHY-09).
@@ -285,6 +330,22 @@ Wrench AerialVehicle::computeWrench(const RigidBodyState& s, const EnvironmentSa
 
 void AerialVehicle::integrate(const EnvironmentSample& env, double dt) {
     lastWind_ = env.wind;
+    {
+        const FrameParams& f = profile_.frame;
+        const bool raining = liquidPrecipitation(env.precipitation);
+        const double wetted = 2.0 * (f.dragAreaForwardM2 + f.dragAreaSideM2 + f.dragAreaVerticalM2);
+        const double film =
+            raining
+                ? kWaterDensity * kFilmThicknessM * wetted *
+                      std::min(1.0, std::sqrt(env.precipitation.rateMmH / kFilmReferenceRateMmH))
+                : 0.0;
+        const double tau = raining && film > waterMassKg_ ? kWettingTimeS : kDryingTimeS;
+        waterMassKg_ += (film - waterMassKg_) * (1.0 - std::exp(-dt / tau));
+        if (std::abs(waterMassKg_ - waterInMassKg_) > 1e-4) {
+            waterInMassKg_ = waterMassKg_;
+            updateMassProperties();
+        }
+    }
     const Vec3 c = mass_.centreOfMassOffset;
     const Vec3& n = env.ground.normal;
     for (std::size_t i = 0; i < points_.size(); ++i) {

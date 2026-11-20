@@ -272,6 +272,68 @@ TEST(WeatherConditions, BriefingSummary) {
               "Calm · clear sky · fog up to 120 m · visibility 500 m · 15 °C · QNH 1013");
 }
 
+TEST(GroundCover, StartsWetOrSnowyWhenItIsAlreadyFalling) {
+    const auto start = [](const char* json) {
+        return WeatherGenerator(parse(json)).state().ground;
+    };
+    EXPECT_EQ(start(R"({"seed":1,"preset":"clear"})"), GroundCover{});
+    EXPECT_DOUBLE_EQ(start(R"({"seed":1,"preset":"drizzle"})").wetness, 1.0);
+    EXPECT_DOUBLE_EQ(start(R"({"seed":1,"preset":"fog"})").wetness, 0.3);
+    const GroundCover light = start(R"({"seed":1,"preset":"light-snow"})");
+    const GroundCover heavy = start(R"({"seed":1,"preset":"heavy-snow"})");
+    EXPECT_DOUBLE_EQ(light.snowDepthM, 0.015);  // 3 h × 0.5 mm/h × 10.
+    EXPECT_DOUBLE_EQ(heavy.snowDepthM, 0.12);
+    EXPECT_DOUBLE_EQ(heavy.wetness, 0.0);
+    // Snow at 3 °C does not settle.
+    EXPECT_DOUBLE_EQ(start(R"({"seed":1,"preset":"light-snow","temperatureC":3})").snowDepthM, 0.0);
+}
+
+TEST(GroundCover, RainWetsSunDriesSnowSettlesAndMelts) {
+    WeatherConditions rain;
+    rain.precipitation = {PrecipitationType::Rain, 2.0};
+    GroundCover g;
+    updateGroundCover(g, rain, 900.0);  // 0.5 mm.
+    EXPECT_NEAR(g.wetness, 0.5, 1e-12);
+    updateGroundCover(g, rain, 3600.0);
+    EXPECT_DOUBLE_EQ(g.wetness, 1.0);
+    WeatherConditions dry;  // 50 % humidity: 30 min time constant.
+    updateGroundCover(g, dry, 1800.0);
+    EXPECT_NEAR(g.wetness, std::exp(-1.0), 1e-12);
+    WeatherConditions humid = dry;
+    humid.air.humidityPct = 90.0;
+    GroundCover h{.wetness = 1.0};
+    updateGroundCover(h, humid, 1800.0);
+    EXPECT_GT(h.wetness, 0.8);
+
+    WeatherConditions snow;
+    snow.air.temperatureC = -3.0;
+    snow.precipitation = {PrecipitationType::Snow, 2.0};
+    GroundCover s;
+    updateGroundCover(s, snow, 3600.0);
+    EXPECT_NEAR(s.snowDepthM, 0.02, 1e-12);
+    WeatherConditions thaw;
+    thaw.air.temperatureC = 2.0;
+    updateGroundCover(s, thaw, 3600.0);  // 1 cm per hour at 2 °C.
+    EXPECT_NEAR(s.snowDepthM, 0.01, 1e-12);
+    EXPECT_GE(s.wetness, 0.6);
+}
+
+TEST(GroundCover, TimelineRainWetsTheGroundDuringTheSession) {
+    WeatherGenerator g(parse(R"({"seed": 2, "preset": "broken-clouds",
+        "timeline": [{"atS": 60, "transitionS": 60, "preset": "heavy-rain"}]})"));
+    EXPECT_DOUBLE_EQ(g.state().ground.wetness, 0.0);
+    g.seek(600.0);
+    EXPECT_GT(g.state().ground.wetness, 0.9);
+}
+
+TEST(Precipitation, FallSpeeds) {
+    EXPECT_DOUBLE_EQ(fallSpeedMs({PrecipitationType::None, 0.0}), 0.0);
+    EXPECT_DOUBLE_EQ(fallSpeedMs({PrecipitationType::Snow, 1.0}), 1.0);
+    EXPECT_DOUBLE_EQ(fallSpeedMs({PrecipitationType::Rain, 1.0}), 5.0);
+    EXPECT_GT(fallSpeedMs({PrecipitationType::Rain, 12.0}), 6.5);
+    EXPECT_LT(fallSpeedMs({PrecipitationType::Drizzle, 0.3}), 3.0);
+}
+
 TEST(WindLevels, InterpolatedLevels) {
     const WindLevelTable& t = WindLevelTable::builtIn();
     EXPECT_EQ(t.interpolated(4.0), t.level(4));

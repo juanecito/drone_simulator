@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <numbers>
 
+#include "ds/common/json.hpp"
 #include "ds/common/math.hpp"
 #include "ds/items/item.hpp"
 #include "ds/physics/drive_controller.hpp"
@@ -166,6 +167,25 @@ TEST(SurfaceMaterial, NamesRoundTrip) {
         EXPECT_GT(p.rollingResistance, 0.0);
     }
     EXPECT_FALSE(physics::parseSurfaceMaterial("lava").has_value());
+}
+
+TEST(SurfaceMaterial, WetnessAndSnowChangeTheGrip) {
+    const weather::GroundCover dry;
+    const weather::GroundCover wet{.wetness = 1.0, .snowDepthM = 0.0};
+    const weather::GroundCover snow{.wetness = 0.0, .snowDepthM = 0.05};
+    EXPECT_EQ(surfaceProperties(SurfaceMaterial::Paved, dry).peakFriction,
+              surfaceProperties(SurfaceMaterial::Paved).peakFriction);
+    EXPECT_DOUBLE_EQ(surfaceProperties(SurfaceMaterial::Paved, wet).peakFriction, 0.6);
+    EXPECT_NEAR(surfaceProperties(SurfaceMaterial::Paved, {.wetness = 0.5}).peakFriction, 0.75,
+                1e-12);
+    EXPECT_GT(surfaceProperties(SurfaceMaterial::Dirt, wet).rollingResistance,
+              surfaceProperties(SurfaceMaterial::Dirt).rollingResistance);  // Mud.
+    EXPECT_GT(surfaceProperties(SurfaceMaterial::Sand, wet).peakFriction,
+              surfaceProperties(SurfaceMaterial::Sand).peakFriction);  // Firmer.
+    for (const SurfaceMaterial m : physics::allSurfaceMaterials()) {
+        EXPECT_DOUBLE_EQ(surfaceProperties(m, snow).peakFriction, 0.3);
+        EXPECT_NEAR(surfaceProperties(m, snow).rollingResistance, 0.08 + 0.10, 1e-12);
+    }
 }
 
 TEST(SurfaceMaterial, FollowsTheTerrainTexture) {
@@ -490,6 +510,34 @@ TEST(GroundVehicle, StopsInWaterDeeperThanItsWadingDepth) {
     EXPECT_TRUE(t.ground.inWater);
     EXPECT_FALSE(world.vehicle().armed());
     EXPECT_GT(t.ground.waterDepthM, rover().limits.wadingDepthM);
+}
+
+TEST(GroundVehicle, RainAndSnowTakeTheGripAway) {
+    // FR-WX-07: dry grass is good for a 22° climb, wet grass and snow-covered ground are not.
+    const auto climb = [](const char* weatherJson) {
+        sim::WorldConfig config = roverWorld(plane(22.0, SurfaceMaterial::Grass));
+        if (weatherJson != nullptr) {
+            config.weather = *weather::WeatherSettings::fromJson(*common::parseJson(weatherJson));
+        }
+        sim::World world(std::move(config));
+        Driver d{world};
+        d.arm();
+        d.controls.drive = 1.0;
+        d.run(3.0);
+        return std::pair(-world.vehicle().bodyState().position.z,
+                         world.vehicle().telemetry().ground.cover);
+    };
+    const auto [dry, dryCover] = climb(nullptr);
+    EXPECT_GT(dry, 2.0);
+    EXPECT_DOUBLE_EQ(dryCover.wetness, 0.0);
+    const auto [wet, wetCover] = climb(R"({"seed": 1, "preset": "light-rain", "temperatureC": 9})");
+    EXPECT_DOUBLE_EQ(wetCover.wetness, 1.0);
+    EXPECT_LT(wet, 0.5);
+    const auto [snowy, snowCover] = climb(R"({"seed": 1, "preset": "heavy-snow"})");
+    EXPECT_GT(snowCover.snowDepthM, 0.02);
+    EXPECT_LT(snowy, 0.5);
+    EXPECT_EQ(physics::surfaceDescription(SurfaceMaterial::Grass, wetCover), "wet grass");
+    EXPECT_EQ(physics::surfaceDescription(SurfaceMaterial::Grass, snowCover), "snow");
 }
 
 TEST(GroundVehicle, SofterGroundIsSlower) {

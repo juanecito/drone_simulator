@@ -79,6 +79,13 @@ public:
     void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2) override;
     /// @brief Releases the payload.
     void releasePayload() override;
+    /// @brief Rain water carried on the airframe, kg (FR-WX-06).
+    [[nodiscard]] double waterMassKg() const noexcept { return waterMassKg_; }
+    /// @brief Force of the falling precipitation on the airframe in @p env for a vehicle in
+    /// state @p s (world frame), N: the momentum flux of the drops relative to the vehicle,
+    /// `ρ_w·v_rel²·A` with the liquid water content `ρ_w = R / v_fall`.
+    [[nodiscard]] Vec3 precipitationForce(const RigidBodyState& s,
+                                          const EnvironmentSample& env) const noexcept;
     /// @brief Disables gravity, drag and contacts (free-fall and RK4 tests).
     void setIdealConditions(bool gravityOnly) noexcept { gravityOnly_ = gravityOnly; }
     /// @brief Last non-gravitational acceleration, body frame.
@@ -132,6 +139,9 @@ private:
     double payloadMassKg_ = 0.0;
     Vec3 payloadOffset_{0.0};
     double payloadDragArea_ = 0.0;
+    // Rain (FR-WX-06): water on the airframe, and the value the mass properties use.
+    double waterMassKg_ = 0.0;
+    double waterInMassKg_ = 0.0;
 };
 
 }  // namespace ds::physics

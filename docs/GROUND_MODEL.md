@@ -99,15 +99,37 @@ C = 1.35) peaks at a slip of ≈ 0.2 and keeps ≈ 85 % of the peak when spinnin
 |---|---:|---:|---|
 | `paved` (asphalt, concrete, bare rock) | 0.90 | 0.015 | rock texture |
 | `grass` | 0.55 | 0.07 | grass texture |
-| `dirt` (dry dirt, gravel) | 0.65 | 0.04 | — (missions, M7 weather) |
+| `dirt` (dry dirt, gravel) | 0.65 | 0.04 | — (missions) |
 | `sand` | 0.50 | 0.16 | beach texture |
 | `snow` (packed) | 0.30 | 0.08 | snow texture |
-| `mud` | 0.35 | 0.14 | — (wet dirt, M7 weather) |
+| `mud` | 0.35 | 0.14 | — (missions) |
 
 Peak friction values are typical published figures for pneumatic tyres; rolling resistance is
 raised for small wheels sinking into soft ground. The terrain lookup returns the material
 with the largest weight in the terrain's texture blend (`terrain::dominantMaterial`), so the
-grip matches what is drawn. Weather (wet ground, snow depth, mud) arrives in M7.
+grip matches what is drawn.
+
+**Weather (FR-WX-07, `surfaceProperties(material, cover)`).** The weather generator keeps a
+ground state, the same everywhere: a **wetness** (0 dry … 1 soaked; 1 mm of rain soaks the
+ground, which dries with a 30 min time constant at 50 % humidity, slower in humid air, not at
+all while it rains; it starts soaked when it is already raining and damp in fog) and a **snow
+depth** (it settles at ≤ 1 °C at 10 mm of snow per mm of water, melts at 5 mm per °C and hour
+and starts with three hours' worth when it is already snowing). Wetness blends each material
+towards its wet values; snow turns any surface into snow from 2 cm and adds `2·depth` (at most
+0.25) of rolling resistance for the wheels pushing through it:
+
+| Surface | Wet μ | Wet C_rr | Note |
+|---|---:|---:|---|
+| `paved` | 0.60 | 0.018 | wet asphalt |
+| `grass` | 0.35 | 0.08 | |
+| `dirt` | 0.40 | 0.10 | turns to mud |
+| `sand` | 0.55 | 0.10 | wet sand is firmer |
+| `snow` | 0.20 | 0.10 | slush |
+| `mud` | 0.25 | 0.18 | |
+
+The HUD and the Simulation tab name the surface as the driver sees it (`wet grass`, `snow`).
+The reference rover climbs 22° of dry grass but not of wet grass nor of snow-covered ground
+(`GroundVehicle.RainAndSnowTakeTheGripAway`).
 
 **Standing still.** A tyre model driven by slip velocity cannot hold a vehicle still on a
 slope: it needs some creep to produce force. When the brake is on, both sides are at zero and

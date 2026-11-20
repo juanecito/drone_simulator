@@ -256,7 +256,11 @@ settings always give the same weather.
 
 Inside a cloud layer of at least 4 oktas the visibility drops to 60 m, so the pilot loses
 sight of a drone that climbs into the cloud (VLOS). Temperature, pressure and humidity set the
-air density (thrust) and the battery temperature; the barometer reads relative to the QNH.
+air density (thrust) and the battery temperature (cold packs hold less and sag more); the
+barometer reads relative to the QNH. Rain wets the airframe of aerial drones (a few tens of
+grams at most) and the ground: wet ground and lying snow take grip away from ground drones (a
+slope that is easy when dry may be impossible in the rain). A mission that starts in rain
+starts on wet ground; one that starts in snow at ≤ 1 °C starts with snow on the ground.
 
 The **briefing** summarises the weather at the start, e.g. *Wind 270° level 4 (24 km/h,
 gusts 34) · broken clouds at 900 m · light rain · visibility 6.0 km · 12 °C · QNH 1009*. The

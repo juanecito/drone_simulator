@@ -265,7 +265,7 @@ void SimulationPanel::refresh() {
     lines << fromStd(hud.battery.text);
     if (ground) {
         const physics::GroundTelemetry& g = t.ground;
-        const auto surface = physics::surfaceMaterialName(g.surface);
+        const std::string surface = physics::surfaceDescription(g.surface, g.cover);
         lines << tr("%1   odometry %2 m/s   %3 m")
                      .arg(fromStd(hud.speed.text))
                      .arg(g.odometrySpeedMs, 0, 'f', 2)

@@ -266,6 +266,8 @@ physics::EnvironmentSample World::sampleEnvironment(const physics::Vec3& positio
     env.qnhHpa = ground.pressureHpa;
     env.ambientC = ground.temperatureC;
     env.wind = wind_.velocity();
+    env.precipitation = weather_.state().conditions.precipitation;
+    env.groundCover = weather_.state().ground;
     return env;
 }
 

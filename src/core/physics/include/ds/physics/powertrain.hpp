@@ -60,6 +60,10 @@ struct BatteryParams {
 [[nodiscard]] double capacityFactor(Chemistry chemistry, double temperatureC) noexcept;
 /// @brief Internal-resistance multiplier at @p temperatureC (1 at 25 °C, Arrhenius law).
 [[nodiscard]] double resistanceFactor(double temperatureC) noexcept;
+/// @brief Multiplier of the polarisation (RC-branch) resistance at @p temperatureC (1 at
+/// 25 °C): charge transfer and diffusion, Arrhenius law with Ea/R = 6000 K (LiPo) or 5000 K
+/// (Li-ion).
+[[nodiscard]] double polarisationFactor(Chemistry chemistry, double temperatureC) noexcept;
 /// @brief Name used in profile files ("lipo", "liion").
 [[nodiscard]] const char* chemistryName(Chemistry chemistry) noexcept;
 

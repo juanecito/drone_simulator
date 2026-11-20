@@ -74,8 +74,19 @@ four times per step.
 ### Battery (equivalent circuit)
 
 - **Terminal voltage:** `V = N·(OCV(SoC, T) − V_RC) − I·R0(T)`. `R0` follows an Arrhenius law
-  in temperature, and one RC branch models the slow polarisation.
-- **Charge:** coulomb counting. The usable capacity falls in the cold.
+  in temperature (Ea/R = 2257 K: twice the 25 °C value at 0 °C), and one RC branch (τ = 15 s,
+  half of `R0` at 25 °C) models the slow polarisation of charge transfer and diffusion, which
+  slows much more in the cold (Ea/R = 6000 K for LiPo, 5000 K for Li-ion).
+- **Charge:** coulomb counting. The usable capacity falls in the cold (LiPo: 60 % at −20 °C,
+  75 % at −10 °C, 85 % at 0 °C; Li-ion slightly better).
+- **Cold weather (NFR-REAL-11, FR-WX-08):** the pack starts at the air temperature of the
+  weather. Discharged at 0.5 C to 3.0 V per cell, a 5 Ah LiPo cell and a 2 Ah Li-ion cell
+  deliver their capacity, and hold their mid-discharge voltage, within 10 % and 3 % of the
+  reference curves in `tests/fixtures/battery/temperature_curves.csv`
+  (`Battery.ColdDischargeFollowsTheDatasheetCurves`). Those curves are representative values
+  of the "discharge at different temperatures" graphs of generic LiPo pouch and 18650
+  datasheets, not of one product; compare them with the datasheet of the cells a new profile
+  models.
 - **Temperature:** a lumped thermal model (Joule heating, convective cooling to the air).
 - **Chemistry:** LiPo and Li-ion open-circuit voltage curves.
 - **Warnings:** low and critical, by loaded cell voltage and state of charge.
@@ -95,6 +106,19 @@ four times per step.
 ### Body drag (`aerodynamics.hpp`)
 
 `F = −½·ρ·C_dA_i·|v_i|·v_i` per body axis, with `v` = vehicle velocity minus wind.
+
+### Rain (FR-WX-06)
+
+- **Water on the airframe:** in drizzle, rain or sleet a film of up to 0.1 mm (thinner below
+  4 mm/h, `∝ √R`) covers a wetted surface taken as twice the sum of the drag areas: 28 g on the
+  survey quad, 7 g on the camera drone. It builds up with a 60 s time constant and is blown off
+  with 300 s once the rain stops; it is carried at the centre of mass.
+- **Drops:** the falling precipitation hits the airframe with its momentum flux
+  `ρ_w·|v_rel|·v_rel·A`, where `ρ_w = R / v_fall` is the water in the air, `v_rel` the drops'
+  velocity (fall speed plus wind) relative to the vehicle and `A` the drag area across
+  `v_rel`. Fall speeds: drizzle 2 m/s, rain 5–8 m/s growing with the rate, sleet 4 m/s, snow
+  1 m/s. Even heavy rain pushes with well under 1 % of the weight: rain matters through the
+  water's weight, the wet ground (ground drones) and the visibility, not through drag.
 
 ### Wind (`wind.hpp`, `weather/wind_levels.hpp`)
 
@@ -134,7 +158,12 @@ four times per step.
 - **Altitude and climb rate:** from the barometer, plus the GPS position and velocity once
   there is a fix.
 - **Known limitation:** without a GPS fix, long accelerating manoeuvres slowly drift the
-  attitude estimate, as on a real flight controller.
+  attitude estimate, as on a real flight controller. The accelerometer of a multirotor reads
+  mostly thrust, so it sees the tilt only through the drag that grows with airspeed. The rotor
+  drag of the reference profiles (`rotorDragCoefficient` 0.5, about 0.04 s⁻¹ of velocity) is
+  weaker than measured on real quadrotors (≈ 0.1–0.6 s⁻¹), so after a hard bank in Angle mode
+  without a fix the true attitude keeps drifting by about 0.5°/s while the estimate stays
+  level. To be revisited with the NFR-REAL validation of M7.
 
 ## 7. Flight controller (`flight_controller.hpp`)
 
@@ -198,6 +227,8 @@ The checks run in `ctest`. The most relevant tests:
 | Reference figures (NFR-REAL-01) | `flight_test.cpp`: static and dynamic hover throttle and current, test-stand thrust-to-weight, top speed in flight |
 | Holding against wind (NFR-REAL-08) | `flight_test.cpp`: the drone leans into the wind and stays in place |
 | Wind statistics | `wind_test.cpp`: 60 s mean speed per level, Dryden σ, gust occurrence, determinism |
+| Battery in the cold (NFR-REAL-11) | `physics_test.cpp`: delivered capacity and mid-discharge voltage vs. temperature |
+| Rain (FR-WX-06) | `flight_test.cpp`: water film mass, drop momentum |
 | Controller | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Angle-mode limits, Acro step response |
 
 ### Acro step response

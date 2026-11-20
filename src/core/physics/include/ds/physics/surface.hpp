@@ -5,9 +5,11 @@
 
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include "ds/terrain/chunk.hpp"
+#include "ds/weather/weather.hpp"
 
 /// @file
 /// @brief Terrain surface materials and their effect on tyres (FR-GND-04): peak friction and
@@ -38,6 +40,17 @@ struct SurfaceProperties {
 /// small wheels sinking into soft ground (sand, mud). The profile's tyre scales both.
 [[nodiscard]] SurfaceProperties surfaceProperties(SurfaceMaterial material) noexcept;
 
+/// @brief Properties of @p material under the weather's @p cover (FR-WX-07).
+/// @details Wetness blends each material towards its wet values: wet asphalt μ 0.6, wet grass
+/// 0.35, dirt turning to mud (μ 0.4, C_rr 0.10), wet sand firmer (μ 0.55, C_rr 0.10), slush
+/// on snow 0.2, wetter mud 0.25. Snow lying on the ground turns any material into snow from
+/// 2 cm, and loose snow adds rolling resistance (2 × depth, at most 0.25).
+[[nodiscard]] SurfaceProperties surfaceProperties(SurfaceMaterial material,
+                                                  const weather::GroundCover& cover) noexcept;
+/// @brief Name of the surface as the driver sees it: "snow" under 2 cm of snow or more,
+/// "wet grass" from wetness 0.3, else the material's name.
+[[nodiscard]] std::string surfaceDescription(SurfaceMaterial material,
+                                             const weather::GroundCover& cover);
 /// @brief Name used in files and the GUI ("paved", "grass", …).
 [[nodiscard]] std::string_view surfaceMaterialName(SurfaceMaterial material) noexcept;
 
