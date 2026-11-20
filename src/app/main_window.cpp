@@ -535,7 +535,10 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
     panelWasVisible_ = panelDock_->isVisible();
     panelDock_->hide();
     viewport_->setFocus();
-    statusBar()->showMessage(tr("Arm the drone to start the mission"), 8000);
+    statusBar()->showMessage(mission.vehicle.type == physics::VehicleType::Ground
+                                 ? tr("Arm the rover (Enter) to start the mission")
+                                 : tr("Arm the drone to start the mission"),
+                             8000);
     return {};
 }
 

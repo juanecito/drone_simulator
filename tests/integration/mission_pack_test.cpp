@@ -60,10 +60,11 @@ TEST(MissionPack, EveryMissionIsValidAndCoversTheObjectiveTypes) {
             ++playable;
         }
     }
-    EXPECT_GE(playable, 10);
-    EXPECT_GE(chapters.size(), 3U);
-    // Every aerial objective type is in the pack (park is for ground vehicles, M6).
-    for (const auto type : {missions::ObjectiveType::ReachAltitude,
+    EXPECT_GE(playable, 14);
+    EXPECT_GE(chapters.size(), 4U);
+    EXPECT_TRUE(chapters.contains("ground"));
+    // Every objective type is in the pack.
+    for (const auto type : {missions::ObjectiveType::Park, missions::ObjectiveType::ReachAltitude,
                             missions::ObjectiveType::ReachWaypoint, missions::ObjectiveType::Hover,
                             missions::ObjectiveType::Land, missions::ObjectiveType::GateCourse,
                             missions::ObjectiveType::Deliver, missions::ObjectiveType::Inspect,
@@ -83,6 +84,7 @@ TEST(MissionPack, PlayableMissionsSitSensiblyOnTheirTerrain) {
             continue;
         }
         SCOPED_TRACE(m.id);
+        const bool rover = m.vehicle.type == physics::VehicleType::Ground;
         auto map = missionMapData(m);
         ASSERT_TRUE(map.has_value()) << map.error().message;
         const terrain::HeightSource& ground = *map->terrain;
@@ -107,9 +109,41 @@ TEST(MissionPack, PlayableMissionsSitSensiblyOnTheirTerrain) {
                     break;
                 }
                 case items::ItemType::Waypoint:
-                case items::ItemType::Gate:
-                    EXPECT_GT(p.y - h, 2.0) << "too close to the ground";
+                    if (!rover) {
+                        EXPECT_GT(p.y - h, 2.0) << "too close to the ground";
+                    }
                     break;
+                case items::ItemType::Gate: {
+                    if (!rover) {
+                        EXPECT_GT(p.y - h, 2.0) << "too close to the ground";
+                        break;
+                    }
+                    // A rover drives through: the opening starts at (or just below) the surface
+                    // under it — the terrain or a bridge deck — and the rover fits.
+                    double surface = h;
+                    for (const items::Item& other : map->items) {
+                        if (const auto top = items::driveSurfaceAt(other, p.x, p.z, p.y)) {
+                            surface = std::max(surface, top->heightM);
+                        }
+                    }
+                    const double bottom = p.y - item.shape.halfExtentsM.y;
+                    EXPECT_LE(bottom, surface + 0.02);
+                    EXPECT_GT(bottom, surface - 0.1) << "the bottom bar sticks out";
+                    EXPECT_GT(p.y + item.shape.halfExtentsM.y, surface + 0.5);
+                    break;
+                }
+                case items::ItemType::ParkingZone:
+                case items::ItemType::Ramp:
+                case items::ItemType::Bridge: {
+                    // Level: the corners within 5 cm of the centre (bays are painted on flat
+                    // ground; ramps and bridges stand on it).
+                    for (const double dx : {-1.0, 1.0}) {
+                        for (const double dz : {-1.0, 1.0}) {
+                            EXPECT_NEAR(ground.height(p.x + dx, p.z + dz), h, 0.05);
+                        }
+                    }
+                    break;
+                }
                 default: break;
             }
         }

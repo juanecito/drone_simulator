@@ -116,7 +116,7 @@ Headings are degrees clockwise from true north.
 | `gate` | opening `widthM` × `heightM` (2 × 2 m) centred on the position | Direction-aware: pass it in the direction of `headingDeg`. |
 | `landingPad` | disc, `radiusM` 1 | |
 | `pickupZone`, `dropZone` | cylinder `radiusM` 3 from 1 m below to `heightM` (10 m) above, or a box with `sizeM` [w, l] | |
-| `parkingZone` | box `sizeM` [w, l] (2 × 3 m), `heightM` 2, rotated by `headingDeg` | Target heading for `park`. |
+| `parkingZone` | box `sizeM` [w, l] (2 × 3 m), `heightM` 2, rotated by `headingDeg` | Target heading for `park`. A bay painted on the ground (white lines, yellow heading mark): always drawn, like a landing pad. Size it for the vehicle (0.7 × 0.9 m for the 4WD rover). |
 | `inspectionTarget` | sphere, `radiusM` 0.5 | |
 | `surveyArea` | prism from `polygon`, or a cylinder | |
 | `noFlyZone` | keep-out prism (`polygon`) or cylinder (`radiusM`), `bottomM`/`topM` optional | Entering it fails the mission. |
@@ -283,7 +283,14 @@ stored per user in the database; it survives when a mission file disappears.
 
 The two examples of SPECIFICATION §4.9.1 are kept as test fixtures and pass validation, the
 default mission is the simplest complete mission, and the built-in missions in
-[`assets/missions/`](../assets/missions/) show every aerial objective type:
+[`assets/missions/`](../assets/missions/) show every objective type. The `ground` chapter
+(4WD rover, M6) has four missions: *First drive* (two markers, then park in the start bay),
+*Tight parking* (between two parked rovers, 25 cm and 8°), *Sample run at dusk* (headlights
+required, deliver a sample, park in the garage) and *Bridge course* (gates on the ground and
+on a footbridge deck, a kicker ramp, a finish bay). Gates for ground vehicles sit with the
+bottom of their opening at the driving surface (`altitude = heightM / 2 − 2 cm`, plus the
+deck height on a bridge); put the `pilot` where the course is not hidden behind bridges or
+buildings, or the line-of-sight rule fails the mission.
 
 - [`assets/default-missions/first-flight.mission.json`](../assets/default-missions/first-flight.mission.json)
   — aerial, procedural terrain, take-off, waypoint and landing in sequence.

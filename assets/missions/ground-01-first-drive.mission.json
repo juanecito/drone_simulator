@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "id": "ground-01-first-drive",
+  "title": "First drive",
+  "briefing": "Get to know the rover: drive to the red marker 25 m north, then to the blue one 20 m east of it, and come back to park in the bay next to the start, facing north. Arm with Enter, drive with W/S and steer with A/D; hold Space to brake.",
+  "difficulty": 1,
+  "chapter": "ground",
+  "order": 1,
+  "terrain": {
+    "source": "procedural",
+    "seed": 611,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [41.6488, -0.8891, 200],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 600,
+      "lengthM": 600
+    }
+  },
+  "environment": {
+    "utc": "2026-05-12T09:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 3,
+      "preset": "few-clouds",
+      "temperatureC": 18,
+      "wind": {
+        "level": 1,
+        "fromDeg": 300
+      }
+    }
+  },
+  "vehicle": {
+    "type": "ground",
+    "profile": "rover-4wd-3kg",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 300,
+    "maxStuckS": 20
+  },
+  "items": [
+    {
+      "type": "waypoint",
+      "id": "red",
+      "name": "Red marker",
+      "local": [0, 0, -25],
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "blue",
+      "name": "Blue marker",
+      "local": [20, 0, -25],
+      "radiusM": 1.5
+    },
+    {
+      "type": "parkingZone",
+      "id": "bay",
+      "name": "Start bay",
+      "local": [1.5, 0, 0],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 0
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "red",
+      "type": "reachWaypoint",
+      "target": "red"
+    },
+    {
+      "id": "blue",
+      "type": "reachWaypoint",
+      "target": "blue"
+    },
+    {
+      "id": "park",
+      "type": "park",
+      "target": "bay",
+      "maxErrorM": 0.3,
+      "maxHeadingErrorDeg": 15
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 180
+      },
+      {
+        "maxTimeS": 120,
+        "maxErrorM": 0.2
+      }
+    ]
+  }
+}

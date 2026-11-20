@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "ground-04-bridge-course",
+  "title": "Bridge course",
+  "briefing": "Drive the course: through the first gate, over the footbridge through the gate on its deck, through the third gate, over the kicker ramp and into the finish bay facing north. The deck gate can only be passed on the bridge. Keep it slow on the bridge — the kerbs are low.",
+  "difficulty": 3,
+  "chapter": "ground",
+  "order": 4,
+  "terrain": {
+    "source": "procedural",
+    "seed": 614,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [41.6530, -0.8950, 200],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 600,
+      "lengthM": 600
+    }
+  },
+  "environment": {
+    "utc": "2026-05-13T16:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 6,
+      "preset": "scattered-clouds",
+      "temperatureC": 21,
+      "wind": {
+        "level": 2,
+        "fromDeg": 200
+      }
+    }
+  },
+  "vehicle": {
+    "type": "ground",
+    "profile": "rover-4wd-3kg"
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 300,
+    "maxStuckS": 20
+  },
+  "items": [
+    {
+      "type": "pilot",
+      "id": "pilot",
+      "name": "Pilot",
+      "local": [8, 0, -15]
+    },
+    {
+      "type": "gate",
+      "id": "g1",
+      "name": "Gate 1",
+      "local": [0, 0.48, -10],
+      "headingDeg": 0,
+      "widthM": 1.6,
+      "heightM": 1.0
+    },
+    {
+      "type": "bridge",
+      "id": "bridge",
+      "name": "Footbridge",
+      "local": [0, 0, -22],
+      "headingDeg": 0,
+      "sizeM": [1.0, 0.3, 4.0]
+    },
+    {
+      "type": "gate",
+      "id": "g2",
+      "name": "Deck gate",
+      "local": [0, 0.78, -22],
+      "headingDeg": 0,
+      "widthM": 1.6,
+      "heightM": 1.0
+    },
+    {
+      "type": "gate",
+      "id": "g3",
+      "name": "Gate 3",
+      "local": [6, 0.48, -34],
+      "headingDeg": 0,
+      "widthM": 1.6,
+      "heightM": 1.0
+    },
+    {
+      "type": "ramp",
+      "id": "kicker",
+      "name": "Kicker",
+      "local": [6, 0, -38],
+      "headingDeg": 0,
+      "sizeM": [1.0, 0.08, 0.8]
+    },
+    {
+      "type": "parkingZone",
+      "id": "finish",
+      "name": "Finish bay",
+      "local": [6, 0, -45],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 0
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "course",
+      "type": "gateCourse",
+      "gates": ["g1", "g2", "g3"]
+    },
+    {
+      "id": "park",
+      "type": "park",
+      "target": "finish",
+      "maxErrorM": 0.3,
+      "maxHeadingErrorDeg": 12
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 150
+      },
+      {
+        "maxTimeS": 90,
+        "maxErrorM": 0.2
+      }
+    ]
+  }
+}

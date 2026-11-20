@@ -20,14 +20,15 @@ astronomically correct day/night sky.
 > with the keyboard, from FPV, chase and line-of-sight cameras, with an OSD, a UTM position
 > panel and a compass showing true and magnetic north (World Magnetic Model WMM2025). There
 > are three reference profiles and an editable Vehicle tab. **Missions** are JSON files: a
-> campaign of 12 built-in aerial missions (basics, racing, operations) plus your own, each
-> with a briefing, objectives on the HUD, flight rules, scoring with stars, a debrief and your
-> progress saved per user. The **Items** tab places gates, obstacles, pads, zones, ramps and
-> bridges in the free-flight scene. The **ground drone** (a 4WD skid-steer RC rover) can
-> already be driven in free mode, with its own HUD (pitch, roll and a rollover warning, slope,
-> wheel slip, odometer) and headlights that light the way at night, and drive up ramps and
-> over bridges (milestone M6 in progress: missions and the parking zone are next). Real
-> terrain and weather arrive in milestones M4 and M7–M8 (see the specification).
+> campaign of 16 built-in missions (aerial: basics, racing, operations; ground: four rover
+> missions) plus your own, each with a briefing, objectives on the HUD, flight rules, scoring
+> with stars, a debrief and your progress saved per user. The **Items** tab places gates,
+> obstacles, pads, zones, parking bays, ramps and bridges in the free-flight scene. The
+> **ground drone** (a 4WD skid-steer RC rover) is driven in free mode and in its own missions,
+> up ramps and over bridges, with its own HUD (pitch, roll and a rollover warning, slope,
+> wheel slip, odometer) and headlights that light the way at night (milestone M6 in progress:
+> a calibration wizard for ground controllers is next). Real terrain and weather arrive in
+> milestones M4 and M7–M8 (see the specification).
 
 ## Quick start
 

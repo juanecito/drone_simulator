@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "id": "ground-02-parking",
+  "title": "Tight parking",
+  "briefing": "Two rovers are already parked in the charging row 9 m ahead, on the right. Park in the free bay between them, nose to the east: come in from the west and line up before you enter. Tight tolerances: within 25 cm of the bay's centre and 8° of its heading, stopped for 2 s. Bumping the other rovers faster than 1 m/s fails the mission.",
+  "difficulty": 2,
+  "chapter": "ground",
+  "order": 2,
+  "terrain": {
+    "source": "procedural",
+    "seed": 612,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [41.6512, -0.8867, 200],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 600,
+      "lengthM": 600
+    }
+  },
+  "environment": {
+    "utc": "2026-05-12T11:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 4,
+      "preset": "clear",
+      "temperatureC": 22,
+      "wind": {
+        "level": 1,
+        "fromDeg": 320
+      }
+    }
+  },
+  "vehicle": {
+    "type": "ground",
+    "profile": "rover-4wd-3kg"
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 240,
+    "maxStuckS": 20,
+    "maxCollisionSpeedMs": 1.0
+  },
+  "items": [
+    {
+      "type": "parkingZone",
+      "id": "bay2",
+      "name": "Bay 2",
+      "local": [4, 0, -8],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 90
+    },
+    {
+      "type": "parkingZone",
+      "id": "bay3",
+      "name": "Bay 3",
+      "local": [4, 0, -8.9],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 90
+    },
+    {
+      "type": "parkingZone",
+      "id": "bay4",
+      "name": "Bay 4",
+      "local": [4, 0, -9.8],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 90
+    },
+    {
+      "type": "obstacle",
+      "id": "rover2",
+      "name": "Parked rover",
+      "local": [4, 0, -8],
+      "headingDeg": 90,
+      "shape": "box",
+      "sizeM": [0.32, 0.18, 0.42],
+      "massKg": 3
+    },
+    {
+      "type": "obstacle",
+      "id": "rover4",
+      "name": "Parked rover",
+      "local": [4, 0, -9.8],
+      "headingDeg": 90,
+      "shape": "box",
+      "sizeM": [0.32, 0.18, 0.42],
+      "massKg": 3
+    }
+  ],
+  "objectives": [
+    {
+      "id": "park",
+      "type": "park",
+      "target": "bay3",
+      "maxErrorM": 0.25,
+      "maxHeadingErrorDeg": 8,
+      "holdS": 2
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 120
+      },
+      {
+        "maxTimeS": 60,
+        "maxErrorM": 0.12
+      }
+    ]
+  }
+}
