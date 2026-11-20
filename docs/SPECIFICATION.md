@@ -1542,7 +1542,7 @@ so Markdown pages appear in the generated site.
 | M4 | **Real terrain (raster/LAS/LAZ files, orthophoto files + OpenTopography)** | Orthophoto files (mosaic, reprojection, LOD streaming, cache); raster source (COG, GeoTIFF, `.hgt`, `.asc`, `.img`; partial reads, overviews, mosaics), LAS/LAZ → DTM rasterization with PDAL and COG cache, path rules, validation, sha256, mission folders; `core/net` (client, cache, offline, credentials), OpenTopography preset (Global DEM + USGS APIs), block fetching + daily quota accounting, area download, attribution, Terrain tab (online), Settings → Data providers, mock-server tests. |
 | M5 | **Items + Missions** | Items Manager with triggers, mission loader/validator, objectives, failures, scoring, briefing/debrief, campaign progress, built-in mission pack (≥ 10), Missions tab. |
 | M6 | **Ground drone** | `Vehicle` interface shared by both types, ground physics (suspension, tyres, drivetrain, rollover, stuck, water), drive modes, ground input mapping, ground HUD/visuals, reference ground profiles, ground missions (≥ 4), parking zone item. |
-| M7 | **Weather & fidelity** | Weather generator (presets, clouds, precipitation, fog, timeline) and its effects on vehicles, battery temperature, cloud/rain/fog rendering; Position hold / RTH, failure injection, validation against NFR-REAL, History tab, replays; online orthophoto provider and further protocols (S). |
+| M7 | **Weather & fidelity** | Weather generator (presets, clouds, precipitation, fog, timeline) and its effects on vehicles, battery temperature, cloud/rain/fog rendering; Position hold / RTH, failure injection, validation against NFR-REAL, History tab, replays. *(The online orthophoto provider and further protocols (S) moved after M4.)* |
 | M8 | **v1.0 release** | Performance targets, coverage ≥ 80 %, user/mission/terrain/weather docs, signed `.deb` release for Debian 13. |
 
 **M2 implementation notes** (deliberate scope decisions, revisited in later milestones):
@@ -1644,6 +1644,9 @@ so Markdown pages appear in the generated site.
   payloads from `/vsimem/`, LAS/LAZ → DTM rasterization with PDAL and the COG cache,
   orthophoto mosaics and GPU streaming, attribution overlay, Terrain tab (online/file),
   Settings → Data providers with the OS keyring (QtKeychain), and the integration tests.
+- **Online orthophoto provider (moved here from M7 step 9):** WMTS and XYZ/TMS (S), WMS
+  GetMap (C), built after the orthophoto files of §4.5.5. It uses the same reprojection and
+  streaming, plus the Web-Mercator tile math of FR-GEO-02b.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 
@@ -1903,7 +1906,8 @@ so Markdown pages appear in the generated site.
   and the waypoint autopilot (C) (FR-GND-05/11); texture maps on model files; choosing item
   models in the Items tab.
 
-**M7 implementation notes** (in progress; deliberate scope decisions):
+**M7 implementation notes** (done except step 9, which moved after M4; deliberate scope
+decisions):
 
 - **Plan:** (1) weather generator core; (2) weather effects on the vehicles (rain, wet and
   snowy ground, flying into cloud) and the battery checks of NFR-REAL-11; (3) weather
@@ -2198,6 +2202,15 @@ so Markdown pages appear in the generated site.
     - NFR-REAL-05 and NFR-REAL-12 need the M4 GDAL / PDAL work.
     - The battery temperature curves of NFR-REAL-11 are still representative, not taken from
       a datasheet.
+- **M7 is complete (steps 1–8).** Step 9, the online orthophoto provider (FR-TER-O10, S), is
+  **moved after M4**. It drapes imagery over georeferenced terrain, which procedural terrain
+  is not (FR-TER-I03). It also reuses the orthophoto reprojection, mosaic and GPU streaming of
+  §4.5.5. Those come from the remaining M4 work, which needs `libgdal-dev` and `libpdal-dev`.
+  Also left for later:
+  - NFR-REAL-05 and NFR-REAL-12 (M4);
+  - a real battery datasheet for NFR-REAL-11;
+  - volumetric clouds (S);
+  - ghost replay (C) and seeking inside a replay.
 
 ---
 

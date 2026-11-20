@@ -12,8 +12,8 @@ astronomically correct day/night sky.
 - **Platform:** Debian 13 (amd64), distributed as a `.deb` package installed in `/opt/drone_simulator`
 - **Licence:** MIT — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-> **Status: milestone M6 (ground drone).** Fly a quadcopter over endless or bounded procedural
-> terrain under a physically based day/night sky. The flight model covers motors, propellers
+> **Status: milestone M7 (weather & fidelity).** Fly a quadcopter over endless or bounded
+> procedural terrain under a physically based day/night sky. The flight model covers motors, propellers
 > and the battery, an ISA atmosphere, wind levels 0–10 with gusts and turbulence, noisy
 > sensors with an onboard estimator, and an Acro / Angle / Altitude-hold flight controller.
 > Fly with an RC transmitter or a gamepad (SDL 3, with a calibration wizard) or with the
@@ -27,8 +27,15 @@ astronomically correct day/night sky.
 > skid-steer RC rover) is driven in free mode and in its own missions, up ramps and over
 > bridges, with its own HUD (pitch, roll and a rollover warning, slope, wheel slip, odometer)
 > and headlights that light the way at night. Vehicles and obstacles can be drawn from your
-> own glTF 2.0 or OBJ model files. Real terrain and weather arrive in milestones M4 and M7–M8
-> (see the specification).
+> own glTF 2.0 or OBJ model files. **Weather** comes from presets or a generator, with:
+> - cloud layers, rain, snow, fog and lightning;
+> - wet and snowy ground;
+> - effects on the drones and the battery.
+>
+> Aerial drones have Position hold and return to home. Failures can be injected, from the
+> Simulation tab or by missions. Every session is recorded: the **History** tab plots its
+> telemetry and replays it exactly. Real terrain arrives in milestone M4 (see the
+> specification).
 
 ## Quick start
 
