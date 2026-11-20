@@ -11,6 +11,7 @@ add_library(ds_app_ui STATIC
     asset_paths.cpp
     command_line.cpp
     controls_panel.cpp
+    data_providers_panel.cpp
     data_services.cpp
     environment_panel.cpp
     history_panel.cpp
@@ -24,6 +25,7 @@ add_library(ds_app_ui STATIC
     mission_library.cpp
     items_controller.cpp
     items_panel.cpp
+    keyring.cpp
     mission_setup.cpp
     mission_validation.cpp
     missions_controller.cpp
@@ -39,6 +41,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/asset_paths.hpp
     include/ds/app/command_line.hpp
     include/ds/app/controls_panel.hpp
+    include/ds/app/data_providers_panel.hpp
     include/ds/app/data_services.hpp
     include/ds/app/environment_panel.hpp
     include/ds/app/history_panel.hpp
@@ -48,6 +51,7 @@ add_library(ds_app_ui STATIC
     include/ds/app/terrain_panel.hpp
     include/ds/app/items_controller.hpp
     include/ds/app/items_panel.hpp
+    include/ds/app/keyring.hpp
     include/ds/app/main_window.hpp
     include/ds/app/mission_dialogs.hpp
     include/ds/app/mission_library.hpp
@@ -84,6 +88,7 @@ target_link_libraries(ds_app_ui PUBLIC
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets)
+target_link_libraries(ds_app_ui PRIVATE Qt6Keychain::Qt6Keychain)
 target_compile_definitions(ds_app_ui PRIVATE
     DS_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 ds_set_warnings(ds_app_ui)

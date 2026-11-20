@@ -32,6 +32,23 @@ namespace ds::net {
 struct BBoxRequest {
     std::string dataset;  ///< Dataset id; empty ⇒ provider default.
     GeoRect area;         ///< Requested area (EPSG:4326).
+    /// Neither read nor write the cache: always one request (Test connection, FR-NET-11).
+    bool noCache = false;
+};
+
+/// @brief What a provider served this session (FR-NET-09).
+struct ClientStats {
+    std::uint64_t cacheHits =
+        0;                       ///< Fetches answered from the cache (fresh, revalidated or stale).
+    std::uint64_t requests = 0;  ///< Fetches sent to the provider.
+    std::uint64_t failures = 0;  ///< Fetches that ended in an error.
+
+    /// @brief cacheHits ÷ (cacheHits + requests), or nullopt before the first fetch.
+    [[nodiscard]] std::optional<double> hitRate() const noexcept {
+        const std::uint64_t all = cacheHits + requests;
+        return all == 0 ? std::nullopt
+                        : std::optional(static_cast<double>(cacheHits) / static_cast<double>(all));
+    }
 };
 
 /// @brief A payload ready for decoding.
@@ -144,8 +161,13 @@ public:
 
     /// @brief The underlying HTTP client.
     [[nodiscard]] HttpClient& http() noexcept { return *http_; }
+    /// @brief Statistics of @p providerKey since the client was created.
+    [[nodiscard]] ClientStats stats(std::string_view providerKey) const;
 
 private:
+    enum class Outcome { Hit, Request, Failure };
+    void count(std::string_view providerKey, Outcome outcome);
+
     [[nodiscard]] std::string apiKey(std::string_view providerKey) const;
 
     HttpClient* http_;
@@ -154,6 +176,12 @@ private:
     std::function<std::int64_t()> clock_;
     mutable std::mutex mutex_;
     std::map<std::string, std::string, std::less<>> keys_;  // Guarded by mutex_.
+    // Shared with the completion callbacks, which may outlive the client.
+    struct StatsTable {
+        std::mutex mutex;
+        std::map<std::string, ClientStats, std::less<>> byProvider;
+    };
+    std::shared_ptr<StatsTable> stats_ = std::make_shared<StatsTable>();
 };
 
 /// @brief Cheap structural check of a payload (FR-TER-O15): non-empty, and a TIFF/BigTIFF

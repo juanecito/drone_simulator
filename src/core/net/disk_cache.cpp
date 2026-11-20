@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <map>
 
 #include "ds/common/log.hpp"
 #include "ds/common/sha256.hpp"
@@ -247,6 +248,58 @@ NetResult<std::uint64_t> DiskCache::totalBytes() {
         total += e.sizeBytes;
     }
     return total;
+}
+
+NetResult<std::vector<CacheUsage>> DiskCache::usage() {
+    const std::scoped_lock lock(mutex_);
+    auto all = fromCommon(index_->list({}));
+    if (!all) {
+        return std::unexpected(all.error());
+    }
+    std::map<std::string, CacheUsage, std::less<>> by;
+    for (const CacheEntry& e : *all) {
+        CacheUsage& u = by[e.provider];
+        u.provider = e.provider;
+        ++u.entries;
+        u.bytes += e.sizeBytes;
+        if (e.pinned) {
+            ++u.pinnedEntries;
+            u.pinnedBytes += e.sizeBytes;
+        }
+    }
+    std::vector<CacheUsage> out;
+    out.reserve(by.size());
+    for (auto& [key, u] : by) {
+        out.push_back(std::move(u));
+    }
+    return out;
+}
+
+NetResult<int> DiskCache::releasePinned(std::string_view provider) {
+    const std::scoped_lock lock(mutex_);
+    auto all = fromCommon(index_->list(provider));
+    if (!all) {
+        return std::unexpected(all.error());
+    }
+    int released = 0;
+    for (const CacheEntry& e : *all) {
+        if (!e.pinned) {
+            continue;
+        }
+        if (auto ok = fromCommon(index_->setPinned(e.provider, e.key, false)); !ok) {
+            return std::unexpected(ok.error());
+        }
+        ++released;
+    }
+    if (auto ok = evictLocked(); !ok) {
+        return std::unexpected(ok.error());
+    }
+    return released;
+}
+
+std::uint64_t DiskCache::limit() const {
+    const std::scoped_lock lock(mutex_);
+    return limitBytes_;
 }
 
 NetResult<void> DiskCache::setLimit(std::uint64_t limitBytes) {

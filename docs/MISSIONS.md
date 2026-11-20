@@ -133,10 +133,12 @@ its dataset (e.g. `"COP30"`, else the provider's default). `origin` is required.
 - **Area:** the terrain is the `extent` around the origin, or 10 km × 10 km without one. It is
   downloaded when the mission starts, after a question showing the number of calls and how
   many are left today. From then on it is in the cache and the mission also works offline.
-- **API key:** OpenTopography needs a free personal key. Until Settings › Data providers
-  arrives, set it in the environment before starting the simulator:
-  `DS_API_KEY_OPENTOPOGRAPHY=<your key>`. Without a key a mission is *unavailable* unless
-  its area is already cached.
+- **API key:** OpenTopography needs a free personal key. Enter it in Settings › Data
+  providers, which keeps it in the system keyring. The environment variable
+  `DS_API_KEY_OPENTOPOGRAPHY=<your key>` overrides the stored key. Without a key a mission is
+  *unavailable* unless its area is already cached.
+- **Your own provider:** `elevationProvider` may also be the key of a provider added in
+  Settings › Data providers.
 - **Origin:** as for files: with `altRef` `"AMSL"` that altitude is height 0, otherwise the
   ground at the origin is.
 - **Scores:** the attempt records the hash of the downloaded data; personal bests only compare

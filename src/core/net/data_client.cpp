@@ -161,13 +161,15 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
     }
     const std::int64_t now = clock_();
 
+    const bool useCache = cache_ != nullptr && provider.allowCache && !request.noCache;
     std::optional<CachedPayload> cached;
-    if (cache_ != nullptr && provider.allowCache) {
+    if (useCache) {
         auto got = cache_->get(provider.key, *key, now);
         if (!got) {
             log::warn("net: {}", got.error().message);
         } else if (*got) {
             if (!(*got)->stale) {
+                count(provider.key, Outcome::Hit);
                 callback(fromCached(std::move(**got)));
                 return 0;
             }
@@ -176,8 +178,10 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
     }
     auto fallback = [&](NetError error) {
         if (cached) {
+            count(provider.key, Outcome::Hit);
             callback(fromCached(std::move(*cached)));
         } else {
+            count(provider.key, Outcome::Failure);
             callback(std::unexpected(std::move(error)));
         }
     };
@@ -253,10 +257,16 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
     }
     http_->setGroupLimits(provider.key, provider.maxConcurrent, provider.rateLimitRps);
 
-    auto onDone = [cache = cache_, clock = clock_, provider = provider, key = *key,
-                   format = provider.format, secrets = http.secrets, stale = std::move(cached),
+    count(provider.key, Outcome::Request);
+    auto onDone = [cache = useCache ? cache_ : nullptr, clock = clock_, provider = provider,
+                   key = *key, format = provider.format, secrets = http.secrets,
+                   stale = std::move(cached), stats = stats_,
                    callback = std::move(callback)](NetResult<HttpResponse> r) mutable {
         const std::int64_t t = clock();
+        const auto failed = [&] {
+            const std::scoped_lock lock(stats->mutex);
+            ++stats->byProvider[provider.key].failures;
+        };
         if (r && r->status == 304 && stale) {
             if (cache != nullptr) {
                 (void)cache->revalidated(provider.key, key, expiry(provider, &*r, t), t);
@@ -271,11 +281,15 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
                 log::info("net: {}; using cached data", r.error().message);
                 callback(fromCached(std::move(*stale)));
             } else {
+                if (c != NetErrorCode::Cancelled) {
+                    failed();
+                }
                 callback(std::unexpected(std::move(r.error())));
             }
             return;
         }
         if (auto ok = checkPayload(r->body, format); !ok) {
+            failed();
             NetError e = ok.error();
             e.message = redact(e.message, secrets);
             callback(std::unexpected(std::move(e)));
@@ -283,7 +297,7 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
         }
         Payload p{std::move(r->body), r->contentType, {}, key, false, false};
         p.contentHash = common::sha256Hex(p.body);
-        if (cache != nullptr && provider.allowCache && !r->noStore) {
+        if (cache != nullptr && !r->noStore) {
             PayloadMeta meta{r->contentType, r->etag, r->lastModified, expiry(provider, &*r, t)};
             if (auto stored = cache->put(provider.key, key, p.body, meta, t); !stored) {
                 log::warn("net: {}", stored.error().message);
@@ -292,6 +306,25 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
         callback(std::move(p));
     };
     return http_->submit(std::move(http), std::move(onDone));
+}
+
+void DataClient::count(std::string_view providerKey, Outcome outcome) {
+    const std::scoped_lock lock(stats_->mutex);
+    auto it = stats_->byProvider.find(providerKey);
+    if (it == stats_->byProvider.end()) {
+        it = stats_->byProvider.emplace(std::string(providerKey), ClientStats{}).first;
+    }
+    switch (outcome) {
+        case Outcome::Hit: ++it->second.cacheHits; break;
+        case Outcome::Request: ++it->second.requests; break;
+        case Outcome::Failure: ++it->second.failures; break;
+    }
+}
+
+ClientStats DataClient::stats(std::string_view providerKey) const {
+    const std::scoped_lock lock(stats_->mutex);
+    const auto it = stats_->byProvider.find(providerKey);
+    return it == stats_->byProvider.end() ? ClientStats{} : it->second;
 }
 
 NetResult<std::optional<Payload>> DataClient::cached(const ProviderConfig& provider,
@@ -316,6 +349,7 @@ NetResult<std::optional<Payload>> DataClient::cached(const ProviderConfig& provi
     if (!*got) {
         return std::optional<Payload>{};
     }
+    count(provider.key, Outcome::Hit);
     return std::optional{fromCached(std::move(**got))};
 }
 

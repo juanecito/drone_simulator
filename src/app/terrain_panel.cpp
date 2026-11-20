@@ -245,6 +245,28 @@ void TerrainPanel::buildUi() {
     });
     connect(download_, &QPushButton::clicked, this, [this] { downloadArea(); });
     fillProviders();
+    if (DataServices* services = scene_->dataServices()) {
+        // Settings › Data providers: providers added or removed, keys stored, offline mode.
+        connect(services, &DataServices::providersChanged, this, [this, services] {
+            const QString provider = provider_->currentData().toString();
+            const QString dataset = dataset_->currentData().toString();
+            fillProviders();
+            if (const int i = provider_->findData(provider); i >= 0) {
+                provider_->setCurrentIndex(i);
+                fillDatasets();
+                dataset_->setCurrentIndex(std::max(dataset_->findData(dataset), 0));
+            }
+            if (!services->elevationProviders().empty()) {
+                if (auto* model = qobject_cast<QStandardItemModel*>(source_->model())) {
+                    model->item(1)->setEnabled(true);
+                    model->item(1)->setToolTip({});
+                }
+            }
+            updateQuota();
+        });
+        connect(services, &DataServices::apiKeysChanged, this, &TerrainPanel::updateQuota);
+        connect(services, &DataServices::networkSettingsChanged, this, &TerrainPanel::updateQuota);
+    }
 
     metadata_ = new QLabel;
     metadata_->setObjectName(QStringLiteral("MetadataLabel"));

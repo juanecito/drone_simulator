@@ -112,8 +112,7 @@ SettingsPanel::SettingsPanel(SettingsController& settings, QWidget* parent)
     connect(openFolder_, &QPushButton::clicked, this, &SettingsPanel::openDataFolder);
     dataForm->addRow(QString(), openFolder_);
 
-    auto* later = new QLabel(
-        tr("Graphics, controls, data providers and cache settings arrive in later milestones."));
+    auto* later = new QLabel(tr("Graphics settings arrive in a later milestone."));
     later->setWordWrap(true);
     later->setEnabled(false);
 

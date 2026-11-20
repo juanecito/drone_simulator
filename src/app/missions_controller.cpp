@@ -79,7 +79,22 @@ void MissionsController::setDataServices(DataServices* data) {
 }
 
 void MissionsController::useDataServices(DataServices* data) {
+    if (data_ != nullptr) {
+        disconnect(data_, nullptr, this, nullptr);
+    }
     data_ = data;
+    if (data_ != nullptr) {
+        // Playability depends on the providers and keys (FR-MIS-02).
+        connect(data_, &DataServices::providersChanged, this, [this] {
+            knowProviders();
+            reload();
+        });
+        connect(data_, &DataServices::apiKeysChanged, this, &MissionsController::reload);
+    }
+    knowProviders();
+}
+
+void MissionsController::knowProviders() {
     folders_.extraProviders.clear();
     if (data_ != nullptr) {
         for (const net::ProviderConfig& p : data_->providers()) {

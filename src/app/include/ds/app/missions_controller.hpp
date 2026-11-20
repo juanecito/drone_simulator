@@ -115,6 +115,7 @@ signals:
 
 private:
     void useDataServices(DataServices* data);
+    void knowProviders();  // The mission loader checks providers against these keys.
 
     MissionFolders folders_;
     storage::StorageService* storage_;

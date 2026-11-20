@@ -55,8 +55,9 @@ std::optional<std::string> onlineUnplayable(const missions::MissionDefinition& m
         auto estimate =
             data->client().estimateDownload(p, dataset ? (*dataset)->id : std::string(), *area);
         if (!estimate || estimate->uncachedRequests > 0) {
-            return std::format("{} needs an API key ({}) to download the mission area", p.name,
-                               DataServices::keyVariable(p.key));
+            return std::format(
+                "{} needs an API key (Settings › Data providers) to download the mission area",
+                p.name);
         }
     }
     return std::nullopt;

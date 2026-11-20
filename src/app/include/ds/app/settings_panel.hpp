@@ -19,9 +19,9 @@ namespace ds::app {
 class SettingsController;
 
 /// @brief Contents of the Settings tab.
-/// @details Milestone M1 provides the display units, coordinate display and the Data section
-/// (data folder, database file, schema version). Graphics, controls, data providers and cache
-/// settings arrive with the milestones that implement them.
+/// @details Display units, coordinate display, flight rules and the Data section (data folder,
+/// database file, schema version). The Settings tab adds the data providers and cache
+/// (DataProvidersPanel) and the controls (ControlsPanel) below it.
 class SettingsPanel final : public QWidget {
     Q_OBJECT
 

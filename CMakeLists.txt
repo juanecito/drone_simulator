@@ -82,6 +82,9 @@ if(GDAL_VERSION VERSION_LESS 3.6)
     message(FATAL_ERROR "GDAL ${GDAL_VERSION} found; 3.6 or newer is required")
 endif()
 
+# QtKeychain (BSD-3-Clause): API keys in the OS keyring (FR-NET-07), app layer only.
+find_package(Qt6Keychain CONFIG REQUIRED)
+
 # ---------------------------------------------------------------------------
 # Project
 # ---------------------------------------------------------------------------

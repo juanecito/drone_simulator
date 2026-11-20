@@ -31,6 +31,7 @@
 
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/controls_panel.hpp"
+#include "ds/app/data_providers_panel.hpp"
 #include "ds/app/data_services.hpp"
 #include "ds/app/environment_panel.hpp"
 #include "ds/app/history_panel.hpp"
@@ -274,6 +275,12 @@ void MainWindow::createPanel() {
                 auto* label = new QLabel(tr("Settings are not saved without a database."));
                 label->setEnabled(false);
                 layout->addWidget(label);
+            }
+            if (data_ != nullptr) {
+                // Settings › Data providers and Cache (FR-NET-02 … FR-NET-11).
+                auto* providers = new DataProvidersPanel(*data_);
+                providers->setObjectName(QStringLiteral("DataProvidersPanel"));
+                layout->addWidget(providers);
             }
             auto* controls = new ControlsPanel(*simulation_, settings_);
             controls->setObjectName(QStringLiteral("ControlsPanel"));

@@ -22,6 +22,7 @@
 #include <thread>
 
 #include "ds/app/data_services.hpp"
+#include "ds/app/keyring.hpp"
 #include "ds/app/mission_setup.hpp"
 #include "ds/app/scene_config.hpp"
 #include "ds/common/worker_pool.hpp"
@@ -420,6 +421,121 @@ TEST(OnlineApp, DataServicesDecideWhetherOnlineMissionsArePlayable) {
     EXPECT_FALSE(*ensured);
     EXPECT_EQ(asked, 1);
     EXPECT_EQ(server.requestCount(), 0U);
+}
+
+// --- Keys and providers (M4 step 5) -----------------------------------------------------------
+
+struct Services {
+    test::MockDemServer server;
+    test::TempDir dir{"data_services"};
+    std::shared_ptr<app::MemoryKeyring> keyring = std::make_shared<app::MemoryKeyring>();
+
+    Services() {
+        std::filesystem::create_directories(dir / "providers");
+        std::ofstream(dir / "providers" / "mockdem.json") << server.providerJson();
+    }
+    std::unique_ptr<app::DataServices> open(bool withKeyring = true) {
+        auto d = app::DataServices::create({.dataDirectory = dir / "data",
+                                            .providerPresets = dir / "providers",
+                                            .keyring = withKeyring ? keyring : nullptr});
+        EXPECT_TRUE(d.has_value()) << d.error().message;
+        return d ? std::move(*d) : nullptr;
+    }
+};
+
+TEST(DataServicesKeys, KeyringThenSessionAndTheEnvironmentWins) {
+    Services s;
+    {
+        auto d = s.open();
+        EXPECT_EQ(d->keyLocation("mockdem"), app::KeyLocation::None);
+        int changes = 0;
+        QObject::connect(d.get(), &app::DataServices::apiKeysChanged, [&] { ++changes; });
+        auto stored = d->storeApiKey("mockdem", "  abc123\n");  // Pasted with spaces.
+        ASSERT_TRUE(stored.has_value()) << stored.error().message;
+        EXPECT_EQ(*stored, app::KeyLocation::Keyring);
+        EXPECT_EQ(s.keyring->peek("provider/mockdem"), "abc123");
+        EXPECT_TRUE(d->hasApiKey("mockdem"));
+        EXPECT_EQ(changes, 1);
+    }
+    {
+        auto d = s.open();  // Next start: from the keyring.
+        EXPECT_EQ(d->keyLocation("mockdem"), app::KeyLocation::Keyring);
+        EXPECT_TRUE(d->hasApiKey("mockdem"));
+        ASSERT_TRUE(d->storeApiKey("mockdem", ""));  // Forget.
+        EXPECT_EQ(d->keyLocation("mockdem"), app::KeyLocation::None);
+        EXPECT_FALSE(s.keyring->peek("provider/mockdem").has_value());
+        EXPECT_FALSE(d->hasApiKey("mockdem"));
+    }
+    {
+        // No keyring backend and no database: the key lasts for the session only.
+        s.keyring->setAvailable(false);
+        auto d = s.open();
+        EXPECT_FALSE(d->keyringProblem().empty());
+        auto stored = d->storeApiKey("mockdem", "xyz");
+        ASSERT_TRUE(stored.has_value());
+        EXPECT_EQ(*stored, app::KeyLocation::Session);
+        EXPECT_TRUE(d->hasApiKey("mockdem"));
+        s.keyring->setAvailable(true);
+    }
+    {
+        ::setenv("DS_API_KEY_MOCKDEM", "env-key", 1);
+        ASSERT_TRUE(s.keyring->write("provider/mockdem", "stored-key"));
+        auto d = s.open();
+        ::unsetenv("DS_API_KEY_MOCKDEM");
+        EXPECT_EQ(d->keyLocation("mockdem"), app::KeyLocation::Environment);
+        auto stored = d->storeApiKey("mockdem", "other");
+        ASSERT_FALSE(stored.has_value());
+        EXPECT_NE(stored.error().message.find("DS_API_KEY_MOCKDEM"), std::string::npos);
+        EXPECT_EQ(s.keyring->peek("provider/mockdem"), "stored-key");
+    }
+}
+
+TEST(DataServicesProviders, UserProvidersAreValidatedAndBuiltInsProtected) {
+    Services s;
+    auto d = s.open();
+    int changes = 0;
+    QObject::connect(d.get(), &app::DataServices::providersChanged, [&] { ++changes; });
+
+    net::ProviderConfig mine = *d->provider("mockdem");
+    EXPECT_FALSE(d->saveProvider(mine).has_value());  // Built-in key.
+    mine.key = "mine";
+    mine.name = "Mine";
+    mine.datasets.clear();
+    auto invalid = d->saveProvider(mine);
+    ASSERT_FALSE(invalid.has_value());
+    EXPECT_NE(invalid.error().message.find("datasets"), std::string::npos)
+        << invalid.error().message;
+    mine.datasets = d->provider("mockdem")->datasets;
+    ASSERT_TRUE(d->saveProvider(mine)) << "valid provider";
+    ASSERT_NE(d->provider("mine"), nullptr);
+    EXPECT_EQ(d->provider("mine")->origin, "user");
+    EXPECT_EQ(d->elevationProviders().size(), 2U);
+    EXPECT_EQ(changes, 1);
+
+    mine.name = "Mine, renamed";
+    ASSERT_TRUE(d->saveProvider(mine));
+    EXPECT_EQ(d->provider("mine")->name, "Mine, renamed");
+    EXPECT_EQ(d->providers().size(), 2U);
+
+    EXPECT_FALSE(d->removeProvider("mockdem", false).has_value());
+    ASSERT_TRUE(d->storeApiKey("mine", "k"));
+    ASSERT_TRUE(d->removeProvider("mine", true));
+    EXPECT_EQ(d->provider("mine"), nullptr);
+    EXPECT_FALSE(d->hasApiKey("mine"));
+    EXPECT_FALSE(s.keyring->peek("provider/mine").has_value());
+    EXPECT_EQ(changes, 3);
+}
+
+TEST(DataServicesProviders, TestAreaIsASmallSquareInsideTheCoverage) {
+    net::DatasetConfig d;
+    net::GeoRect a = app::DataServices::testArea(d);
+    EXPECT_NEAR((a.south + a.north) / 2.0, 46.5, 1e-9);
+    EXPECT_NEAR((a.west + a.east) / 2.0, 8.0, 1e-9);
+    EXPECT_NEAR(a.north - a.south, 0.01, 1e-9);
+    d.coverage = net::GeoRect{-125.0, 24.0, -66.0, 50.0};
+    a = app::DataServices::testArea(d);
+    EXPECT_NEAR((a.south + a.north) / 2.0, 37.0, 1e-9);
+    EXPECT_NEAR((a.west + a.east) / 2.0, -95.5, 1e-9);
 }
 
 }  // namespace

@@ -1760,6 +1760,43 @@ so Markdown pages appear in the generated site.
     if the Qt SQLite driver is missing. The cache is at `~/.drone_simulation/cache` (5 GB).
   - *Not done:* Settings › Data providers and the keyring (step 5); procedural fill beyond
     the data (S).
+- **Step 5 — Settings › Data providers and Cache (done, FR-NET-05 … 09, 11, FR-TER-O02):**
+  - *API keys (FR-NET-07, NFR-SEC-02a):* keys are read from `DS_API_KEY_<PROVIDER>` first.
+    That variable wins over a stored key, and its key cannot be changed in the UI.
+    - Otherwise keys come from the OS keyring through QtKeychain, service `DroneSimulator`,
+      entry `provider/<key>`. QtKeychain's plain-text fallback is off.
+    - If the keyring fails, keys come from the user database, which is set to file mode 0600.
+      The panel shows a warning with the keyring's error.
+    - A key is never in both places: saving to the keyring removes the database copy.
+    - Keys are trimmed. The stored key is never shown again.
+    - Each keyring call runs a local event loop with a 20 s timeout. After one failure the
+      keyring is not asked again in that session.
+    - Tests use an in-memory keyring and never touch the real one.
+  - *Providers (FR-TER-O02):* the list shows each provider's kind, key state and calls left
+    today, with details: URL template, datasets, limits, attribution, licence and terms link.
+    - User providers can be added, duplicated from a built-in one, edited and removed. The
+      editor covers key, name, protocol, URL template, format, datasets, key placement, daily
+      limit, concurrency, block size, caching, plain HTTP, attribution, licence and terms. It
+      validates like a provider file and keeps the fields it does not show.
+    - Built-in providers are read-only. Only `rest_bbox` and EPSG:4326 are offered; the
+      other protocols are listed as not supported yet.
+    - Removing a provider also deletes its key and its cached data.
+    - The mission loader, the Terrain tab and mission playability follow changes at once.
+  - *Usage (FR-NET-09):* calls, failures and bytes over the last 24 h, the remaining budget,
+    the session's cache hits versus requests (`DataClient::stats`), the cached and pinned size,
+    and an open circuit breaker.
+  - *Test connection (FR-NET-11):* one uncached request (`BBoxRequest::noCache`) for a 0.01°
+    square at the centre of the dataset's coverage, else at 46.5° N, 8° E. The answer is
+    decoded as an elevation raster.
+    - The result shows the latency, size, raster size and height range, or the error.
+    - Quota-limited providers ask first: *"uses 1 of your N remaining calls"*.
+  - *Cache (FR-NET-05, 06, 08):* the panel shows usage and the size limit, and has *Release
+    Downloaded Areas* (unpin, then the limit applies), *Clear Cache…* (keeps pinned areas),
+    *Open Folder*, *Work offline* and the network state (unreachable ⇒ cache only).
+    - The proxy is used from the next start.
+    - Offline mode, the limit and the proxy are saved as `net.offline`, `net.cacheLimitMb` and
+      `net.proxy`.
+  - *Not done:* imagery providers (steps 7–8); proxy settings without a restart (S).
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

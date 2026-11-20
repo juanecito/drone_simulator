@@ -14,6 +14,7 @@
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/command_line.hpp"
 #include "ds/app/data_services.hpp"
+#include "ds/app/keyring.hpp"
 #include "ds/app/main_window.hpp"
 #include "ds/app/mission_validation.hpp"
 #include "ds/app/missions_controller.hpp"
@@ -156,6 +157,7 @@ int main(int argc, char* argv[]) {
         }
         dataOptions.providerPresets = ds::app::findAssetDirectory() / "providers";
         dataOptions.userStorage = storage->service.get();
+        dataOptions.keyring = std::make_shared<ds::app::OsKeyring>();  // FR-NET-07.
         if (auto created = ds::app::DataServices::create(dataOptions)) {
             data = std::move(*created);
         } else {

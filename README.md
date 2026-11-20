@@ -129,8 +129,17 @@ rate.
   of gamepad triggers — and the steering) and set expo and deadzones, then *Fly With This* or
   *Drive With This*. Mappings are
   saved per device and per vehicle type, and the panel edits those of the type in use.
+- **Settings › Data providers:** the online elevation providers (OpenTopography built in, and
+  your own bounding-box servers: *Add…*, *Duplicate…*, *Edit…*). Enter your personal API key
+  here; it is kept in the system keyring (Secret Service), or, without one, in your database
+  with a warning. *Test Connection* makes one small request, and the panel shows the calls
+  used in the last 24 h against the daily limit.
+- **Settings › Cache:** how much downloaded data is kept (5 GB by default), *Release
+  Downloaded Areas*, *Clear Cache…*, *Work offline* and a proxy.
 
-- **Terrain tab:** choose a preset (built-in or your own: *Save As…* / *Delete*), set the seed
+- **Terrain tab:** the source is procedural, elevation files (GeoTIFF, `.hgt`, `.asc`,
+  `.img`) or an online provider (*Download Area…* keeps an area for offline use). Choose a
+  preset (built-in or your own: *Save As…* / *Delete*), set the seed
   (*Random*), shape parameters, water level, unlimited or custom dimensions with the edge
   treatment, and the geographic origin; *Regenerate* applies them. A shaded 2D preview shows
   the result.

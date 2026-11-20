@@ -100,6 +100,15 @@ struct PayloadMeta {
     std::optional<std::int64_t> expiresAtUnixS;  ///< From maxAgeDays / Cache-Control.
 };
 
+/// @brief Size of the cache of one provider (Settings › Cache, FR-NET-05).
+struct CacheUsage {
+    std::string provider;           ///< Provider key.
+    int entries = 0;                ///< Cached payloads.
+    std::uint64_t bytes = 0;        ///< Their size.
+    int pinnedEntries = 0;          ///< Of which pinned (downloaded areas, mission areas).
+    std::uint64_t pinnedBytes = 0;  ///< Their size.
+};
+
 /// @brief Payload files under `<root>/<provider>/…`, indexed by a CacheIndex.
 /// @details Directories are created with mode 0700 and files with 0600 (NFR-SEC-01). Files are
 /// written to a temporary name and renamed, and their SHA-256 is checked on every read, so a
@@ -127,8 +136,15 @@ public:
                                             bool pinned);
     /// @brief Total size of the indexed files.
     [[nodiscard]] NetResult<std::uint64_t> totalBytes();
+    /// @brief Usage per provider, sorted by provider key.
+    [[nodiscard]] NetResult<std::vector<CacheUsage>> usage();
+    /// @brief Unpins every entry of @p provider (all if empty), so eviction may remove them;
+    /// returns how many were pinned. Evicts if over the limit.
+    [[nodiscard]] NetResult<int> releasePinned(std::string_view provider);
     /// @brief Changes the size limit and evicts if needed.
     [[nodiscard]] NetResult<void> setLimit(std::uint64_t limitBytes);
+    /// @brief The size limit.
+    [[nodiscard]] std::uint64_t limit() const;
     /// @brief Removes every entry of @p provider (all if empty), pinned ones only if
     /// @p includePinned.
     [[nodiscard]] NetResult<void> clear(std::string_view provider, bool includePinned);
@@ -142,7 +158,7 @@ private:
     std::filesystem::path root_;
     CacheIndex* index_;
     std::uint64_t limitBytes_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
 };
 
 }  // namespace ds::net

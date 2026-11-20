@@ -366,6 +366,37 @@ TEST(DiskCache, StoreReadEvictPin) {
     fs::remove_all(dir);
 }
 
+TEST(DiskCache, UsagePerProviderAndReleasingPins) {
+    const fs::path dir = tempDir("cache_usage");
+    InMemoryCacheIndex index;
+    DiskCache cache(dir, index, 1000);
+    ASSERT_TRUE(cache.put("b", "k1", std::string(100, 'x'), {}, 10));
+    ASSERT_TRUE(cache.put("a", "k2", std::string(200, 'y'), {}, 20));
+    ASSERT_TRUE(cache.put("a", "k3", std::string(300, 'z'), {}, 30));
+    ASSERT_TRUE(cache.setPinned("a", "k3", true).value());
+    auto usage = cache.usage();
+    ASSERT_TRUE(usage);
+    ASSERT_EQ(usage->size(), 2U);
+    EXPECT_EQ((*usage)[0].provider, "a");
+    EXPECT_EQ((*usage)[0].entries, 2);
+    EXPECT_EQ((*usage)[0].bytes, 500U);
+    EXPECT_EQ((*usage)[0].pinnedEntries, 1);
+    EXPECT_EQ((*usage)[0].pinnedBytes, 300U);
+    EXPECT_EQ((*usage)[1].bytes, 100U);
+    EXPECT_EQ(cache.limit(), 1000U);
+
+    // Over a 250-byte limit only the pinned 300 bytes stay; released, they go too.
+    ASSERT_TRUE(cache.setLimit(250));
+    EXPECT_TRUE(cache.get("a", "k3", 40).value());
+    EXPECT_EQ(cache.totalBytes().value(), 300U);
+    auto released = cache.releasePinned("a");
+    ASSERT_TRUE(released);
+    EXPECT_EQ(*released, 1);
+    EXPECT_EQ(cache.totalBytes().value(), 0U);
+    EXPECT_TRUE(cache.usage()->empty());
+    fs::remove_all(dir);
+}
+
 TEST(DiskCache, ExpiryAndDamagedFiles) {
     const fs::path dir = tempDir("cache2");
     InMemoryCacheIndex index;
@@ -664,6 +695,31 @@ TEST_F(DataClientFixture, FetchCachesRecordsAndNeverLogsTheKey) {
     EXPECT_EQ(logged.find("API_Key=good"), std::string::npos) << logged;
     EXPECT_NE(logged.find("API_Key=***"), std::string::npos) << logged;
     EXPECT_EQ(bad.error().message.find("wrong-key-123"), std::string::npos);
+}
+
+TEST_F(DataClientFixture, NoCacheRequestsAlwaysAndSessionStatsCount) {
+    EXPECT_FALSE(client.stats("mock").hitRate().has_value());
+    client.setApiKey("mock", "good");
+    ASSERT_TRUE(fetch({"COP30", area}));
+    ASSERT_TRUE(fetch({"COP30", area}));  // From the cache.
+    EXPECT_EQ(served.load(), 1);
+    // Test connection: neither read nor written to the cache.
+    auto direct = fetch({.dataset = "COP30", .area = area, .noCache = true});
+    ASSERT_TRUE(direct) << direct.error().message;
+    EXPECT_FALSE(direct->fromCache);
+    EXPECT_EQ(served.load(), 2);
+    const GeoRect other = GeoRect::around(42.0, -3.7, 4, 4);
+    ASSERT_TRUE(fetch({.dataset = "COP30", .area = other, .noCache = true}));
+    EXPECT_FALSE(client.cached(provider, {"COP30", other}).value().has_value());
+
+    client.setApiKey("mock", "bad");
+    EXPECT_FALSE(fetch({"COP30", GeoRect::around(43.0, -3.7, 4, 4)}));
+    const ClientStats s = client.stats("mock");
+    EXPECT_EQ(s.cacheHits, 1U);
+    EXPECT_EQ(s.requests, 4U);
+    EXPECT_EQ(s.failures, 1U);
+    EXPECT_DOUBLE_EQ(s.hitRate().value(), 0.2);
+    EXPECT_EQ(client.stats("other").requests, 0U);
 }
 
 TEST_F(DataClientFixture, InvalidPayloadIsRejectedAndKeyRedacted) {
