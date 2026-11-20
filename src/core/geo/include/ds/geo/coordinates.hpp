@@ -22,6 +22,8 @@ struct Geodetic {
 struct LatLon {
     double latitudeDeg = 0.0;   ///< Latitude in degrees.
     double longitudeDeg = 0.0;  ///< Longitude in degrees, −180…180.
+    /// @brief Equality.
+    bool operator==(const LatLon&) const = default;
 };
 
 /// @brief Earth-centred, Earth-fixed Cartesian position in metres.

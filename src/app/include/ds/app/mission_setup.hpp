@@ -23,13 +23,14 @@ namespace ds::app {
 
 /// @brief Terrain and environment of a mission.
 struct MissionScene {
-    TerrainConfig terrain;          ///< Procedural terrain of the mission.
+    TerrainConfig terrain;          ///< Terrain of the mission.
     EnvironmentConfig environment;  ///< Time, weather, wind and air of the mission.
 };
 
 /// @brief Why this build cannot fly @p mission, or nullopt if it can.
-/// @details Online and file terrain need the raster sources of M4 (GDAL), which this build does
-/// not have yet. Both vehicle types are playable.
+/// @details Online terrain and LAS/LAZ elevation files need later M4 steps; elevation rasters
+/// are playable once the mission loader has found every file. Both vehicle types are
+/// playable.
 [[nodiscard]] std::optional<std::string> unplayableReason(
     const missions::MissionDefinition& mission);
 
@@ -37,8 +38,11 @@ struct MissionScene {
 /// Environment tab clamped.
 [[nodiscard]] weather::WeatherConditions missionStartWeather(const missions::WeatherSpec& weather);
 
-/// @brief Terrain of a procedural mission: the built-in preset `terrain.preset` (rolling hills
-/// if none), then the mission's seed and `params`, origin and extent.
+/// @brief Terrain of a mission. Procedural: the built-in preset `terrain.preset` (rolling
+/// hills if none), then the mission's seed and `params`, origin and extent. File: the
+/// elevation rasters the loader resolved, with the mission's band, CRS, datum, attribution,
+/// origin (an AMSL origin altitude is kept, an AGL one puts the ground at the origin at
+/// height 0) and extent; the origin of the returned config is only known once it is built.
 [[nodiscard]] common::Result<TerrainConfig> missionTerrain(
     const missions::MissionDefinition& mission);
 

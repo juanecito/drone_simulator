@@ -33,11 +33,52 @@ std::optional<std::string> unplayableReason(const missions::MissionDefinition& m
             return "online terrain needs the online elevation source, not available in this "
                    "build yet (milestone M4)";
         case missions::TerrainSource::File:
-            return "elevation files need the raster terrain source, not available in this build "
-                   "yet (milestone M4)";
+            if (!mission.terrain.file) {
+                return "the mission has no elevation files";
+            }
+            if (mission.terrain.file->format == terrain::ElevationFormat::PointCloud) {
+                return "LAS/LAZ elevation files need the lidar rasterizer, not available in this "
+                       "build yet (milestone M4)";
+            }
+            if (mission.terrain.file->resolvedElevationFiles.size() !=
+                mission.terrain.file->elevationFiles.size()) {
+                return "elevation files not found";
+            }
+            break;
     }
     return std::nullopt;
 }
+
+namespace {
+
+common::Result<TerrainConfig> fileMissionTerrain(const missions::MissionDefinition& mission) {
+    const missions::TerrainSpec& t = mission.terrain;
+    if (auto reason = unplayableReason(mission)) {
+        return common::makeError(*reason);
+    }
+    const terrain::FileTerrainSpec& spec = *t.file;
+    TerrainConfig config;
+    config.kind = TerrainKind::File;
+    FileTerrainConfig& f = config.file;
+    f.files = spec.resolvedElevationFiles;
+    f.band = spec.band;
+    f.crs = spec.crs;
+    f.verticalDatum = spec.verticalDatum;
+    f.attribution = spec.attribution;
+    f.edge = terrain::EdgeMode::Cliff;
+    if (t.origin) {
+        f.origin = t.origin;
+    } else if (spec.originLatDeg && spec.originLonDeg) {
+        f.origin = geo::LatLon{*spec.originLatDeg, *spec.originLonDeg};
+    }
+    if (t.originAltitudeRef == items::AltitudeRef::Amsl && f.origin) {
+        f.originAltitudeM = t.originAltitudeM;
+    }
+    config.extent = t.extent ? t.extent : spec.extent;
+    return config;
+}
+
+}  // namespace
 
 weather::WeatherConditions missionStartWeather(const missions::WeatherSpec& weather) {
     weather::WeatherConditions c = weather::WeatherGenerator(weather.settings).plannedAt(0.0);
@@ -50,6 +91,9 @@ weather::WeatherConditions missionStartWeather(const missions::WeatherSpec& weat
 
 common::Result<TerrainConfig> missionTerrain(const missions::MissionDefinition& mission) {
     const missions::TerrainSpec& t = mission.terrain;
+    if (t.source == missions::TerrainSource::File) {
+        return fileMissionTerrain(mission);
+    }
     if (t.source != missions::TerrainSource::Procedural) {
         return common::makeError(unplayableReason(mission).value_or("unsupported terrain source"));
     }

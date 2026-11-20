@@ -65,11 +65,78 @@ common::Result<void> readOptional(const QJsonObject& json, const char* key,
     return {};
 }
 
+QJsonObject fileToJson(const FileTerrainConfig& f) {
+    QJsonArray files;
+    for (const auto& file : f.files) {
+        files.append(QString::fromStdString(file.string()));
+    }
+    QJsonObject json{
+        {QStringLiteral("files"), files},
+        {QStringLiteral("band"), f.band},
+        {QStringLiteral("crs"), QString::fromStdString(f.crs)},
+        {QStringLiteral("verticalDatum"), QString::fromStdString(f.verticalDatum)},
+        {QStringLiteral("attribution"), QString::fromStdString(f.attribution)},
+        {QStringLiteral("edge"), edgeName(f.edge)},
+    };
+    if (f.origin) {
+        json.insert(QStringLiteral("origin"),
+                    QJsonObject{{QStringLiteral("lat"), f.origin->latitudeDeg},
+                                {QStringLiteral("lon"), f.origin->longitudeDeg}});
+    }
+    if (f.originAltitudeM) {
+        json.insert(QStringLiteral("originAltM"), *f.originAltitudeM);
+    }
+    return json;
+}
+
+common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
+    FileTerrainConfig f;
+    for (const QJsonValue& v : json.value(QStringLiteral("files")).toArray()) {
+        if (!v.isString() || v.toString().isEmpty()) {
+            return common::makeError("'files' must list file paths");
+        }
+        f.files.emplace_back(v.toString().toStdString());
+    }
+    if (f.files.empty()) {
+        return common::makeError("a file terrain needs at least one elevation file");
+    }
+    f.band = json.value(QStringLiteral("band")).toInt(1);
+    if (f.band < 1 || f.band > 1000) {
+        return common::makeError("'band' must be 1 or more");
+    }
+    f.crs = json.value(QStringLiteral("crs")).toString().toStdString();
+    f.verticalDatum = json.value(QStringLiteral("verticalDatum")).toString().toStdString();
+    f.attribution = json.value(QStringLiteral("attribution")).toString().toStdString();
+    const auto edge =
+        edgeFromName(json.value(QStringLiteral("edge")).toString(QStringLiteral("cliff")));
+    if (!edge || *edge == terrain::EdgeMode::Water) {
+        return common::makeError("'edge' must be \"cliff\" or \"fade\" for file terrain");
+    }
+    f.edge = *edge;
+    if (const QJsonValue o = json.value(QStringLiteral("origin")); o.isObject()) {
+        geo::LatLon origin;
+        if (auto r = readNumber(o.toObject(), "lat", origin.latitudeDeg); !r) {
+            return std::unexpected(r.error());
+        }
+        if (auto r = readNumber(o.toObject(), "lon", origin.longitudeDeg); !r) {
+            return std::unexpected(r.error());
+        }
+        if (std::abs(origin.latitudeDeg) > 89.0 || std::abs(origin.longitudeDeg) > 180.0) {
+            return common::makeError("the geographic origin is out of range");
+        }
+        f.origin = origin;
+    }
+    if (auto r = readOptional(json, "originAltM", f.originAltitudeM); !r) {
+        return std::unexpected(r.error());
+    }
+    return f;
+}
+
 }  // namespace
 
 bool TerrainConfig::operator==(const TerrainConfig& o) const noexcept {
-    return presetKey == o.presetKey && params == o.params && extent == o.extent &&
-           origin.latitudeDeg == o.origin.latitudeDeg &&
+    return kind == o.kind && file == o.file && presetKey == o.presetKey && params == o.params &&
+           extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
            origin.longitudeDeg == o.origin.longitudeDeg && origin.heightM == o.origin.heightM;
 }
 
@@ -171,7 +238,8 @@ common::Result<terrain::ProceduralParams> paramsFromJson(const QJsonObject& json
 QJsonObject terrainToJson(const TerrainConfig& c) {
     QJsonObject json{
         {QStringLiteral("preset"), QString::fromStdString(c.presetKey)},
-        {QStringLiteral("source"), QStringLiteral("procedural")},
+        {QStringLiteral("source"),
+         c.kind == TerrainKind::File ? QStringLiteral("file") : QStringLiteral("procedural")},
         {QStringLiteral("params"), paramsToJson(c.params)},
         {QStringLiteral("origin"), QJsonObject{{QStringLiteral("lat"), c.origin.latitudeDeg},
                                                {QStringLiteral("lon"), c.origin.longitudeDeg},
@@ -182,6 +250,9 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
                     QJsonObject{{QStringLiteral("widthM"), c.extent->widthM},
                                 {QStringLiteral("lengthM"), c.extent->lengthM}});
     }
+    if (c.kind == TerrainKind::File) {
+        json.insert(QStringLiteral("file"), fileToJson(c.file));
+    }
     return json;
 }
 
@@ -190,7 +261,14 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
     c.presetKey = json.value(QStringLiteral("preset")).toString().toStdString();
     const QString source =
         json.value(QStringLiteral("source")).toString(QStringLiteral("procedural"));
-    if (source != QLatin1String("procedural")) {
+    if (source == QLatin1String("file")) {
+        auto file = fileFromJson(json.value(QStringLiteral("file")).toObject());
+        if (!file) {
+            return std::unexpected(file.error());
+        }
+        c.kind = TerrainKind::File;
+        c.file = std::move(*file);
+    } else if (source != QLatin1String("procedural")) {
         return common::makeError(
             std::format("terrain source '{}' is not available yet", source.toStdString()));
     }
@@ -349,7 +427,7 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     storage::TerrainPresetRecord r;
     r.key = key;
     r.name = name;
-    r.sourceType = "procedural";
+    r.sourceType = c.kind == TerrainKind::File ? "file" : "procedural";
     r.seed = c.params.seed;
     r.originLatDeg = c.origin.latitudeDeg;
     r.originLonDeg = c.origin.longitudeDeg;
@@ -358,13 +436,16 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
         r.extentWidthM = c.extent->widthM;
         r.extentLengthM = c.extent->lengthM;
     }
-    r.paramsJson =
-        QJsonDocument(paramsToJson(c.params)).toJson(QJsonDocument::Compact).toStdString();
+    QJsonObject params = paramsToJson(c.params);
+    if (c.kind == TerrainKind::File) {
+        params.insert(QStringLiteral("file"), fileToJson(c.file));
+    }
+    r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
     return r;
 }
 
 common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecord& r) {
-    if (r.sourceType != "procedural") {
+    if (r.sourceType != "procedural" && r.sourceType != "file") {
         return common::makeError(std::format(
             "preset '{}' uses the '{}' source, which is not available yet", r.name, r.sourceType));
     }
@@ -379,6 +460,14 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         return std::unexpected(params.error());
     }
     TerrainConfig c;
+    if (r.sourceType == "file") {
+        auto file = fileFromJson(doc.object().value(QStringLiteral("file")).toObject());
+        if (!file) {
+            return common::makeError(std::format("preset '{}': {}", r.name, file.error().message));
+        }
+        c.kind = TerrainKind::File;
+        c.file = std::move(*file);
+    }
     c.presetKey = r.key;
     c.params = std::move(*params);
     if (r.seed) {
@@ -389,6 +478,37 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         c.extent = terrain::Extent{*r.extentWidthM, *r.extentLengthM};
     }
     return c;
+}
+
+common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config) {
+    BuiltTerrain built;
+    if (config.kind == TerrainKind::Procedural) {
+        auto source = terrain::ProceduralSource::create(config.params, config.extent);
+        if (!source) {
+            return std::unexpected(source.error());
+        }
+        built.source = *source;
+        built.origin = config.origin;
+        return built;
+    }
+    const FileTerrainConfig& f = config.file;
+    terrain::RasterOptions options;
+    options.band = f.band;
+    options.crs = f.crs;
+    options.verticalDatum = f.verticalDatum;
+    options.origin = f.origin;
+    options.originAltitudeM = f.originAltitudeM;
+    options.extent = config.extent;
+    options.edge = f.edge;
+    auto source = terrain::RasterSource::open(f.files, options);
+    if (!source) {
+        return common::makeError(source.error().message);
+    }
+    built.metadata = (*source)->metadata();
+    built.origin = built.metadata->origin;
+    built.attribution = f.attribution;
+    built.source = std::move(*source);
+    return built;
 }
 
 const std::vector<BuiltInPreset>& builtInPresets() {

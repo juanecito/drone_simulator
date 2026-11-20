@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include "ds/app/scene_config.hpp"
 #include "ds/common/error.hpp"
@@ -98,6 +99,12 @@ public:
     /// @brief True while the simulation drives the clock.
     [[nodiscard]] bool timeFollowsSimulation() const noexcept { return externalClock_; }
 
+    /// @brief Metadata of file terrain (FR-TER-O12); empty for procedural terrain.
+    [[nodiscard]] const std::optional<terrain::SourceMetadata>& terrainMetadata() const noexcept {
+        return metadata_;
+    }
+    /// @brief Attribution of the terrain data, shown in the viewport (FR-TER-O13, F10).
+    [[nodiscard]] const std::string& attribution() const noexcept { return attribution_; }
     /// @brief Height source of the current terrain.
     [[nodiscard]] const std::shared_ptr<const terrain::HeightSource>& source() const noexcept {
         return source_;
@@ -133,7 +140,10 @@ signals:
 
 private:
     void loadSaved();
-    void rebuildTerrain();
+    // Builds @p config and makes it the scene's terrain; on error nothing changes.
+    common::Result<void> applyTerrain(const TerrainConfig& config);
+    // applyTerrain(), falling back to the default preset on error.
+    void applyTerrainOrDefault(const TerrainConfig& config);
     void reloadPresets();
     void saveTerrain();
     void saveEnvironment();
@@ -146,6 +156,8 @@ private:
     TerrainConfig terrain_;
     EnvironmentConfig environment_;
     std::shared_ptr<const terrain::HeightSource> source_;
+    std::optional<terrain::SourceMetadata> metadata_;
+    std::string attribution_;
     std::unique_ptr<terrain::TerrainStreamer> streamer_;
     std::unique_ptr<terrain::TerrainQuery> query_;
     geo::LocalFrame frame_{geo::Geodetic{}};

@@ -21,6 +21,7 @@
 #include "ds/terrain/chunk.hpp"
 #include "ds/terrain/query.hpp"
 
+#include "raster_fixtures.hpp"
 #include <cpl_conv.h>
 #include <gdal.h>
 #include <ogr_srs_api.h>
@@ -31,102 +32,15 @@ namespace {
 using namespace ds::terrain;
 namespace fs = std::filesystem;
 
-// UTM zone 30N tile near Madrid, 10 m pixels.
-constexpr double kE0 = 440'000.0;
-constexpr double kN0 = 4'476'000.0;
-constexpr int kUtmEpsg = 32630;
+using ds::test::kE0;
+using ds::test::kN0;
+using ds::test::RasterSpec;
+using ds::test::TempDir;
+using ds::test::writeRaster;
 
-struct RasterSpec {
-    int width = 200;
-    int height = 200;
-    std::array<double, 6> geoTransform{kE0, 10.0, 0.0, kN0, 0.0, -10.0};
-    int epsg = kUtmEpsg;  // 0 = no CRS.
-    GDALDataType type = GDT_Float32;
-    std::optional<double> noData;
-    double scale = 1.0;
-    double offset = 0.0;
-    std::string unit;
-    std::string driver = "GTiff";
-    std::vector<std::string> creationOptions;
-    bool overviews = false;
-    // Raw pixel value at column i, row j.
-    std::function<double(int i, int j)> value;
-};
+using ds::test::planeUtm;
 
-class TempDir {
-public:
-    TempDir() : path_(fs::temp_directory_path() / std::format("ds_raster_{}", ::getpid())) {
-        fs::remove_all(path_);
-        fs::create_directories(path_);
-    }
-    ~TempDir() { fs::remove_all(path_); }
-    TempDir(const TempDir&) = delete;
-    TempDir& operator=(const TempDir&) = delete;
-    [[nodiscard]] fs::path operator/(const std::string& name) const { return path_ / name; }
-
-private:
-    fs::path path_;
-};
-
-void writeRaster(const fs::path& file, const RasterSpec& spec) {
-    GDALAllRegister();
-    GDALDriverH mem = GDALGetDriverByName("MEM");
-    GDALDatasetH ds = GDALCreate(mem, "", spec.width, spec.height, 1, spec.type, nullptr);
-    ASSERT_NE(ds, nullptr);
-    auto gt = spec.geoTransform;
-    GDALSetGeoTransform(ds, gt.data());
-    if (spec.epsg != 0) {
-        OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
-        OSRImportFromEPSG(srs, spec.epsg);
-        GDALSetSpatialRef(ds, srs);
-        OSRDestroySpatialReference(srs);
-    }
-    GDALRasterBandH band = GDALGetRasterBand(ds, 1);
-    if (spec.noData) {
-        GDALSetRasterNoDataValue(band, *spec.noData);
-    }
-    if (spec.scale != 1.0 || spec.offset != 0.0) {
-        GDALSetRasterScale(band, spec.scale);
-        GDALSetRasterOffset(band, spec.offset);
-    }
-    if (!spec.unit.empty()) {
-        GDALSetRasterUnitType(band, spec.unit.c_str());
-    }
-    std::vector<double> row(static_cast<std::size_t>(spec.width));
-    for (int j = 0; j < spec.height; ++j) {
-        for (int i = 0; i < spec.width; ++i) {
-            row[static_cast<std::size_t>(i)] = spec.value(i, j);
-        }
-        ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, j, spec.width, 1, row.data(), spec.width, 1,
-                               GDT_Float64, 0, 0),
-                  CE_None);
-    }
-    if (spec.overviews) {
-        const std::array<int, 3> levels{2, 4, 8};
-        ASSERT_EQ(GDALBuildOverviews(ds, "AVERAGE", 3, levels.data(), 0, nullptr, nullptr, nullptr),
-                  CE_None);
-    }
-    std::vector<const char*> options;
-    for (const auto& o : spec.creationOptions) {
-        options.push_back(o.c_str());
-    }
-    options.push_back(nullptr);
-    GDALDatasetH out =
-        GDALCreateCopy(GDALGetDriverByName(spec.driver.c_str()), file.string().c_str(), ds, FALSE,
-                       const_cast<char**>(options.data()), nullptr, nullptr);
-    ASSERT_NE(out, nullptr) << CPLGetLastErrorMsg();
-    GDALClose(out);
-    GDALClose(ds);
-}
-
-// Planar surface in UTM: height at easting / northing.
-double planeUtm(double e, double n) { return 600.0 + 0.01 * (e - kE0) + 0.02 * (n - kN0); }
-
-RasterSpec planarUtmSpec() {
-    RasterSpec s;
-    s.value = [](int i, int j) { return planeUtm(kE0 + (i + 0.5) * 10.0, kN0 - (j + 0.5) * 10.0); };
-    return s;
-}
+RasterSpec planarUtmSpec() { return ds::test::planarUtmSpec(); }
 
 // The planar height expected at world (x, z), through the project's own UTM code.
 double expectedPlanar(const RasterSource& source, double x, double z) {

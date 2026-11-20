@@ -15,6 +15,7 @@
 
 #include "ds/geo/coordinates.hpp"
 #include "ds/terrain/height_source.hpp"
+#include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/terrain_error.hpp"
 
 /// @file
@@ -42,6 +43,12 @@ struct RasterOptions {
     /// (overviews, or averages built while reading). Default: the default level-0 spacing.
     double fullDetailStepM = 2.0;
     int maxDimensionPx = 40'000;  ///< Largest raster (or mosaic) side (FR-TER-F08).
+    /// Border treatment (FR-TER-O08): Cliff clamps the data at the edge (closed by a wall),
+    /// Fade blends heights down to the lowest elevation of the data within the outer
+    /// kFadeBandM (at most a tenth of the shorter side). Water is not supported.
+    EdgeMode edge = EdgeMode::Cliff;
+    /// Width of the fade band, metres.
+    static constexpr double kFadeBandM = 500.0;
 };
 
 /// @brief What the metadata view shows about elevation data (FR-TER-O12).
@@ -115,12 +122,15 @@ private:
     void sampleAmsl(Reader& reader, std::span<const double> xs, std::span<const double> zs, int d,
                     std::span<double> out) const;
     [[nodiscard]] int decimationFor(double step) const noexcept;
+    // Applies the edge treatment to a height AMSL at world (x, z).
+    [[nodiscard]] double edged(double amsl, double x, double z) const noexcept;
 
     std::unique_ptr<Layout> layout_;
     SourceMetadata metadata_;
     std::string description_;
     double originAltitude_ = 0.0;
     double fallbackAmsl_ = 0.0;
+    double fadeBandM_ = 0.0;  // 0 ⇒ no fading.
     mutable std::mutex readersMutex_;
     mutable std::vector<std::unique_ptr<Reader>> readers_;
     mutable std::atomic<std::uint64_t> readErrors_{0};

@@ -39,6 +39,7 @@
 #include "ds/app/mission_setup.hpp"
 #include "ds/app/missions_controller.hpp"
 #include "ds/app/missions_panel.hpp"
+#include "ds/app/progress_task.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/app/settings_controller.hpp"
 #include "ds/app/settings_panel.hpp"
@@ -47,6 +48,7 @@
 #include "ds/app/terrain_panel.hpp"
 #include "ds/app/vehicle_panel.hpp"
 #include "ds/app/viewport.hpp"
+#include "ds/common/log.hpp"
 #include "ds/common/version.hpp"
 #include "ds/geo/utm.hpp"
 
@@ -551,9 +553,38 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
         return std::unexpected(profile.error());
     }
     const std::filesystem::path missionDir = missions_->entry(*row).load.file.parent_path();
+    // Elevation files: check their sha256 and compute the terrain data hash recorded with the
+    // attempt (FR-TER-F09), on a worker thread with progress (large files take a while).
+    std::string terrainHash;
+    if (mission.terrain.source == missions::TerrainSource::File && mission.terrain.file) {
+        const terrain::TerrainFileRoots roots{missionDir, missions_->folders().libraryDir};
+        const terrain::FileTerrainSpec& spec = *mission.terrain.file;
+        auto prepared = runWithProgress<terrain::TerrainResult<terrain::PreparedFileTerrain>>(
+            this, tr("Checking the elevation files…"),
+            [&](std::stop_token stop, const ProgressReport& report) {
+                terrain::PrepareHooks hooks;
+                hooks.cache = &fileHashes_;
+                hooks.progress = [&report](std::uint64_t done, std::uint64_t total) {
+                    report(total > 0 ? static_cast<double>(done) / static_cast<double>(total)
+                                     : 1.0);
+                };
+                return terrain::prepareFileTerrain(spec, roots, {}, stop, hooks);
+            });
+        if (!prepared) {
+            return common::makeError("cancelled");
+        }
+        if (!*prepared) {
+            return common::makeError(prepared->error().message);
+        }
+        for (const std::string& warning : (*prepared)->warnings) {
+            log::warn("Mission {}: {}", key, warning);
+        }
+        terrainHash = (*prepared)->terrainDataHash;
+    }
     if (auto started = simulation_->startMission(mission, *profile, missionDir); !started) {
         return started;
     }
+    missionTerrainHash_ = terrainHash;
     missionKey_ = key;
     lastAttemptId_.reset();
     // Fly full view (FR-UI-04): the panel comes back after the mission.
@@ -608,11 +639,11 @@ void MainWindow::onMissionFinished() {
         return;
     }
     // The personal best before this attempt, then the attempt itself (FR-MIS-11, FR-MIS-12).
-    bestBefore_ = missions_->bestAttempt(missionKey_);
+    bestBefore_ = missions_->bestAttempt(missionKey_, std::nullopt, missionTerrainHash_);
     const astro::UtcTime started =
         simulation_->snapshot().utc -
         std::chrono::milliseconds(std::llround(status.elapsedS * 1000.0));
-    auto id = missions_->recordAttempt(missionKey_, *status.result, started);
+    auto id = missions_->recordAttempt(missionKey_, *status.result, started, missionTerrainHash_);
     lastAttemptId_ = id ? std::optional<std::int64_t>(*id) : std::nullopt;
     if (id) {
         simulation_->linkNextSessionToAttempt(*id);  // History: the attempt's replay.

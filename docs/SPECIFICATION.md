@@ -1685,6 +1685,42 @@ so Markdown pages appear in the generated site.
   - *Not done here:* the cached COG copy for large rasters without overviews (C02; it comes
     with the COG writer of step 6). Until then the metadata suggests converting such files
     with `gdal_translate -of COG`.
+- **Step 3 — file terrain in the application (done):**
+  - *Scene configuration:* `TerrainConfig` has a source kind (procedural or file) and a
+    `FileTerrainConfig`: files, band, CRS, datum, attribution, optional origin and AMSL
+    origin altitude, and edge. These are saved in `scene.terrain` and in terrain presets
+    (source type `file`).
+    - `buildTerrain()` builds either source. `SceneController` builds before it switches, so
+      a terrain that fails to open changes nothing. A saved file terrain whose files have gone
+      starts on the default preset and keeps the saved choice.
+    - The origin of file terrain is filled in from the data. The renderer and the HUD take the
+      extent from the source, not from the configuration.
+  - *Missions:* the mission loader stores the canonical paths of the elevation files it
+    found (`resolvedElevationFiles`), so the briefing map, the daylight text and the scene
+    open them without the folders.
+    - Raster missions are playable. LAS/LAZ ones are unavailable until step 6, online ones
+      until step 4.
+    - At launch the files are checked against their `sha256` and the terrain data hash is
+      computed, on a worker thread behind a progress dialog with *Cancel*. Hashes are cached
+      by path, size and modification time for the session.
+    - The hash goes into `mission_attempts.terrain_data_hash`, and the debrief's personal
+      best only compares attempts on the same data (FR-TER-O14, F09).
+  - *Origin (FR-TER-09):* an AGL origin, or none, puts the ground at the origin at height 0.
+    An AMSL origin altitude is kept.
+  - *Edges (FR-TER-O08):* *clamp edge* (the mesh is closed by its wall) and *fade to the
+    lowest height* within 500 m of the border (at most a tenth of the shorter side). The HUD
+    shows a caution 300 m from the terrain edge and a warning 100 m from it; this soft
+    geofence works on procedural terrain too. *Procedural fill* beyond the data is not done
+    (S).
+  - *Terrain tab (FR-TER-F11):* the *Elevation file* source has:
+    - a file list with *Add…* / *Remove*, band, CRS, vertical datum, attribution and edge;
+    - "centre of the data, at ground level" as the default origin;
+    - a metadata view: format, CRS, size, resolution, height range, datum, extent, NoData
+      and advice (FR-TER-O12).
+  - *Attribution (FR-TER-O13, F10):* the terrain's attribution is drawn at the bottom right
+    of the viewport. Debrief screenshots don't exist yet.
+  - *Not done:* the DEM-file mission of the built-in pack and its licensed data (step 9);
+    opening LAS/LAZ files from the Terrain tab (step 6).
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

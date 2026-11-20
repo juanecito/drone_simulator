@@ -5,6 +5,8 @@
 
 #include <QJsonObject>
 
+#include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,6 +17,7 @@
 #include "ds/graphics/exposure.hpp"
 #include "ds/storage/terrain_preset_store.hpp"
 #include "ds/terrain/procedural_source.hpp"
+#include "ds/terrain/raster_source.hpp"
 #include "ds/weather/weather.hpp"
 #include "ds/weather/wind_levels.hpp"
 
@@ -26,11 +29,36 @@
 namespace ds::app {
 
 /// @brief The terrain the scene uses (Terrain tab).
+/// @brief Kind of terrain source (FR-TER-02).
+enum class TerrainKind {
+    Procedural,  ///< Seeded noise (§4.5.2).
+    File,        ///< Elevation rasters (§4.5.4).
+};
+
+/// @brief Elevation files of a terrain (FR-TER-F02, FR-TER-F11).
+struct FileTerrainConfig {
+    std::vector<std::filesystem::path> files;  ///< Absolute paths of the rasters.
+    int band = 1;                              ///< Elevation band.
+    std::string crs;                           ///< CRS for files without one ("" ⇒ from the files).
+    std::string verticalDatum;                 ///< Vertical datum ("" ⇒ from the files).
+    std::string attribution;                   ///< Shown in the viewport (FR-TER-F10).
+    std::optional<geo::LatLon> origin;         ///< Empty ⇒ centre of the data.
+    std::optional<double> originAltitudeM;     ///< AMSL of world height 0; empty ⇒ the ground.
+    terrain::EdgeMode edge = terrain::EdgeMode::Cliff;  ///< Cliff or Fade (FR-TER-O08).
+    /// @brief Equality.
+    bool operator==(const FileTerrainConfig&) const = default;
+};
+
+/// @brief Terrain of the scene: its source and placement.
 struct TerrainConfig {
+    TerrainKind kind = TerrainKind::Procedural;  ///< Source type.
     std::string presetKey;                  ///< Preset it came from (may be empty).
     terrain::ProceduralParams params;       ///< Procedural source parameters.
+    FileTerrainConfig file;                 ///< Elevation files (kind File).
     std::optional<terrain::Extent> extent;  ///< Dimensions; empty = unlimited (FR-TER-04a).
-    geo::Geodetic origin{};                 ///< Geographic origin; heightM is AMSL (FR-TER-09).
+    /// Geographic origin; heightM is AMSL (FR-TER-09). For file terrain it is the origin in
+    /// use, filled in when the terrain is built (buildTerrain()).
+    geo::Geodetic origin{};
     /// @brief Equality.
     bool operator==(const TerrainConfig& other) const noexcept;
 };
@@ -107,6 +135,17 @@ inline constexpr double kMaxQnhHpa = 1080.0;
 /// @brief Terrain configuration from a stored procedural preset.
 [[nodiscard]] common::Result<TerrainConfig> fromPresetRecord(
     const storage::TerrainPresetRecord& record);
+
+/// @brief A terrain source built from a TerrainConfig.
+struct BuiltTerrain {
+    std::shared_ptr<const terrain::HeightSource> source;  ///< Heights.
+    geo::Geodetic origin{};                               ///< Origin in use (AMSL altitude).
+    std::optional<terrain::SourceMetadata> metadata;      ///< File terrain: the data.
+    std::string attribution;                              ///< Data attribution ("" if none).
+};
+
+/// @brief Builds the height source of @p config (procedural, or opens the elevation files).
+[[nodiscard]] common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config);
 
 /// @brief A built-in terrain preset.
 struct BuiltInPreset {

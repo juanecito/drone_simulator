@@ -77,8 +77,20 @@ bool isInside(const fs::path& base, const fs::path& candidate) {
     return c != candidate.end();  // Strictly inside.
 }
 
+struct Progress {
+    const PrepareHooks* hooks = nullptr;
+    std::uint64_t done = 0;
+    std::uint64_t total = 0;
+    void advance(std::uint64_t bytes) {
+        done += bytes;
+        if (hooks->progress) {
+            hooks->progress(done, total);
+        }
+    }
+};
+
 TerrainResult<ResolvedFile> resolveAndCheck(const FileRef& ref, const TerrainFileRoots& roots,
-                                            const std::stop_token& stop) {
+                                            const std::stop_token& stop, Progress& progress) {
     auto path = resolveTerrainPath(ref.path, roots);
     if (!path) {
         return terrainError(path.error().code,
@@ -90,7 +102,17 @@ TerrainResult<ResolvedFile> resolveAndCheck(const FileRef& ref, const TerrainFil
         return terrainError(TerrainErrorCode::FileNotFound,
                             std::format("{}: cannot read \"{}\"", ref.jsonPath, ref.path));
     }
-    auto hash = common::sha256File(*path, stop);
+    common::Result<std::string> hash = common::makeError("not hashed");
+    if (auto known =
+            progress.hooks->cache != nullptr ? progress.hooks->cache->find(*path) : std::nullopt) {
+        hash = std::move(*known);
+    } else {
+        hash = common::sha256File(*path, stop);
+        if (hash && progress.hooks->cache != nullptr) {
+            progress.hooks->cache->store(*path, *hash);
+        }
+    }
+    progress.advance(file.sizeBytes);
     if (!hash) {
         if (stop.stop_requested()) {
             return terrainError(TerrainErrorCode::Cancelled, "cancelled");
@@ -294,12 +316,23 @@ TerrainResult<fs::path> resolveTerrainPath(std::string_view reference,
 TerrainResult<PreparedFileTerrain> prepareFileTerrain(const FileTerrainSpec& spec,
                                                       const TerrainFileRoots& roots,
                                                       const TerrainFileLimits& limits,
-                                                      std::stop_token stop) {
+                                                      std::stop_token stop,
+                                                      const PrepareHooks& hooks) {
     PreparedFileTerrain out;
+    Progress progress{.hooks = &hooks};
+    for (const auto* list : {&spec.elevationFiles, &spec.orthophotoFiles}) {
+        for (const FileRef& ref : *list) {
+            if (auto path = resolveTerrainPath(ref.path, roots)) {
+                std::error_code ec;
+                const std::uint64_t size = fs::file_size(*path, ec);
+                progress.total += ec ? 0 : size;
+            }
+        }
+    }
     std::uint64_t total = 0;
     std::vector<std::string> hashes;
     for (const FileRef& ref : spec.elevationFiles) {
-        auto file = resolveAndCheck(ref, roots, stop);
+        auto file = resolveAndCheck(ref, roots, stop, progress);
         if (!file) {
             return std::unexpected(file.error());
         }
@@ -325,7 +358,7 @@ TerrainResult<PreparedFileTerrain> prepareFileTerrain(const FileTerrainSpec& spe
             out.orthophotos.clear();
             break;
         }
-        auto file = resolveAndCheck(ref, roots, stop);
+        auto file = resolveAndCheck(ref, roots, stop, progress);
         if (!file) {
             if (file.error().code == TerrainErrorCode::Cancelled) {
                 return std::unexpected(file.error());
@@ -364,6 +397,39 @@ std::string terrainDataHash(const std::vector<std::string>& fileHashes,
         spec.resolutionM ? std::format("{:.6f}", *spec.resolutionM) : std::string("auto"),
         spec.interpolation == LidarInterpolation::Idw ? "idw" : "tin", spec.classifyGround));
     return common::Sha256::toHex(hash.finish());
+}
+
+}  // namespace ds::terrain
+
+namespace ds::terrain {
+
+std::optional<std::string> FileHashCache::find(const std::filesystem::path& file) const {
+    std::error_code ec;
+    const std::uint64_t size = std::filesystem::file_size(file, ec);
+    if (ec) {
+        return std::nullopt;
+    }
+    const auto time = std::filesystem::last_write_time(file, ec);
+    if (ec) {
+        return std::nullopt;
+    }
+    const std::scoped_lock lock(mutex_);
+    const auto it = entries_.find(file);
+    if (it == entries_.end() || it->second.size != size || it->second.time != time) {
+        return std::nullopt;
+    }
+    return it->second.sha256;
+}
+
+void FileHashCache::store(const std::filesystem::path& file, std::string sha256) {
+    std::error_code ec;
+    const std::uint64_t size = std::filesystem::file_size(file, ec);
+    const auto time = std::filesystem::last_write_time(file, ec);
+    if (ec) {
+        return;
+    }
+    const std::scoped_lock lock(mutex_);
+    entries_[file] = Entry{size, time, std::move(sha256)};
 }
 
 }  // namespace ds::terrain

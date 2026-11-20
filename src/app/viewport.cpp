@@ -197,9 +197,10 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     frame.starsVersion = scene_->sky().starsVersion();
     frame.terrain.chunks = chunks;
     frame.terrain.gridSize = scene_->layout().gridSize;
-    frame.terrain.extent = terrainConfig.extent;
+    frame.terrain.extent = scene_->source()->extent();  // File terrain: from the data.
     frame.terrain.waterLevelM = scene_->source()->waterLevel();
-    frame.terrain.waterBeyondExtent = terrainConfig.params.edge == terrain::EdgeMode::Water;
+    frame.terrain.waterBeyondExtent = terrainConfig.kind == TerrainKind::Procedural &&
+                                      terrainConfig.params.edge == terrain::EdgeMode::Water;
     frame.exposure = env.exposure;
     if (sim != nullptr) {
         frame.weather = sim->weatherView();
@@ -225,6 +226,7 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     } else if (sim != nullptr) {
         paintFreeCompass(*sim, camera);
     }
+    paintAttribution();
 
     ++framesSinceStats_;
     if (exposureClock_.elapsed() >= 500) {
@@ -432,6 +434,29 @@ void Viewport::paintHud(const SimulationController& sim) {
         paintInsetFrame(painter, (*insets)[0], tr("Top · N↑"), options.scale);
         paintInsetFrame(painter, (*insets)[1], tr("Behind"), options.scale);
     }
+}
+
+void Viewport::paintAttribution() {
+    // The data attribution of the visible terrain (FR-TER-O13, FR-TER-F10), bottom right.
+    const QString text = QString::fromStdString(scene_->attribution());
+    if (text.isEmpty()) {
+        return;
+    }
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    const double scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
+    QFont font = painter.font();
+    font.setPointSizeF(7.5 * scale);
+    painter.setFont(font);
+    const QFontMetricsF metrics(font);
+    const double margin = 4.0 * scale;
+    const QString shown = metrics.elidedText(text, Qt::ElideRight, 0.6 * width());
+    const QSizeF size(metrics.horizontalAdvance(shown) + 2.0 * margin,
+                      metrics.height() + 0.5 * margin);
+    const QRectF box(width() - size.width(), height() - size.height(), size.width(), size.height());
+    painter.fillRect(box, QColor(0, 0, 0, 110));
+    painter.setPen(QColor(235, 235, 235));
+    painter.drawText(box, Qt::AlignCenter, shown);
 }
 
 void Viewport::paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera) {

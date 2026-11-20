@@ -1457,6 +1457,7 @@ void SimulationController::updateFrame(double dt, double aspect) {
         options.pilotPosition = rig_.pilotEye();
     }
     options.showMarkers = !mission_ || mission_->rules.showMarkers;
+    options.terrainExtent = scene_->source()->extent();
     sim::WorldSnapshot shown = s;
     shown.body.position = pose_.position;
     if (!started_) {

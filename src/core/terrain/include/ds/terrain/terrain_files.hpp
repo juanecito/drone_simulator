@@ -5,6 +5,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -61,6 +64,9 @@ struct FileTerrainSpec {
     std::string orthophotoCrs;             ///< If the images carry no CRS.
     std::string orthophotoAttribution;     ///< Imagery attribution.
     std::vector<int> orthophotoBands;      ///< e.g. {1, 2, 3}; empty ⇒ automatic.
+    /// Canonical paths of the elevation files, in order: filled by the mission loader when
+    /// every file was found (not part of the JSON).
+    std::vector<std::filesystem::path> resolvedElevationFiles;
 };
 
 /// @brief Parses a mission `terrain` object with `"source": "file"`.
@@ -115,13 +121,40 @@ struct PreparedFileTerrain {
     std::string terrainDataHash;            ///< FR-TER-F09 (orthophotos excluded, FR-TER-I09).
 };
 
+/// @brief Remembers file hashes by path, size and modification time, so a file is hashed
+/// once per session (thread-safe).
+class FileHashCache {
+public:
+    /// @brief The cached hash of @p file, if its size and time still match.
+    [[nodiscard]] std::optional<std::string> find(const std::filesystem::path& file) const;
+    /// @brief Stores @p sha256 for @p file as it is now.
+    void store(const std::filesystem::path& file, std::string sha256);
+
+private:
+    struct Entry {
+        std::uint64_t size = 0;
+        std::filesystem::file_time_type time;
+        std::string sha256;
+    };
+    mutable std::mutex mutex_;
+    std::map<std::filesystem::path, Entry> entries_;
+};
+
+/// @brief Optional hooks of prepareFileTerrain().
+struct PrepareHooks {
+    /// Called after each file with the bytes hashed so far and the total (any thread).
+    std::function<void(std::uint64_t done, std::uint64_t total)> progress;
+    FileHashCache* cache = nullptr;  ///< Hashes known from earlier calls.
+};
+
 /// @brief Resolves, checks and hashes every file of @p spec.
 /// @details Elevation problems are errors naming the JSON path. Orthophoto problems only
 /// disable the imagery and add a warning (FR-TER-I08). Hashing reads every file once and can be
 /// cancelled with @p stop.
 [[nodiscard]] TerrainResult<PreparedFileTerrain> prepareFileTerrain(
     const FileTerrainSpec& spec, const TerrainFileRoots& roots,
-    const TerrainFileLimits& limits = {}, std::stop_token stop = {});
+    const TerrainFileLimits& limits = {}, std::stop_token stop = {},
+    const PrepareHooks& hooks = {});
 
 /// @brief Combined hash of the elevation inputs and the settings that change the heights
 /// (FR-TER-F09): SHA-256 over the file hashes in order and a canonical text of the settings.

@@ -85,13 +85,19 @@ public:
     [[nodiscard]] const MissionRow* nextMission(std::string_view key) const noexcept;
     /// @brief Saves an attempt of mission @p key (FR-MIS-11, FR-MIS-12) and reloads the list
     /// (progress and unlocks change). Returns the attempt's id.
+    /// @p terrainDataHash identifies the elevation data flown on ("" for procedural terrain,
+    /// FR-TER-O14, FR-TER-F09).
     common::Result<std::int64_t> recordAttempt(const std::string& key,
                                                const missions::MissionResult& result,
-                                               astro::UtcTime startedAt);
+                                               astro::UtcTime startedAt,
+                                               const std::string& terrainDataHash = {});
     /// @brief The personal best of @p key (most stars, then highest score), ignoring the
-    /// attempt @p excluding; nullopt if there is none or no database.
+    /// attempt @p excluding and attempts flown on other terrain data than @p terrainDataHash
+    /// (scores are compared only on identical data, FR-TER-O14); nullopt if there is none or
+    /// no database.
     [[nodiscard]] std::optional<storage::MissionAttemptRecord> bestAttempt(
-        const std::string& key, std::optional<std::int64_t> excluding = std::nullopt) const;
+        const std::string& key, std::optional<std::int64_t> excluding = std::nullopt,
+        const std::string& terrainDataHash = {}) const;
     /// @brief Copies a mission file or mission folder into the user's mission folder
     /// (Missions › Import mission, FR-MIS-01) and reloads the list.
     common::Result<std::filesystem::path> importMission(const std::filesystem::path& source,

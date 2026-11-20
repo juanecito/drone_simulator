@@ -102,6 +102,28 @@ follow the terrain: they are placed `alt` metres above the ground under them, an
 when the terrain changes. `geo` and `utm` positions need a geographic origin
 (`terrain.origin`, or the origin of the elevation files for file terrain).
 
+### Terrain from elevation files
+
+A mission can fly over real terrain from **elevation rasters**: COG / GeoTIFF, SRTM `.hgt`,
+ESRI ASCII grid `.asc` (with its `.prj`) or ERDAS Imagine `.img`. LAS/LAZ lidar files are
+accepted by the validator, but they are not playable until the lidar rasterizer arrives.
+
+- **Where the files are:** put the mission in a folder of its own, with the files next to it
+  (usually in `dem/`). Paths are relative to that folder, or `library:<name>` for the geodata
+  library `~/.drone_simulation/library/`. A missing file makes the mission *unavailable*.
+- **Several tiles** are joined into one surface. They must share one CRS. Files without a
+  CRS need `crs`, e.g. `"EPSG:25830"`.
+- **Origin:** without `origin`, the origin is the centre of the data and the ground there is
+  at height 0. With an `origin` whose `altRef` is `"AMSL"`, that altitude is height 0.
+- **Extent:** without `extent`, the terrain is the largest rectangle centred on the origin
+  that the data covers. With `extent`, the rectangle must lie inside the data. A HUD caution
+  appears 300 m from the edge and a warning 100 m from it.
+- **Checks at launch:** the files are hashed, behind a progress dialog for large files.
+  A file whose hash differs from its `sha256` stops the mission. The attempt records the hash
+  of the data and of the settings that change heights (`terrain_data_hash`), and the personal
+  best of the debrief only counts attempts flown on the same data.
+- **Attribution:** `attribution` is shown at the bottom right of the view.
+
 Item **polygons** (`surveyArea`, `noFlyZone`, `geofence`) are lists of `[x, z]` offsets in
 metres from the item position, in the same engine frame, rotated by the item's `headingDeg`.
 Headings are degrees clockwise from true north.

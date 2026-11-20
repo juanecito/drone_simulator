@@ -355,7 +355,23 @@ double RasterSource::heightAmsl(double x, double z) const {
     return out[0];
 }
 
-double RasterSource::height(double x, double z) const { return heightAmsl(x, z) - originAltitude_; }
+double RasterSource::edged(double amsl, double x, double z) const noexcept {
+    if (fadeBandM_ <= 0.0) {
+        return amsl;
+    }
+    const Extent& e = metadata_.extent;
+    const double inside = std::min(0.5 * e.widthM - std::abs(x), 0.5 * e.lengthM - std::abs(z));
+    if (inside >= fadeBandM_) {
+        return amsl;
+    }
+    const double t = std::clamp(inside / fadeBandM_, 0.0, 1.0);
+    const double s = t * t * (3.0 - 2.0 * t);
+    return metadata_.minHeightM + (amsl - metadata_.minHeightM) * s;
+}
+
+double RasterSource::height(double x, double z) const {
+    return edged(heightAmsl(x, z), x, z) - originAltitude_;
+}
 
 void RasterSource::sampleGrid(double x0, double z0, double step, int cols, int rows,
                               std::span<double> out) const {
@@ -376,8 +392,8 @@ void RasterSource::sampleGrid(double x0, double z0, double step, int cols, int r
         return;
     }
     sampleAmsl(*lease.get(), xs, zs, decimationFor(step), out.first(n));
-    for (double& h : out.first(n)) {
-        h -= originAltitude_;
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = edged(out[i], xs[i], zs[i]) - originAltitude_;
     }
 }
 
@@ -391,6 +407,10 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     std::span<const std::filesystem::path> files, const RasterOptions& options) {
     if (files.empty()) {
         return terrainError(TerrainErrorCode::InvalidSpec, "no elevation files");
+    }
+    if (options.edge == EdgeMode::Water) {
+        return terrainError(TerrainErrorCode::NotSupported,
+                            "the water edge is only available on procedural terrain");
     }
     if (options.band < 1) {
         return terrainError(TerrainErrorCode::InvalidSpec, "band must be 1 or more");
@@ -757,6 +777,10 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     }
 
     source->release(std::move(*first));
+    if (options.edge == EdgeMode::Fade) {
+        source->fadeBandM_ = std::min(RasterOptions::kFadeBandM,
+                                      0.1 * std::min(meta.extent.widthM, meta.extent.lengthM));
+    }
 
     if (!meta.hasOverviews && std::max(l.width, l.height) > 4096) {
         meta.notes.push_back(

@@ -10,6 +10,7 @@
 
 #include "ds/geo/coordinates.hpp"
 #include "ds/sim/world_snapshot.hpp"
+#include "ds/terrain/height_source.hpp"
 
 /// @file
 /// @brief Content of the position panel and the OSD (FR-GFX-14, FR-GFX-14a), computed from a
@@ -42,7 +43,14 @@ struct HudOptions {
     /// Pilot position for line-of-sight flying (distance to pilot), if known.
     std::optional<physics::Vec3> pilotPosition;
     bool showMarkers = true;       ///< Guidance markers for the mission's targets.
+    /// Bounded terrain: a soft geofence warns before its edge (FR-TER-O08).
+    std::optional<terrain::Extent> terrainExtent;
 };
+
+/// @brief Distance to the terrain edge below which the HUD shows a caution, metres.
+inline constexpr double kTerrainEdgeCautionM = 300.0;
+/// @brief Distance to the terrain edge below which the HUD shows a warning, metres.
+inline constexpr double kTerrainEdgeWarningM = 100.0;
 
 /// @brief Compass rose (FR-GFX-14b): true and magnetic north and the vehicle's heading.
 struct HudCompass {

@@ -19,7 +19,9 @@ endif()
 function(ds_add_integration_test target)
     cmake_parse_arguments(ARG "FORCE_OFFSCREEN" "" "SOURCES" ${ARGN})
     add_executable(${target} test_main.cpp ${ARG_SOURCES})
-    target_link_libraries(${target} PRIVATE GTest::gtest ds::app_ui ds::graphics ds::storage Qt6::Test)
+    target_link_libraries(${target} PRIVATE GTest::gtest ds::app_ui ds::graphics ds::storage Qt6::Test
+                                            GDAL::GDAL)
+    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/tests/support)
     if(ARG_FORCE_OFFSCREEN)
         target_compile_definitions(${target} PRIVATE DS_TEST_FORCE_OFFSCREEN)
     endif()
@@ -44,4 +46,5 @@ target_compile_definitions(ds_storage_integration_tests PRIVATE
 ds_add_integration_test(ds_mission_flight_tests FORCE_OFFSCREEN SOURCES mission_flight_test.cpp)
 target_compile_definitions(ds_mission_flight_tests PRIVATE
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
-ds_add_integration_test(ds_mission_flow_tests FORCE_OFFSCREEN SOURCES mission_flow_test.cpp)
+ds_add_integration_test(ds_mission_flow_tests FORCE_OFFSCREEN SOURCES mission_flow_test.cpp
+    file_terrain_test.cpp)

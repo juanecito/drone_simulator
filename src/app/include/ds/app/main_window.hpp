@@ -15,6 +15,7 @@
 #include "ds/common/error.hpp"
 #include "ds/storage/mission_store.hpp"
 #include "ds/storage/recording_store.hpp"
+#include "ds/terrain/terrain_files.hpp"
 
 class QAction;
 class QDockWidget;
@@ -162,6 +163,8 @@ private:
     QPointer<MissionBriefingDialog> briefing_;
     QPointer<MissionDebriefDialog> debrief_;
     std::string missionKey_;
+    std::string missionTerrainHash_;     // FR-TER-F09: elevation data of the mission flown.
+    terrain::FileHashCache fileHashes_;  // Elevation files are hashed once per session.
     std::optional<std::int64_t> lastAttemptId_;
     std::optional<storage::MissionAttemptRecord> bestBefore_;
     bool panelWasVisible_ = true;

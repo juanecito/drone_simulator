@@ -46,7 +46,7 @@ struct MissionMapData {
     std::vector<glm::dvec3> path;                          ///< Flight path (debrief).
 };
 
-/// @brief Builds the map data of @p mission (procedural terrain only; see unplayableReason()).
+/// @brief Builds the map data of @p mission (opens file terrain; see unplayableReason()).
 [[nodiscard]] common::Result<MissionMapData> missionMapData(
     const missions::MissionDefinition& mission);
 

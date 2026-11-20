@@ -358,6 +358,15 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
     if (aerial && h.altitudeAgl.level == HudLevel::Warning && !heightRule) {
         h.warnings.push_back({"ABOVE 120 m AGL", HudLevel::Warning});
     }
+    if (o.terrainExtent) {
+        const double edge = std::min(0.5 * o.terrainExtent->widthM - std::abs(pos.x),
+                                     0.5 * o.terrainExtent->lengthM - std::abs(pos.z));
+        if (edge < kTerrainEdgeCautionM) {
+            h.warnings.push_back(
+                {std::format("TERRAIN EDGE {}", length(std::max(edge, 0.0), o.imperial, 0)),
+                 edge < kTerrainEdgeWarningM ? HudLevel::Warning : HudLevel::Caution});
+        }
+    }
     buildMissionHud(s.mission, pos, o, h);
     return h;
 }

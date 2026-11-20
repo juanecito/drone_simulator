@@ -165,7 +165,8 @@ const MissionRow* MissionsController::nextMission(std::string_view key) const no
 }
 
 common::Result<std::int64_t> MissionsController::recordAttempt(
-    const std::string& key, const missions::MissionResult& result, astro::UtcTime startedAt) {
+    const std::string& key, const missions::MissionResult& result, astro::UtcTime startedAt,
+    const std::string& terrainDataHash) {
     if (storage_ == nullptr) {
         return common::makeError("results cannot be saved without a database");
     }
@@ -178,6 +179,7 @@ common::Result<std::int64_t> MissionsController::recordAttempt(
     r.stars = result.stars;
     r.durationS = result.durationS;
     r.resultsJson = result.toJson().dump();
+    r.terrainDataHash = terrainDataHash;
     auto id = storage_->submit([r](storage::DbConnection& c) {
                          return storage::MissionStore(c).recordAttempt(r);
                      }).get();
@@ -190,7 +192,8 @@ common::Result<std::int64_t> MissionsController::recordAttempt(
 }
 
 std::optional<storage::MissionAttemptRecord> MissionsController::bestAttempt(
-    const std::string& key, std::optional<std::int64_t> excluding) const {
+    const std::string& key, std::optional<std::int64_t> excluding,
+    const std::string& terrainDataHash) const {
     if (storage_ == nullptr) {
         return std::nullopt;
     }
@@ -204,7 +207,7 @@ std::optional<storage::MissionAttemptRecord> MissionsController::bestAttempt(
     // Same order as MissionStore::bestAttempt(): most stars, then highest score.
     std::optional<storage::MissionAttemptRecord> best;
     for (const storage::MissionAttemptRecord& a : *attempts) {
-        if (excluding && a.id == excluding) {
+        if ((excluding && a.id == excluding) || a.terrainDataHash != terrainDataHash) {
             continue;
         }
         if (!best || a.stars > best->stars || (a.stars == best->stars && a.score > best->score)) {

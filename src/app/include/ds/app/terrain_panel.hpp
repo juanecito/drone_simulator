@@ -12,13 +12,16 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QGroupBox;
 class QLineEdit;
+class QListWidget;
 class QPushButton;
 class QSpinBox;
 
 /// @file
-/// @brief Terrain tab (SPECIFICATION §4.11): presets, procedural parameters, dimensions,
-/// geographic origin, *Regenerate* and a 2D height preview.
+/// @brief Terrain tab (SPECIFICATION §4.11): presets, source (procedural parameters or
+/// elevation files with their metadata), dimensions, geographic origin, *Regenerate* and a 2D
+/// height preview.
 /// @ingroup app
 
 namespace ds::app {
@@ -51,6 +54,8 @@ private:
     void updatePreview();
     void updateEnabled();
     void showStatus(const QString& text, bool error);
+    void addFiles();
+    void updateMetadata();
 
     SceneController* scene_;
     QComboBox* presets_ = nullptr;
@@ -75,6 +80,17 @@ private:
     QDoubleSpinBox* latitude_ = nullptr;
     QDoubleSpinBox* longitude_ = nullptr;
     QDoubleSpinBox* altitude_ = nullptr;
+    QCheckBox* autoOrigin_ = nullptr;
+    QGroupBox* procedural_ = nullptr;
+    QGroupBox* fileBox_ = nullptr;
+    QListWidget* files_ = nullptr;
+    QPushButton* removeFile_ = nullptr;
+    QSpinBox* band_ = nullptr;
+    QLineEdit* crs_ = nullptr;
+    QLineEdit* datum_ = nullptr;
+    QLineEdit* attribution_ = nullptr;
+    QComboBox* fileEdge_ = nullptr;
+    QLabel* metadata_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* preview_ = nullptr;
     terrain::ProceduralParams hidden_;  // Parameters without widgets (flat zones, snow line).

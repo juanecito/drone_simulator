@@ -145,17 +145,17 @@ common::Result<MissionMapData> missionMapData(const missions::MissionDefinition&
     if (!config) {
         return std::unexpected(config.error());
     }
-    auto source = terrain::ProceduralSource::create(config->params, config->extent);
-    if (!source) {
-        return std::unexpected(source.error());
+    auto built = buildTerrain(*config);
+    if (!built) {
+        return std::unexpected(built.error());
     }
     MissionMapData data;
-    data.terrain = *source;
-    data.extent = config->extent;
+    data.terrain = built->source;
+    data.extent = built->source->extent();
     missions::MissionPlacement placement;
-    placement.origin = geo::LatLon{config->origin.latitudeDeg, config->origin.longitudeDeg};
+    placement.origin = geo::LatLon{built->origin.latitudeDeg, built->origin.longitudeDeg};
     placement.ground = [src = data.terrain](double x, double z) { return src->height(x, z); };
-    placement.originAltitudeM = config->origin.heightM;
+    placement.originAltitudeM = built->origin.heightM;
     auto registry = missions::buildItems(mission, placement);
     if (!registry) {
         return std::unexpected(registry.error());
@@ -443,7 +443,18 @@ QString daylightHtml(const missions::MissionDefinition& m) {
     if (!terrainConfig) {
         return {};
     }
-    const geo::Geodetic observer = terrainConfig->origin;
+    geo::Geodetic observer = terrainConfig->origin;
+    if (terrainConfig->kind == TerrainKind::File) {
+        // The origin of file terrain comes from the data unless the mission gives it.
+        const FileTerrainConfig& f = terrainConfig->file;
+        if (f.origin && f.originAltitudeM) {
+            observer = {f.origin->latitudeDeg, f.origin->longitudeDeg, *f.originAltitudeM};
+        } else if (auto built = buildTerrain(*terrainConfig)) {
+            observer = built->origin;
+        } else {
+            return {};
+        }
+    }
     const astro::UtcTime t = m.environment.utc;
     const std::string& zone = m.environment.timeZone;
     const astro::BodyPosition sun = astro::sunPosition(t, observer);

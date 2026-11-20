@@ -36,6 +36,22 @@ QString slug(const QString& name) {
     return s.isEmpty() ? QStringLiteral("preset") : s;
 }
 
+common::Result<void> validateTerrain(const TerrainConfig& config) {
+    if (config.kind == TerrainKind::Procedural) {
+        if (auto valid = terrain::validate(config.params); !valid) {
+            return valid;
+        }
+    } else if (config.file.files.empty()) {
+        return common::makeError("choose at least one elevation file");
+    }
+    if (config.extent) {
+        if (auto valid = terrain::validate(*config.extent); !valid) {
+            return valid;
+        }
+    }
+    return {};
+}
+
 }  // namespace
 
 SceneController::SceneController(SettingsController* settings, std::filesystem::path assetDirectory,
@@ -55,7 +71,7 @@ SceneController::SceneController(SettingsController* settings, std::filesystem::
     }
     loadSaved();
     reloadPresets();
-    rebuildTerrain();
+    applyTerrainOrDefault(terrain_);
     camera_.pitchRad = -0.12;
     camera_.position.y = query_->height(0.0, 0.0) + kInitialHeightAglM;
     updateSky();
@@ -82,15 +98,16 @@ void SceneController::loadSaved() {
     }
 }
 
-void SceneController::rebuildTerrain() {
-    auto source = terrain::ProceduralSource::create(terrain_.params, terrain_.extent);
-    if (!source) {
-        // Validated before; fall back to the default preset rather than run without terrain.
-        log::error("Cannot create terrain: {}", source.error().message);
-        terrain_ = builtInPresets().front().config;
-        source = terrain::ProceduralSource::create(terrain_.params, terrain_.extent);
+common::Result<void> SceneController::applyTerrain(const TerrainConfig& config) {
+    auto built = buildTerrain(config);
+    if (!built) {
+        return std::unexpected(built.error());
     }
-    source_ = *source;
+    terrain_ = config;
+    terrain_.origin = built->origin;  // File terrain: the origin found in the data.
+    source_ = built->source;
+    metadata_ = std::move(built->metadata);
+    attribution_ = std::move(built->attribution);
     streamer_.reset();
     terrain::StreamerSettings settings;
     settings.selection.viewRadiusM = kViewRadiusM;
@@ -101,11 +118,11 @@ void SceneController::rebuildTerrain() {
         return query->height(x, z);
     });
     // Keep the camera inside a bounded terrain and above the ground.
-    if (terrain_.extent) {
-        camera_.position.x = std::clamp(camera_.position.x, -0.5 * terrain_.extent->widthM,
-                                        0.5 * terrain_.extent->widthM);
-        camera_.position.z = std::clamp(camera_.position.z, -0.5 * terrain_.extent->lengthM,
-                                        0.5 * terrain_.extent->lengthM);
+    if (const auto extent = source_->extent()) {
+        camera_.position.x =
+            std::clamp(camera_.position.x, -0.5 * extent->widthM, 0.5 * extent->widthM);
+        camera_.position.z =
+            std::clamp(camera_.position.z, -0.5 * extent->lengthM, 0.5 * extent->lengthM);
     }
     const double ground = query_->height(camera_.position.x, camera_.position.z);
     if (camera_.position.y < ground + graphics::FreeFlyController::kClearanceM) {
@@ -114,19 +131,25 @@ void SceneController::rebuildTerrain() {
     ++terrainVersion_;
     exposureReset_ = true;
     log::info("Terrain: {}", source_->describe());
+    return {};
+}
+
+void SceneController::applyTerrainOrDefault(const TerrainConfig& config) {
+    if (auto applied = applyTerrain(config); !applied) {
+        // E.g. elevation files deleted since: run on the default preset rather than without
+        // terrain.
+        log::error("Cannot create terrain: {}", applied.error().message);
+        (void)applyTerrain(builtInPresets().front().config);
+    }
 }
 
 common::Result<void> SceneController::setTerrain(const TerrainConfig& config) {
-    if (auto valid = terrain::validate(config.params); !valid) {
+    if (auto valid = validateTerrain(config); !valid) {
         return valid;
     }
-    if (config.extent) {
-        if (auto valid = terrain::validate(*config.extent); !valid) {
-            return valid;
-        }
+    if (auto applied = applyTerrain(config); !applied) {
+        return applied;
     }
-    terrain_ = config;
-    rebuildTerrain();
     updateSky();
     saveTerrain();
     emit terrainChanged();
@@ -135,22 +158,20 @@ common::Result<void> SceneController::setTerrain(const TerrainConfig& config) {
 
 common::Result<void> SceneController::enterMission(const TerrainConfig& terrain,
                                                   const EnvironmentConfig& environment) {
-    if (auto valid = terrain::validate(terrain.params); !valid) {
+    if (auto valid = validateTerrain(terrain); !valid) {
         return valid;
     }
-    if (terrain.extent) {
-        if (auto valid = terrain::validate(*terrain.extent); !valid) {
-            return valid;
-        }
+    const TerrainConfig before = terrain_;
+    const graphics::Camera camera = camera_;
+    if (auto applied = applyTerrain(terrain); !applied) {
+        return applied;  // Nothing changed.
     }
     if (!missionScene_) {
-        freeTerrain_ = terrain_;
+        freeTerrain_ = before;
         freeEnvironment_ = environment_;
-        freeCamera_ = camera_;
+        freeCamera_ = camera;
     }
     missionScene_ = true;
-    terrain_ = terrain;
-    rebuildTerrain();
     environment_ = environment;
     environment_.visibilityM =
         std::clamp(environment.visibilityM, kMinVisibilityM, kMaxVisibilityM);
@@ -169,7 +190,7 @@ void SceneController::leaveMission() {
     terrain_ = freeTerrain_;
     environment_ = freeEnvironment_;
     camera_ = freeCamera_;
-    rebuildTerrain();
+    applyTerrainOrDefault(freeTerrain_);
     exposureReset_ = true;
     updateSky();
     emit terrainChanged();

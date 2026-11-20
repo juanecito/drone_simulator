@@ -276,17 +276,19 @@ private:
         }
     }
 
-    void checkTerrainFiles(const terrain::FileTerrainSpec& spec) {
+    void checkTerrainFiles(terrain::FileTerrainSpec& spec) {
         if (missionDir_.empty()) {
             return;
         }
         const terrain::TerrainFileRoots roots{missionDir_, ctx_.libraryDir};
+        std::vector<std::filesystem::path> found;
         for (const terrain::FileRef& f : spec.elevationFiles) {
             if (f.path.starts_with("library:") && ctx_.libraryDir.empty()) {
                 continue;
             }
             const auto resolved = terrain::resolveTerrainPath(f.path, roots);
             if (resolved) {
+                found.push_back(*resolved);
                 continue;
             }
             if (resolved.error().code == terrain::TerrainErrorCode::FileNotFound) {
@@ -295,6 +297,9 @@ private:
             } else {
                 error(common::pointerToDotted(f.jsonPath), resolved.error().message);
             }
+        }
+        if (found.size() == spec.elevationFiles.size()) {
+            spec.resolvedElevationFiles = std::move(found);
         }
     }
 

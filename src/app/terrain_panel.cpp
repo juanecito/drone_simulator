@@ -6,12 +6,14 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
@@ -29,6 +31,7 @@
 #include "ds/common/random.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/query.hpp"
+#include "ds/terrain/terrain_files.hpp"
 
 namespace ds::app {
 namespace {
@@ -89,6 +92,7 @@ TerrainPanel::TerrainPanel(SceneController& scene, QWidget* parent)
     buildUi();
     reloadPresets();
     setFormConfig(scene.terrain());
+    updateMetadata();
     updatePreview();
     connect(scene_, &SceneController::presetsChanged, this, &TerrainPanel::reloadPresets);
 }
@@ -121,9 +125,9 @@ void TerrainPanel::buildUi() {
     source_ = new QComboBox;
     source_->setObjectName(QStringLiteral("SourceCombo"));
     source_->addItems({tr("Procedural"), tr("Online elevation"), tr("Elevation file")});
-    disableItem(source_, 1, tr("Available in milestone M4."));
-    disableItem(source_, 2, tr("Available in milestone M4."));
+    disableItem(source_, 1, tr("Available in a later step of milestone M4."));
     form->addRow(tr("Source:"), source_);
+    connect(source_, &QComboBox::currentIndexChanged, this, &TerrainPanel::updateEnabled);
     dimensions_ = new QComboBox;
     dimensions_->setObjectName(QStringLiteral("DimensionsCombo"));
     dimensions_->addItems({tr("Unlimited"), tr("Custom")});
@@ -138,8 +142,63 @@ void TerrainPanel::buildUi() {
     connect(dimensions_, &QComboBox::currentIndexChanged, this, &TerrainPanel::updateEnabled);
     layout->addWidget(general);
 
+    // Elevation files (FR-TER-F11).
+    fileBox_ = new QGroupBox(tr("Elevation files"));
+    fileBox_->setObjectName(QStringLiteral("FileBox"));
+    auto* fform = new QFormLayout(fileBox_);
+    files_ = new QListWidget;
+    files_->setObjectName(QStringLiteral("FileList"));
+    files_->setMaximumHeight(90);
+    files_->setToolTip(
+        tr("Elevation rasters (COG, GeoTIFF, .hgt, .asc, .img) in one CRS; "
+           "several tiles are joined into one surface."));
+    fform->addRow(files_);
+    auto* addFile = new QPushButton(tr("Add…"));
+    addFile->setObjectName(QStringLiteral("AddFileButton"));
+    removeFile_ = new QPushButton(tr("Remove"));
+    removeFile_->setObjectName(QStringLiteral("RemoveFileButton"));
+    auto* fileButtons = new QHBoxLayout;
+    fileButtons->addWidget(addFile);
+    fileButtons->addWidget(removeFile_);
+    fileButtons->addStretch();
+    fform->addRow(fileButtons);
+    connect(addFile, &QPushButton::clicked, this, &TerrainPanel::addFiles);
+    connect(removeFile_, &QPushButton::clicked, this, [this] {
+        qDeleteAll(files_->selectedItems());
+        updateEnabled();
+    });
+    connect(files_, &QListWidget::itemSelectionChanged, this, &TerrainPanel::updateEnabled);
+    band_ = new QSpinBox;
+    band_->setObjectName(QStringLiteral("BandSpin"));
+    band_->setRange(1, 1000);
+    fform->addRow(tr("Band:"), band_);
+    crs_ = new QLineEdit;
+    crs_->setObjectName(QStringLiteral("CrsEdit"));
+    crs_->setPlaceholderText(tr("from the files, e.g. EPSG:25830"));
+    fform->addRow(tr("CRS:"), crs_);
+    datum_ = new QLineEdit;
+    datum_->setObjectName(QStringLiteral("DatumEdit"));
+    datum_->setPlaceholderText(tr("from the files, e.g. EGM2008"));
+    fform->addRow(tr("Vertical datum:"), datum_);
+    attribution_ = new QLineEdit;
+    attribution_->setObjectName(QStringLiteral("AttributionEdit"));
+    attribution_->setPlaceholderText(tr("dataset licence / citation, shown in the view"));
+    fform->addRow(tr("Attribution:"), attribution_);
+    fileEdge_ = new QComboBox;
+    fileEdge_->setObjectName(QStringLiteral("FileEdgeCombo"));
+    fileEdge_->addItem(tr("Clamp edge"), static_cast<int>(terrain::EdgeMode::Cliff));
+    fileEdge_->addItem(tr("Fade to lowest height"), static_cast<int>(terrain::EdgeMode::Fade));
+    fform->addRow(tr("Edge:"), fileEdge_);
+    metadata_ = new QLabel;
+    metadata_->setObjectName(QStringLiteral("MetadataLabel"));
+    metadata_->setWordWrap(true);
+    metadata_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    fform->addRow(metadata_);
+    layout->addWidget(fileBox_);
+
     // Procedural parameters.
     auto* proc = new QGroupBox(tr("Procedural"));
+    procedural_ = proc;
     auto* pform = new QFormLayout(proc);
     seed_ = new QLineEdit;
     seed_->setObjectName(QStringLiteral("SeedEdit"));
@@ -196,6 +255,11 @@ void TerrainPanel::buildUi() {
     latitude_ = spin("LatitudeSpin", -89.0, 89.0, 0.1, 6, QStringLiteral("°"));
     longitude_ = spin("LongitudeSpin", -180.0, 180.0, 0.1, 6, QStringLiteral("°"));
     altitude_ = spin("AltitudeSpin", -500.0, 9000.0, 10.0, 1, tr(" m AMSL"));
+    autoOrigin_ = new QCheckBox(tr("Centre of the data, at ground level"));
+    autoOrigin_->setObjectName(QStringLiteral("AutoOriginCheck"));
+    autoOrigin_->setChecked(true);
+    oform->addRow(autoOrigin_);
+    connect(autoOrigin_, &QCheckBox::toggled, this, &TerrainPanel::updateEnabled);
     oform->addRow(tr("Latitude:"), latitude_);
     oform->addRow(tr("Longitude:"), longitude_);
     oform->addRow(tr("Altitude:"), altitude_);
@@ -312,6 +376,22 @@ TerrainConfig TerrainPanel::formConfig() const {
         c.extent = terrain::Extent{widthKm_->value() * 1000.0, lengthKm_->value() * 1000.0};
     }
     c.origin = {latitude_->value(), longitude_->value(), altitude_->value()};
+    if (source_->currentIndex() == 2) {
+        c.kind = TerrainKind::File;
+        FileTerrainConfig& f = c.file;
+        for (int i = 0; i < files_->count(); ++i) {
+            f.files.emplace_back(files_->item(i)->data(Qt::UserRole).toString().toStdString());
+        }
+        f.band = band_->value();
+        f.crs = crs_->text().trimmed().toStdString();
+        f.verticalDatum = datum_->text().trimmed().toStdString();
+        f.attribution = attribution_->text().trimmed().toStdString();
+        f.edge = static_cast<terrain::EdgeMode>(fileEdge_->currentData().toInt());
+        if (!autoOrigin_->isChecked()) {
+            f.origin = geo::LatLon{latitude_->value(), longitude_->value()};
+            f.originAltitudeM = altitude_->value();
+        }
+    }
     return c;
 }
 
@@ -337,6 +417,21 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     latitude_->setValue(c.origin.latitudeDeg);
     longitude_->setValue(c.origin.longitudeDeg);
     altitude_->setValue(c.origin.heightM);
+    source_->setCurrentIndex(c.kind == TerrainKind::File ? 2 : 0);
+    files_->clear();
+    for (const auto& file : c.file.files) {
+        const QString path = QString::fromStdString(file.string());
+        auto* item = new QListWidgetItem(QString::fromStdString(file.filename().string()));
+        item->setData(Qt::UserRole, path);
+        item->setToolTip(path);
+        files_->addItem(item);
+    }
+    band_->setValue(c.file.band);
+    crs_->setText(QString::fromStdString(c.file.crs));
+    datum_->setText(QString::fromStdString(c.file.verticalDatum));
+    attribution_->setText(QString::fromStdString(c.file.attribution));
+    fileEdge_->setCurrentIndex(std::max(fileEdge_->findData(static_cast<int>(c.file.edge)), 0));
+    autoOrigin_->setChecked(c.kind == TerrainKind::File && !c.file.origin);
     const int index = presets_->findData(QString::fromStdString(c.presetKey));
     presets_->setCurrentIndex(std::max(index, 0));
     updateEnabled();
@@ -358,13 +453,86 @@ bool TerrainPanel::regenerate() {
         showStatus(QString::fromStdString(applied.error().message), true);
         return false;
     }
-    showStatus(tr("Terrain generated."), false);
+    showStatus(
+        config.kind == TerrainKind::File ? tr("Elevation files loaded.") : tr("Terrain generated."),
+        false);
+    if (config.kind == TerrainKind::File) {
+        // The origin found in the data.
+        const geo::Geodetic& o = scene_->terrain().origin;
+        latitude_->setValue(o.latitudeDeg);
+        longitude_->setValue(o.longitudeDeg);
+        altitude_->setValue(o.heightM);
+    }
+    updateMetadata();
     updatePreview();
     return true;
 }
 
+void TerrainPanel::addFiles() {
+    const QStringList chosen = QFileDialog::getOpenFileNames(
+        this, tr("Add Elevation Files"), QString(),
+        tr("Elevation rasters (*.tif *.tiff *.hgt *.asc *.img);;All files (*)"));
+    for (const QString& path : chosen) {
+        const std::filesystem::path file(path.toStdString());
+        if (terrain::elevationFormatOf(file) != terrain::ElevationFormat::Raster) {
+            showStatus(tr("“%1” is not an elevation raster (LAS/LAZ files come in a later "
+                          "version).")
+                           .arg(QString::fromStdString(file.filename().string())),
+                       true);
+            continue;
+        }
+        auto* item = new QListWidgetItem(QString::fromStdString(file.filename().string()));
+        item->setData(Qt::UserRole, path);
+        item->setToolTip(path);
+        files_->addItem(item);
+    }
+    updateEnabled();
+}
+
+void TerrainPanel::updateMetadata() {
+    const auto& meta = scene_->terrainMetadata();
+    if (!meta) {
+        metadata_->clear();
+        return;
+    }
+    QStringList lines;
+    lines << tr("Format: %1, %2 file(s), %3 × %4 px%5")
+                 .arg(QString::fromStdString(meta->format))
+                 .arg(meta->fileCount)
+                 .arg(meta->widthPx)
+                 .arg(meta->heightPx)
+                 .arg(meta->hasOverviews ? tr(", with overviews") : QString());
+    lines << tr("CRS: %1").arg(QString::fromStdString(
+        meta->crsCode.empty() ? meta->crs : meta->crsCode + " — " + meta->crs));
+    lines << tr("Resolution: %1 m · heights %2 … %3 m (%4)")
+                 .arg(meta->resolutionM, 0, 'g', 3)
+                 .arg(meta->minHeightM, 0, 'f', 1)
+                 .arg(meta->maxHeightM, 0, 'f', 1)
+                 .arg(meta->verticalDatum.empty() ? tr("datum unknown")
+                                                  : QString::fromStdString(meta->verticalDatum));
+    lines << tr("Terrain: %1 × %2 km")
+                 .arg(meta->extent.widthM / 1000.0, 0, 'f', 2)
+                 .arg(meta->extent.lengthM / 1000.0, 0, 'f', 2);
+    if (meta->noDataPercent > 0.0) {
+        lines << tr("NoData: %1 % (filled)").arg(meta->noDataPercent, 0, 'f', 1);
+    }
+    for (const std::string& note : meta->notes) {
+        lines << QString::fromStdString(note);
+    }
+    metadata_->setText(lines.join(QLatin1Char('\n')));
+}
+
 void TerrainPanel::updateEnabled() {
     const bool custom = dimensions_->currentIndex() == 1;
+    const bool file = source_->currentIndex() == 2;
+    procedural_->setVisible(!file);
+    fileBox_->setVisible(file);
+    autoOrigin_->setVisible(file);
+    const bool manualOrigin = !file || !autoOrigin_->isChecked();
+    latitude_->setEnabled(manualOrigin);
+    longitude_->setEnabled(manualOrigin);
+    altitude_->setEnabled(manualOrigin);
+    removeFile_->setEnabled(!files_->selectedItems().isEmpty());
     widthKm_->setEnabled(custom);
     lengthKm_->setEnabled(custom);
     edge_->setEnabled(custom);
@@ -384,20 +552,21 @@ void TerrainPanel::updatePreview() {
 
 QImage TerrainPanel::renderPreview(const TerrainConfig& config, int size) {
     QImage image(size, size, QImage::Format_RGB32);
-    auto source = terrain::ProceduralSource::create(config.params, config.extent);
-    if (!source) {
+    auto built = buildTerrain(config);
+    if (!built) {
         image.fill(Qt::darkGray);
         return image;
     }
-    const double extentM = config.extent ? std::max(config.extent->widthM, config.extent->lengthM)
-                                         : kUnboundedPreviewM;
+    const terrain::HeightSource& source = *built->source;
+    const auto extent = source.extent();
+    const double extentM = extent ? std::max(extent->widthM, extent->lengthM) : kUnboundedPreviewM;
     const std::vector<float> heights =
-        terrain::sampleHeightMap(**source, 0.0, 0.0, extentM, size, size);
+        terrain::sampleHeightMap(source, 0.0, 0.0, extentM, size, size);
     const auto [lo, hi] = std::ranges::minmax_element(heights);
     const double minH = *lo;
     const double range = std::max(static_cast<double>(*hi) - minH, 1.0);
     const double cell = extentM / size;
-    const std::optional<double> water = config.params.waterLevelM;
+    const std::optional<double> water = source.waterLevel();
     for (int y = 0; y < size; ++y) {
         auto* row = reinterpret_cast<QRgb*>(image.scanLine(y));
         for (int x = 0; x < size; ++x) {

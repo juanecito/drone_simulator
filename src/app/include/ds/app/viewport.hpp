@@ -127,6 +127,7 @@ private:
     void paintHud(const SimulationController& sim);
     void renderInsets(const SimulationController& sim, const graphics::FrameTarget& target,
                       const graphics::FrameInput& main);
+    void paintAttribution();
     void paintFreeCompass(const SimulationController& sim, const graphics::Camera& camera);
 
     SceneController* scene_;
