@@ -13,10 +13,27 @@
 
 namespace ds::physics {
 
-/// @brief Flight modes (Position hold and Return-to-home arrive in milestone M7).
-enum class FlightMode { Acro, Angle, AltitudeHold };
+/// @brief Flight modes (FR-PHY-13). The pilot selects the first four; ReturnToHome is
+/// entered with the RTH switch or by the RC-loss failsafe.
+enum class FlightMode {
+    Acro,          ///< Sticks command body rates.
+    Angle,         ///< Sticks command tilt; self-levelling.
+    AltitudeHold,  ///< Angle plus barometric altitude hold (throttle = climb rate).
+    PositionHold,  ///< Altitude hold plus GPS position hold (sticks = horizontal speed).
+    ReturnToHome,  ///< Climb, fly back to the take-off point and land (GPS).
+};
 
-/// @brief Display name of @p mode ("Acro", "Angle", "Alt hold").
+/// @brief Stage of a return to home.
+enum class RthStage {
+    Climb,    ///< Climbing to the return height, holding position, turning towards home.
+    Return,   ///< Flying back at the return height.
+    Descend,  ///< Landing over home; disarms on the ground.
+};
+
+/// @brief Display name of @p stage ("climb", "return", "land").
+[[nodiscard]] std::string_view rthStageName(RthStage stage) noexcept;
+
+/// @brief Display name of @p mode ("Acro", "Angle", "Alt hold", "Pos hold", "RTH").
 [[nodiscard]] std::string_view flightModeName(FlightMode mode) noexcept;
 
 /// @brief Drive modes of the ground drone (FR-GND-11). Heading hold (S) and the waypoint
@@ -42,6 +59,7 @@ struct PilotCommand {
     bool brake = false;                       ///< Ground: brake.
     bool arm = false;                         ///< Arm switch position.
     FlightMode mode = FlightMode::Angle;      ///< Selected flight mode (aerial).
+    bool returnToHome = false;                ///< RTH switch (aerial).
     DriveMode driveMode = DriveMode::Manual;  ///< Selected drive mode (ground).
     bool linkValid = true;                    ///< False while the RC link is lost.
 };
@@ -58,6 +76,8 @@ enum class ArmBlock {
     ThrottleNotCentred,  ///< Drive stick must be in neutral (ground).
     RolledOver,          ///< On its side or roof (ground).
     InWater,             ///< Drowned in water deeper than the wading depth (ground).
+    NoGpsFix,            ///< Position hold selected without a GPS fix (aerial).
+    RthSwitchOn,         ///< The RTH switch is on (aerial).
 };
 
 /// @brief Message for @p block.

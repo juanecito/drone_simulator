@@ -181,13 +181,39 @@ four times per step.
 - **Angle:** the sticks command tilt, up to the profile's limit (55° for the racer).
 - **Altitude hold:** the throttle stick commands the climb rate. Centre holds the altitude,
   full stick climbs at `maxClimbMs`, zero stick descends at `maxDescentMs`.
-- **Position hold (mode 4):** behaves as altitude hold until M7.
+- **Position hold (mode 4):** altitude hold plus GPS position hold, all from the estimate
+  (the controller never sees the true position). Pitch and roll sticks command a horizontal
+  speed in the heading frame, up to `maxHorizontalSpeedMs` (8 m/s). Released, the drone
+  brakes to under 0.3 m/s, takes that point as its target and holds it:
+  `v = positionGain · (target − position)`. A velocity PI loop (`velocityP`, `velocityI`;
+  the integrator learns the wind) gives the acceleration, and the acceleration gives the
+  tilt, `θ = atan(a / g)` in the heading frame. The acceleration is limited by the Angle-mode
+  tilt limit, so a wind beyond the profile's capability blows the drone away (FR-WIND-05/06).
+  The integrator stops while the limit is reached. Without a GPS fix the mode flies as
+  altitude hold and the HUD says so.
+- **Return to home (RTH switch, key `H`):** home is the estimated position at arming, or at the
+  first GPS fix after it. The return has three stages:
+  1. *Climb:* hold the position and turn the nose towards home while climbing to
+     `rthAltitudeM` (30 m) above the arming altitude (or stay higher if already above). Within
+     10 m of home the climb is skipped.
+  2. *Return:* fly home at `rthSpeedMs` (8 m/s), slowing down over the last few metres.
+  3. *Land:* within 1.5 m of home, descend at the landing speed, hold the position over home,
+     and disarm 1 s after touching down.
+
+  Turning the switch off gives control back to the selected mode. Without a fix or a home the
+  switch is ignored (HUD warning).
 
 ### Arming and failsafe
 
-- **Pre-arm checks:** throttle low, tilt under 25°, battery not critical, not crashed, RC link
-  present, and the arm switch cycled since start-up.
-- **Failsafe:** 1 s after the RC link is lost the craft lands at 1.5 m/s.
+- **Pre-arm checks:**
+  - throttle low (at or below centre in the hold modes);
+  - tilt under 25°;
+  - battery not critical, not crashed;
+  - RC link present, the arm switch cycled since start-up and the RTH switch off;
+  - a GPS fix when Position hold is selected.
+- **Failsafe:** 1 s after the RC link is lost the craft returns home with RTH if it has a
+  GPS fix and a home; otherwise it lands where it is at 1.5 m/s. When the link comes back, the
+  pilot has control again.
 
 ## 8. Contact and crashes
 
@@ -230,6 +256,7 @@ The checks run in `ctest`. The most relevant tests:
 | Battery in the cold (NFR-REAL-11) | `physics_test.cpp`: delivered capacity and mid-discharge voltage vs. temperature |
 | Rain (FR-WX-06) | `flight_test.cpp`: water film mass, drop momentum |
 | Controller | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Angle-mode limits, Acro step response |
+| Position hold and RTH (FR-PHY-13, FR-WIND-06) | `flight_test.cpp`: hold within 2 m (estimate) up to each profile's wind limit and blown away 3 levels above it, stick speed and braking, RTH climb → return → land within the GPS error of home, failsafe RTH, GPS pre-arm checks |
 
 ### Acro step response
 

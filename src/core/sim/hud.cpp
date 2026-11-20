@@ -238,6 +238,10 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
     if (aerial) {
         h.throttle.text = std::format("THR {:.0f}%", 100.0 * t.throttle);
         h.mode.text = std::string(physics::flightModeName(t.mode));
+        if (t.rthStage) {
+            h.mode.text += " " + std::string(physics::rthStageName(*t.rthStage));
+            h.mode.level = HudLevel::Caution;
+        }
     } else {
         // Ground: the drive command (the full ground HUD is FR-GFX-20). Parked, the holding
         // brake is always on: only a brake applied while armed is shown.
@@ -247,7 +251,8 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
         h.mode.text = std::string(physics::driveModeName(t.ground.mode));
     }
     if (t.failsafe) {
-        h.mode.text = "FAILSAFE";
+        h.mode.text = t.rthStage ? "FAILSAFE RTH " + std::string(physics::rthStageName(*t.rthStage))
+                                 : "FAILSAFE";
         h.mode.level = HudLevel::Warning;
     }
     if (t.crashed) {
@@ -330,8 +335,15 @@ HudModel buildHud(const WorldSnapshot& s, const geo::LocalFrame& frame, const Hu
                               HudLevel::Warning});
     }
     if (t.failsafe) {
+        h.warnings.push_back({!aerial      ? "RC LINK LOST — STOPPED"
+                              : t.rthStage ? "RC LINK LOST — RETURNING HOME"
+                                           : "RC LINK LOST — LANDING",
+                              HudLevel::Warning});
+    }
+    if (aerial && t.armed && t.gpsModeUnavailable) {
         h.warnings.push_back(
-            {aerial ? "RC LINK LOST — LANDING" : "RC LINK LOST — STOPPED", HudLevel::Warning});
+            {s.controls.returnToHome ? "NO GPS — RTH UNAVAILABLE" : "NO GPS — ALTITUDE HOLD ONLY",
+             HudLevel::Caution});
     }
     if (!aerial) {
         buildGroundHud(s, o, h);

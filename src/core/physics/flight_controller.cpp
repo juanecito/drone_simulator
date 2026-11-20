@@ -17,6 +17,27 @@ constexpr double kLowThrottle = 0.05;
 constexpr double kMaxArmTiltRad = 0.4363323129985824;  // 25°
 constexpr double kAltHoldDeadband = 0.1;
 constexpr double kLandedDisarmS = 1.0;
+constexpr double kStickDeadband = 0.05;                // Position hold: centred sticks.
+constexpr double kBrakeDoneMs = 0.3;                   // Braking ends below this speed.
+constexpr double kRthClimbToleranceM = 1.0;            // Climb done this close to the height.
+constexpr double kRthYawGain = 2.0;                    // Turn rate per radian of error, 1/s.
+constexpr double kRthMaxYawRate = 1.5707963267948966;  // 90°/s.
+constexpr double kRthTurnRadiusM = 5.0;                // Closer than this: keep the heading.
+
+// A mode in which the throttle stick commands the climb rate.
+bool holdsAltitude(FlightMode mode) noexcept {
+    return mode == FlightMode::AltitudeHold || mode == FlightMode::PositionHold ||
+           mode == FlightMode::ReturnToHome;
+}
+
+bool usesGps(FlightMode mode) noexcept {
+    return mode == FlightMode::PositionHold || mode == FlightMode::ReturnToHome;
+}
+
+Vec3 horizontal(const Vec3& v) noexcept { return {v.x, 0.0, v.z}; }
+
+// Bearing (clockwise from north) of the world vector @p d.
+double bearing(const Vec3& d) noexcept { return std::atan2(d.x, -d.z); }
 
 double applyDeadband(double x, double band) noexcept {
     if (std::abs(x) <= band) {
@@ -32,6 +53,17 @@ std::string_view flightModeName(FlightMode mode) noexcept {
         case FlightMode::Acro: return "Acro";
         case FlightMode::Angle: return "Angle";
         case FlightMode::AltitudeHold: return "Alt hold";
+        case FlightMode::PositionHold: return "Pos hold";
+        case FlightMode::ReturnToHome: return "RTH";
+    }
+    return "?";
+}
+
+std::string_view rthStageName(RthStage stage) noexcept {
+    switch (stage) {
+        case RthStage::Climb: return "climb";
+        case RthStage::Return: return "return";
+        case RthStage::Descend: return "land";
     }
     return "?";
 }
@@ -48,6 +80,8 @@ std::string_view armBlockText(ArmBlock block) noexcept {
         case ArmBlock::ThrottleNotCentred: return "Throttle not in neutral";
         case ArmBlock::RolledOver: return "Rolled over — reset the vehicle";
         case ArmBlock::InWater: return "In the water — reset the vehicle";
+        case ArmBlock::NoGpsFix: return "Position hold needs a GPS fix";
+        case ArmBlock::RthSwitchOn: return "Turn the RTH switch off first";
     }
     return "";
 }
@@ -157,6 +191,24 @@ void FlightController::reset() {
     collective_ = 0.0;
     armedTime_ = 0.0;
     lastSaturated_ = false;
+    armAltitude_ = 0.0;
+    home_.reset();
+    holdPhase_ = HoldPhase::Braking;
+    holdTarget_ = Vec3(0.0);
+    velocityIntegrator_ = Vec3(0.0);
+    rthStage_ = RthStage::Climb;
+    rthAltitude_ = 0.0;
+    gpsModeUnavailable_ = false;
+}
+
+std::optional<RthStage> FlightController::rthStage() const noexcept {
+    return mode_ == FlightMode::ReturnToHome && armed_ ? std::optional(rthStage_) : std::nullopt;
+}
+
+std::optional<Vec3> FlightController::holdTarget() const noexcept {
+    return mode_ == FlightMode::PositionHold && holdPhase_ == HoldPhase::Holding
+               ? std::optional(holdTarget_)
+               : std::nullopt;
 }
 
 void FlightController::forceDisarm() noexcept {
@@ -176,11 +228,18 @@ ArmBlock FlightController::preArmCheck(const PilotCommand& command, const Estima
     if (!switchWasLow_) {
         return ArmBlock::SwitchNotCycled;
     }
-    // In altitude hold the centred stick means "hold": arming needs it at or below centre.
+    if (command.returnToHome) {
+        return ArmBlock::RthSwitchOn;
+    }
+    // In altitude and position hold the centred stick means "hold": arming needs it at or
+    // below centre.
     const double throttleLimit =
-        command.mode == FlightMode::AltitudeHold ? 0.5 + kAltHoldDeadband / 2.0 : kLowThrottle;
+        holdsAltitude(command.mode) ? 0.5 + kAltHoldDeadband / 2.0 : kLowThrottle;
     if (command.throttle > throttleLimit) {
         return ArmBlock::ThrottleNotLow;
+    }
+    if (usesGps(command.mode) && !state.positionValid) {
+        return ArmBlock::NoGpsFix;
     }
     if (std::abs(state.euler.roll) > kMaxArmTiltRad ||
         std::abs(state.euler.pitch) > kMaxArmTiltRad) {
@@ -196,13 +255,90 @@ void FlightController::enterMode(FlightMode mode, const EstimatedState& state) {
     if (mode == mode_) {
         return;
     }
-    if (mode == FlightMode::AltitudeHold) {
+    if (holdsAltitude(mode) && !holdsAltitude(mode_)) {
         // Bumpless: hold the current altitude with the current collective as hover estimate.
         altitudeTarget_ = state.altitudeM;
         const double tilt = std::max(0.3, std::cos(state.euler.roll) * std::cos(state.euler.pitch));
         climbIntegrator_ = collective_ * std::sqrt(tilt);
     }
+    if (usesGps(mode) && !usesGps(mode_)) {
+        velocityIntegrator_ = Vec3(0.0);
+    }
+    if (mode == FlightMode::PositionHold) {
+        holdPhase_ = HoldPhase::Braking;
+    }
+    if (mode == FlightMode::ReturnToHome && home_) {
+        const double distance = glm::length(horizontal(*home_ - state.position));
+        rthStage_ = distance > kRthNoClimbRadiusM ? RthStage::Climb : RthStage::Return;
+        rthAltitude_ =
+            distance > kRthNoClimbRadiusM
+                ? std::max(state.altitudeM, armAltitude_ + profile_.controller.rthAltitudeM)
+                : state.altitudeM;
+        holdTarget_ = horizontal(state.position);
+    }
     mode_ = mode;
+}
+
+std::pair<double, double> FlightController::velocityControl(const Vec3& velocity,
+                                                            const EstimatedState& state,
+                                                            double dt) {
+    const ControllerParams& cp = profile_.controller;
+    const double maxAccel = kGravity * std::tan(common::degToRad(cp.maxAngleDeg));
+    const Vec3 error = horizontal(velocity - state.velocity);
+    const Vec3 integrator = velocityIntegrator_ + cp.velocityI * error * dt;
+    Vec3 accel = cp.velocityP * error + integrator;
+    const double norm = glm::length(accel);
+    if (norm > maxAccel) {
+        accel *= maxAccel / norm;  // Saturated: the integrator does not wind up.
+    } else {
+        velocityIntegrator_ = integrator;
+        const double iNorm = glm::length(velocityIntegrator_);
+        if (iNorm > maxAccel) {
+            velocityIntegrator_ *= maxAccel / iNorm;
+        }
+    }
+    // Into the heading frame: forward needs nose down, right needs right side down.
+    const double north = -accel.z;
+    const double east = accel.x;
+    const double psi = state.euler.yaw;
+    const double forward = north * std::cos(psi) + east * std::sin(psi);
+    const double right = -north * std::sin(psi) + east * std::cos(psi);
+    const double pitch = -std::atan(forward / kGravity);
+    const double roll = std::atan(right * std::cos(pitch) / kGravity);
+    return {roll, pitch};
+}
+
+Vec3 FlightController::positionHold(const PilotCommand& cmd, const EstimatedState& state) {
+    const ControllerParams& cp = profile_.controller;
+    const double forward = applyDeadband(std::clamp(cmd.pitch, -1.0, 1.0), kStickDeadband);
+    const double right = applyDeadband(std::clamp(cmd.roll, -1.0, 1.0), kStickDeadband);
+    const Vec3 position = horizontal(state.position);
+    if (forward != 0.0 || right != 0.0) {
+        // Sticks: horizontal speed in the heading frame.
+        holdPhase_ = HoldPhase::Moving;
+        const double psi = state.euler.yaw;
+        const double vf = forward * cp.maxHorizontalSpeedMs;
+        const double vr = right * cp.maxHorizontalSpeedMs;
+        const double north = vf * std::cos(psi) - vr * std::sin(psi);
+        const double east = vf * std::sin(psi) + vr * std::cos(psi);
+        return {east, 0.0, -north};
+    }
+    if (holdPhase_ == HoldPhase::Moving) {
+        holdPhase_ = HoldPhase::Braking;
+    }
+    if (holdPhase_ == HoldPhase::Braking) {
+        if (glm::length(horizontal(state.velocity)) > kBrakeDoneMs) {
+            return Vec3(0.0);
+        }
+        holdTarget_ = position;
+        holdPhase_ = HoldPhase::Holding;
+    }
+    Vec3 v = cp.positionGain * (holdTarget_ - position);
+    const double speed = glm::length(v);
+    if (speed > cp.maxHorizontalSpeedMs) {
+        v *= cp.maxHorizontalSpeedMs / speed;
+    }
+    return v;
 }
 
 ControllerOutput FlightController::update(const PilotCommand& input, const EstimatedState& state,
@@ -221,6 +357,7 @@ ControllerOutput FlightController::update(const PilotCommand& input, const Estim
         cmd = lastValid_;
         cmd.roll = cmd.pitch = cmd.yaw = 0.0;
         cmd.mode = FlightMode::Angle;
+        cmd.returnToHome = false;
         cmd.linkValid = false;
         if (armed_ && linkLostTime_ >= cp.failsafeDelayS) {
             failsafeActive_ = true;
@@ -239,6 +376,10 @@ ControllerOutput FlightController::update(const PilotCommand& input, const Estim
                 armedTime_ = 0.0;
                 altitudeTarget_ = state.altitudeM;
                 climbIntegrator_ = 0.0;
+                armAltitude_ = state.altitudeM;
+                home_.reset();
+                velocityIntegrator_ = Vec3(0.0);
+                holdPhase_ = HoldPhase::Braking;
                 for (Pid& pid : pid_) {
                     pid.reset();
                 }
@@ -256,36 +397,108 @@ ControllerOutput FlightController::update(const PilotCommand& input, const Estim
         collective_ = 0.0;
         rateSetpoint_ = Vec3(0.0);
         mode_ = cmd.mode;
+        gpsModeUnavailable_ = false;
         return {};
     }
     armedTime_ += dt;
+    if (!home_ && state.positionValid) {
+        home_ = horizontal(state.position);  // At arming, or at the first fix after it.
+    }
 
-    // --- Failsafe landing: level, descend, disarm on the ground. ---
+    // --- Mode: the RTH switch or the failsafe take over; GPS modes need a fix. ---
+    const bool gps = state.positionValid && home_.has_value();
+    FlightMode wanted = cmd.mode;
+    gpsModeUnavailable_ = false;
+    if (failsafeActive_ || cmd.returnToHome) {
+        if (gps) {
+            wanted = FlightMode::ReturnToHome;
+        } else if (cmd.returnToHome && !failsafeActive_) {
+            gpsModeUnavailable_ = true;  // The switch is ignored.
+        }
+    }
+    if (wanted == FlightMode::PositionHold && !state.positionValid) {
+        wanted = FlightMode::AltitudeHold;
+        gpsModeUnavailable_ = true;
+    }
+    if (wanted == FlightMode::ReturnToHome && !gps) {
+        wanted = FlightMode::AltitudeHold;
+    }
+
+    // --- Failsafe landing without GPS, and the end of a return: descend, disarm on the
+    // ground. ---
     double climbSetpoint = 0.0;
     bool verticalSpeedControl = false;
-    if (failsafeActive_) {
+    if (failsafeActive_ && wanted != FlightMode::ReturnToHome) {
         enterMode(FlightMode::AltitudeHold, state);
         verticalSpeedControl = true;
         climbSetpoint = -cp.failsafeDescentMs;
-        landedTime_ = conditions.landed ? landedTime_ + dt : 0.0;
-        if (landedTime_ >= kLandedDisarmS) {
-            forceDisarm();
-            return {};
-        }
     } else {
-        enterMode(cmd.mode, state);
+        enterMode(wanted, state);
+    }
+
+    // --- Horizontal control of the GPS modes. ---
+    std::optional<std::pair<double, double>> gpsTilt;
+    double yawRate = common::degToRad(rateFromStick(cp.rates[2], cmd.yaw));
+    if (mode_ == FlightMode::PositionHold) {
+        gpsTilt = velocityControl(positionHold(cmd, state), state, dt);
+    } else if (mode_ == FlightMode::ReturnToHome) {
+        const Vec3 position = horizontal(state.position);
+        const Vec3 toHome = *home_ - position;
+        const double distance = glm::length(toHome);
+        Vec3 velocity(0.0);
+        switch (rthStage_) {
+            case RthStage::Climb:
+                velocity = cp.positionGain * (holdTarget_ - position);
+                if (state.altitudeM >= rthAltitude_ - kRthClimbToleranceM) {
+                    rthStage_ = RthStage::Return;
+                }
+                break;
+            case RthStage::Return:
+                if (distance > 1e-6) {
+                    velocity =
+                        toHome / distance * std::min(cp.rthSpeedMs, cp.positionGain * distance);
+                }
+                if (distance < kRthArrivalRadiusM) {
+                    rthStage_ = RthStage::Descend;
+                }
+                break;
+            case RthStage::Descend: velocity = cp.positionGain * toHome; break;
+        }
+        gpsTilt = velocityControl(velocity, state, dt);
+        verticalSpeedControl = true;
+        climbSetpoint = rthStage_ == RthStage::Descend
+                            ? -cp.failsafeDescentMs
+                            : std::clamp(cp.altitudeGain * (rthAltitude_ - state.altitudeM),
+                                         -cp.maxDescentMs, cp.maxClimbMs);
+        if (rthStage_ != RthStage::Descend && distance > kRthTurnRadiusM) {
+            // Nose towards home.
+            const double error = common::wrapRadiansPi(bearing(toHome) - state.euler.yaw);
+            yawRate = std::clamp(kRthYawGain * error, -kRthMaxYawRate, kRthMaxYawRate);
+        } else {
+            yawRate = 0.0;
+        }
+    }
+    const bool landing =
+        verticalSpeedControl && climbSetpoint < 0.0 &&
+        (failsafeActive_ || (mode_ == FlightMode::ReturnToHome && rthStage_ == RthStage::Descend));
+    landedTime_ = landing && conditions.landed ? landedTime_ + dt : 0.0;
+    if (landedTime_ >= kLandedDisarmS) {
+        forceDisarm();
+        landedTime_ = 0.0;
+        return {};
     }
 
     // --- Rate setpoints. ---
     const double maxAngle = common::degToRad(cp.maxAngleDeg);
     Vec3 rates(0.0);
-    const double yawRate = common::degToRad(rateFromStick(cp.rates[2], cmd.yaw));
     if (mode_ == FlightMode::Acro) {
         rates = Vec3(common::degToRad(rateFromStick(cp.rates[0], cmd.roll)),
                      -common::degToRad(rateFromStick(cp.rates[1], cmd.pitch)), yawRate);
     } else {
-        const double rollTarget = std::clamp(cmd.roll, -1.0, 1.0) * maxAngle;
-        const double pitchTarget = -std::clamp(cmd.pitch, -1.0, 1.0) * maxAngle;
+        const double rollTarget =
+            gpsTilt ? gpsTilt->first : std::clamp(cmd.roll, -1.0, 1.0) * maxAngle;
+        const double pitchTarget =
+            gpsTilt ? gpsTilt->second : -std::clamp(cmd.pitch, -1.0, 1.0) * maxAngle;
         const double maxRoll = common::degToRad(cp.rates[0].maxDps);
         const double maxPitch = common::degToRad(cp.rates[1].maxDps);
         rates =
@@ -297,7 +510,7 @@ ControllerOutput FlightController::update(const PilotCommand& input, const Estim
 
     // --- Collective. ---
     const double idle = cp.idleThrottle;
-    if (mode_ == FlightMode::AltitudeHold) {
+    if (holdsAltitude(mode_)) {
         if (!verticalSpeedControl) {
             const double stick = applyDeadband(2.0 * cmd.throttle - 1.0, kAltHoldDeadband);
             climbSetpoint = stick >= 0.0 ? stick * cp.maxClimbMs : stick * cp.maxDescentMs;

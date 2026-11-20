@@ -60,7 +60,8 @@ rules, prints its errors and exits (0 = valid); see [docs/MISSIONS.md](docs/MISS
 | `W` / `S` | Throttle up / down (stays where you leave it; centres in altitude hold) |
 | `A` / `D` | Yaw left / right |
 | Arrow keys | Pitch forward / back, roll left / right |
-| `1` `2` `3` `4` | Acro, Angle, Altitude hold, Position hold (= altitude hold until M7) |
+| `1` `2` `3` `4` | Acro, Angle, Altitude hold, Position hold (GPS; the fix takes 20–30 s after start-up) |
+| `H` | Return to home switch: climb, fly back, land (GPS) |
 | `L` | Navigation lights |
 | `C` | Next camera: FPV → chase (with top and behind insets) → line of sight → free |
 | `P` | Pause / resume |

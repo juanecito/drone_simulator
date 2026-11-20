@@ -236,7 +236,7 @@ void SimulationPanel::refresh() {
                         "C camera, P pause, R reset.</small>")
                    : tr("<small>Keyboard (vehicle cameras): W/S throttle, A/D yaw, arrows pitch "
                         "and roll, Space or Enter arm, 1–4 Acro/Angle/Alt hold/Pos hold, "
-                        "L lights. C camera, P pause, R reset.</small>"));
+                        "H return to home, L lights. C camera, P pause, R reset.</small>"));
     }
     throttle_->setValue(percent(ground ? c.drive : c.throttle));
     roll_->setValue(percent(ground ? c.steering : c.roll));

@@ -144,17 +144,19 @@ TEST(World, MapsControlsToPilotCommands) {
     EXPECT_EQ(toFlightMode(0), physics::FlightMode::Acro);
     EXPECT_EQ(toFlightMode(1), physics::FlightMode::Angle);
     EXPECT_EQ(toFlightMode(2), physics::FlightMode::AltitudeHold);
-    EXPECT_EQ(toFlightMode(3), physics::FlightMode::AltitudeHold);
+    EXPECT_EQ(toFlightMode(3), physics::FlightMode::PositionHold);
     input::ControlInputs c;
     c.throttle = 0.3;
     c.roll = -0.5;
     c.arm = true;
     c.linkValid = false;
+    c.returnToHome = true;
     const physics::PilotCommand p = toPilotCommand(c);
     EXPECT_DOUBLE_EQ(p.throttle, 0.3);
     EXPECT_DOUBLE_EQ(p.roll, -0.5);
     EXPECT_TRUE(p.arm);
     EXPECT_FALSE(p.linkValid);
+    EXPECT_TRUE(p.returnToHome);
 }
 
 TEST(World, StartsOnTheGroundAndPublishesArmingEvents) {
@@ -532,6 +534,38 @@ TEST(Hud, GroundDroneReadOutsAndWarnings) {
     // Aerial drones have no ground block.
     s.telemetry.type = physics::VehicleType::Aerial;
     EXPECT_FALSE(buildHud(s, frame, {}).ground.has_value());
+}
+
+TEST(Hud, ReturnToHomeAndGpsModeWarnings) {
+    WorldSnapshot s;
+    s.hasVehicle = true;
+    s.telemetry.armed = true;
+    s.telemetry.mode = physics::FlightMode::ReturnToHome;
+    s.telemetry.rthStage = physics::RthStage::Climb;
+    const geo::LocalFrame frame({40.4, -3.7, 650.0});
+    HudModel h = buildHud(s, frame, {});
+    EXPECT_EQ(h.mode.text, "RTH climb");
+    EXPECT_EQ(h.mode.level, HudLevel::Caution);
+
+    s.telemetry.failsafe = true;
+    s.telemetry.rthStage = physics::RthStage::Return;
+    h = buildHud(s, frame, {});
+    EXPECT_EQ(h.mode.text, "FAILSAFE RTH return");
+    const auto has = [&](const std::string& text) {
+        return std::ranges::any_of(h.warnings, [&](const HudItem& w) { return w.text == text; });
+    };
+    EXPECT_TRUE(has("RC LINK LOST — RETURNING HOME"));
+
+    s.telemetry.failsafe = false;
+    s.telemetry.rthStage.reset();
+    s.telemetry.mode = physics::FlightMode::AltitudeHold;
+    s.telemetry.gpsModeUnavailable = true;
+    h = buildHud(s, frame, {});
+    EXPECT_EQ(h.mode.text, "Alt hold");
+    EXPECT_TRUE(has("NO GPS — ALTITUDE HOLD ONLY"));
+    s.controls.returnToHome = true;
+    h = buildHud(s, frame, {});
+    EXPECT_TRUE(has("NO GPS — RTH UNAVAILABLE"));
 }
 
 TEST(Hud, WeatherItemInMetarStyle) {

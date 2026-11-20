@@ -1596,8 +1596,8 @@ so Markdown pages appear in the generated site.
 - **Clock:** before the first Start the scene's clock (Environment tab) drives the sky and the
   vehicle's UTC; from then on the simulation clock drives the sky (time scale included) and a
   time edited in the Environment tab moves the simulation clock.
-- **Position hold and return to home** (flight mode 4 and the RTH switch) arrive in M7; mode 4
-  currently behaves as altitude hold. **Telemetry recording and replays** arrive in M7; M3
+- **Position hold and return to home** (flight mode 4 and the RTH switch) arrived in M7 step 5
+  (see the M7 notes). **Telemetry recording and replays** arrive in M7; M3
   writes one `sessions` row per flight (flights shorter than 1 s armed are not recorded).
 - **Estimator without GPS:** the attitude estimate uses the accelerometer only within ±5 % of
   1 g (plus GPS-derived acceleration once there is a fix), so long accelerating manoeuvres
@@ -2051,6 +2051,29 @@ so Markdown pages appear in the generated site.
     the vehicle (60 m inside a cloud) and the temperature, e.g. *WX BKN 900 m -RA VIS 6 km
     12 °C*. Amber under 5 km or with precipitation, red under 1 km or in a thunderstorm.
     Heights in feet, visibility in miles and temperature in °F with imperial units.
+- **Step 5 — Position hold and return to home (done, FR-PHY-13 M/S, FR-PHY-14 failsafe RTH,
+  FR-WIND-06):** details in `docs/FLIGHT_MODEL.md` §7.
+  - *Position hold:* altitude hold plus a GPS position loop on the estimate. The sticks set a
+    horizontal speed (8 m/s at full stick). Released, the drone brakes, then holds the point
+    where it stopped, using a velocity PI whose integrator learns the wind. The acceleration
+    is limited by the Angle-mode tilt limit, so the drone holds up to its wind capability and
+    is blown away beyond it. Without a GPS fix it flies as altitude hold, with a HUD warning.
+  - *Return to home:* home is set at arming or at the first fix after it. Stages:
+    climb to 30 m above the arming altitude (skipped within 10 m of home) while turning
+    towards home → fly back at 8 m/s → land over home and disarm. The switch (input mapping
+    or key `H`) works from any mode; switching it off gives control back. The HUD shows
+    *RTH climb/return/land*.
+  - *Failsafe:* RC loss returns home with RTH when there is a fix and a home, else lands in
+    place as before.
+  - *Arming:* the RTH switch must be off, and Position hold needs a GPS fix.
+  - *Parameters:* six new controller parameters per profile, editable in the Vehicle tab:
+    `maxHorizontalSpeedMs`, `positionGain`, `velocityP`, `velocityI`, `rthAltitudeM`,
+    `rthSpeedMs`.
+  - *Validation:* the controller holds its estimated position within 2 m in winds up to each
+    profile's limit (within 1 m in calm air). The true position follows the GPS error: RMS
+    1.5 m for the camera and survey drones, 2.3 m for the racer. RTH lands within about 2 m
+    of home. No terrain following: the return height is barometric above the take-off
+    point, so the pilot must keep it above obstacles on the way.
 
 ---
 

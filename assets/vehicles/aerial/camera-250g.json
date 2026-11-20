@@ -115,7 +115,13 @@
     "idleThrottle": 0.05,
     "airmode": false,
     "failsafeDescentMs": 1.5,
-    "failsafeDelayS": 1.0
+    "failsafeDelayS": 1.0,
+    "maxHorizontalSpeedMs": 8.0,
+    "positionGain": 1.0,
+    "velocityP": 2.0,
+    "velocityI": 0.5,
+    "rthAltitudeM": 30,
+    "rthSpeedMs": 8.0
   },
   "camera": {
     "uptiltDeg": 0,

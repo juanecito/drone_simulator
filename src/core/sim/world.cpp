@@ -41,7 +41,8 @@ physics::FlightMode toFlightMode(int index) noexcept {
     switch (index) {
         case 0: return physics::FlightMode::Acro;
         case 1: return physics::FlightMode::Angle;
-        default: return physics::FlightMode::AltitudeHold;  // Position hold arrives in M7.
+        case 2: return physics::FlightMode::AltitudeHold;
+        default: return physics::FlightMode::PositionHold;
     }
 }
 
@@ -58,6 +59,7 @@ physics::PilotCommand toPilotCommand(const input::ControlInputs& c) noexcept {
     p.yaw = std::clamp(c.yaw, -1.0, 1.0);
     p.arm = c.arm;
     p.mode = toFlightMode(c.flightMode);
+    p.returnToHome = c.returnToHome;
     p.drive = std::clamp(c.drive, -1.0, 1.0);
     p.steering = std::clamp(c.steering, -1.0, 1.0);
     p.brake = c.brake;

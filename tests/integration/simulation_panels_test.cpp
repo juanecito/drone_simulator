@@ -242,6 +242,14 @@ TEST_F(SimulationPanelsTest, CamerasDrawItemsAndHud) {
     run(0.1);
     EXPECT_EQ(sim_->hud().lights.text, "LIGHTS ON");
 
+    // H toggles the RTH switch (M7 step 5).
+    sim_->keyboardAction(input::KeyboardAction::ToggleReturnToHome);
+    run(0.1);
+    EXPECT_TRUE(sim_->snapshot().controls.returnToHome);
+    sim_->keyboardAction(input::KeyboardAction::ToggleReturnToHome);
+    run(0.1);
+    EXPECT_FALSE(sim_->snapshot().controls.returnToHome);
+
     sim_->setCameraMode(graphics::CameraMode::Fpv);
     run(0.01);
     EXPECT_TRUE(sim_->drawItems().empty());  // Not drawn from its own camera.

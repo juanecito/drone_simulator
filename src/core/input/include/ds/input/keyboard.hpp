@@ -59,6 +59,8 @@ public:
     void setFlightMode(int mode) noexcept;
     /// @brief Toggles the lights.
     void toggleLights() noexcept { state_.lights = !state_.lights; }
+    /// @brief Toggles the RTH switch (key H).
+    void toggleReturnToHome() noexcept { state_.returnToHome = !state_.returnToHome; }
     /// @brief Throttle to zero, sticks centred, disarmed (vehicle reset).
     void reset() noexcept;
     /// @brief Current controls.

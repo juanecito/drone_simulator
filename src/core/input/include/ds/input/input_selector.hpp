@@ -22,7 +22,17 @@
 namespace ds::input {
 
 /// @brief One-shot keyboard actions.
-enum class KeyboardAction { ToggleArm, Disarm, Mode1, Mode2, Mode3, Mode4, ToggleLights, Reset };
+enum class KeyboardAction {
+    ToggleArm,
+    Disarm,
+    Mode1,
+    Mode2,
+    Mode3,
+    Mode4,
+    ToggleLights,
+    ToggleReturnToHome,
+    Reset
+};
 
 /// @brief Input source selection and polling.
 class InputSelector {

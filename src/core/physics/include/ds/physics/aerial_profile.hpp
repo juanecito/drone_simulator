@@ -95,8 +95,14 @@ struct ControllerParams {
     double climbI = 0.08;              ///< Altitude hold: throttle per m of climb error.
     double idleThrottle = 0.05;        ///< Motor command when armed at zero throttle.
     bool airmode = true;               ///< Keep full attitude authority at zero throttle.
-    double failsafeDescentMs = 1.5;    ///< Landing speed after RC loss.
-    double failsafeDelayS = 1.0;       ///< RC loss → landing.
+    double failsafeDescentMs = 1.5;    ///< Landing speed (RC-loss failsafe and RTH).
+    double failsafeDelayS = 1.0;       ///< RC loss → failsafe (RTH with GPS, else landing).
+    double maxHorizontalSpeedMs = 8.0;  ///< Position hold: horizontal speed at full stick.
+    double positionGain = 1.0;          ///< Position hold: speed per metre of error, 1/s.
+    double velocityP = 2.0;             ///< Position hold: acceleration per m/s of error, 1/s.
+    double velocityI = 0.5;             ///< Position hold: integral (wind), 1/s².
+    double rthAltitudeM = 30.0;         ///< RTH: lowest return height above home.
+    double rthSpeedMs = 8.0;            ///< RTH: horizontal return speed.
 };
 
 /// @brief FPV camera mounted on the drone (FR-GFX-05).

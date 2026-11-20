@@ -310,6 +310,12 @@ bool Viewport::commandKey(SimulationController& sim, int key) {
         case Qt::Key_3: sim.keyboardAction(KeyboardAction::Mode3); return true;
         case Qt::Key_4: sim.keyboardAction(KeyboardAction::Mode4); return true;
         case Qt::Key_L: sim.keyboardAction(KeyboardAction::ToggleLights); return true;
+        case Qt::Key_H:
+            if (sim.vehicleType() == physics::VehicleType::Ground) {
+                return false;
+            }
+            sim.keyboardAction(KeyboardAction::ToggleReturnToHome);
+            return true;
         default: return false;
     }
 }

@@ -623,6 +623,192 @@ TEST(FlightController, FailsafeLandsThenDisarms) {
     EXPECT_FALSE(h.fc.armed());
 }
 
+// --- Position hold and return to home (M7 step 5) ---------------------------------------------
+
+/// Takes off in altitude hold with a GPS fix after 1 s, then switches to position hold.
+sim::World gpsWorld(const char* key, int windLevel = 0) {
+    AerialProfile p = loadProfile(key);
+    p.sensors.gpsAcquisitionS = 1.0;
+    return makeWorld(p, 7, windLevel);
+}
+
+TEST(PositionHold, HoldsInWindUpToTheProfileLimitAndDriftsBeyond) {
+    // FR-WIND-05/06 and the "Wind levels" validation: the controller holds its estimated
+    // position within 2 m up to the wind the profile can resist (within 1 m in calm air); the
+    // true position wanders only with the GPS error (about 1–1.5 m 1σ, slowly varying).
+    const auto& table = weather::WindLevelTable::builtIn();
+    for (const char* key : kProfiles) {
+        const AerialProfile p = loadProfile(key);
+        const int maxLevel = table.highestLevelWithGustsAtMost(computeAerialStats(p).maxWindMs);
+        for (const int level : {0, maxLevel}) {
+            sim::World world = gpsWorld(key, level);
+            input::ControlInputs c = takeOff(world);
+            c.flightMode = 3;
+            run(world, c, 10.0);
+            ASSERT_EQ(world.vehicle().telemetry().mode, FlightMode::PositionHold) << key;
+            const Vec3 start = world.vehicle().bodyState().position;
+            const Vec3 estimateStart = world.vehicle().telemetry().estimate.position;
+            double estimateError = 0.0;
+            double sumSq = 0.0;
+            const int n = 60 * 500;
+            for (int i = 0; i < n; ++i) {
+                world.tick(c, kDt);
+                const Vec3 d = world.vehicle().bodyState().position - start;
+                const Vec3 e = world.vehicle().telemetry().estimate.position - estimateStart;
+                estimateError = std::max(estimateError, std::hypot(e.x, e.z));
+                sumSq += d.x * d.x + d.z * d.z;
+            }
+            EXPECT_LT(estimateError, level == 0 ? 1.0 : 2.0) << key << " level " << level;
+            EXPECT_LT(std::sqrt(sumSq / n), 2.0 * p.sensors.gpsHorizontalNoiseM)
+                << key << " level " << level;
+            EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+        }
+        // Three levels above the limit the gusts win: the drone is blown away.
+        sim::World world = gpsWorld(key, std::min(maxLevel + 3, 10));
+        input::ControlInputs c = takeOff(world);
+        c.flightMode = 3;
+        run(world, c, 10.0);
+        const Vec3 start = world.vehicle().bodyState().position;
+        run(world, c, 30.0);
+        const Vec3 d = world.vehicle().bodyState().position - start;
+        if (maxLevel + 3 <= 10) {
+            EXPECT_GT(std::hypot(d.x, d.z), 5.0) << key;
+        }
+    }
+}
+
+TEST(PositionHold, SticksSetTheSpeedAndReleasingThemStops) {
+    for (const char* key : kProfiles) {
+        sim::World world = gpsWorld(key);
+        const ControllerParams& cp = loadProfile(key).controller;
+        input::ControlInputs c = takeOff(world);
+        c.flightMode = 3;
+        c.pitch = 1.0;
+        run(world, c, 6.0);
+        Vec3 v = world.vehicle().bodyState().velocity;
+        EXPECT_NEAR(std::hypot(v.x, v.z), cp.maxHorizontalSpeedMs, 0.6) << key;
+        c.pitch = 0.0;
+        const Vec3 released = world.vehicle().bodyState().position;
+        run(world, c, 6.0);
+        v = world.vehicle().bodyState().velocity;
+        const Vec3 d = world.vehicle().bodyState().position - released;
+        EXPECT_LT(std::hypot(v.x, v.z), 0.5) << key;
+        EXPECT_LT(std::hypot(d.x, d.z), 10.0) << key;  // About 5–8 m from 8 m/s.
+        const Vec3 stopped = world.vehicle().bodyState().position;
+        run(world, c, 5.0);
+        const Vec3 drift = world.vehicle().bodyState().position - stopped;
+        EXPECT_LT(std::hypot(drift.x, drift.z), 1.5) << key;
+    }
+}
+
+TEST(ReturnToHome, ClimbsReturnsAndLandsAtHome) {
+    for (const char* key : kProfiles) {
+        sim::World world = gpsWorld(key, 3);
+        const ControllerParams& cp = loadProfile(key).controller;
+        const Vec3 home = world.vehicle().bodyState().position;
+        input::ControlInputs c = takeOff(world);
+        c.flightMode = 3;
+        c.pitch = 1.0;
+        c.roll = 0.5;
+        run(world, c, 8.0);
+        c.pitch = c.roll = 0.0;
+        c.flightMode = 1;  // RTH works from any mode.
+        c.returnToHome = true;
+        double maxY = 0.0;
+        double t = 0.0;
+        std::vector<RthStage> stages;
+        while (world.vehicle().armed() && t < 120.0) {
+            world.tick(c, kDt);
+            t += kDt;
+            maxY = std::max(maxY, world.vehicle().bodyState().position.y);
+            const VehicleTelemetry tel = world.vehicle().telemetry();
+            if (tel.rthStage && (stages.empty() || stages.back() != *tel.rthStage)) {
+                stages.push_back(*tel.rthStage);
+            }
+        }
+        EXPECT_EQ(stages, (std::vector{RthStage::Climb, RthStage::Return, RthStage::Descend}))
+            << key;
+        EXPECT_FALSE(world.vehicle().armed()) << key;  // Landed and disarmed.
+        EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+        EXPECT_GT(maxY, home.y + cp.rthAltitudeM - 2.0) << key;
+        const Vec3 d = world.vehicle().bodyState().position - home;
+        EXPECT_LT(std::hypot(d.x, d.z), 3.0 * loadProfile(key).sensors.gpsHorizontalNoiseM) << key;
+        // Disarmed with the switch on: it must be turned off before arming again.
+        c.arm = false;
+        world.tick(c, kDt);
+        c.arm = true;
+        c.flightMode = 2;
+        c.throttle = 0.5;
+        world.tick(c, kDt);
+        EXPECT_FALSE(world.vehicle().armed()) << key;
+        EXPECT_EQ(world.vehicle().telemetry().armBlock, ArmBlock::RthSwitchOn) << key;
+    }
+}
+
+TEST(ReturnToHome, FailsafeReturnsHomeWithGps) {
+    sim::World world = gpsWorld("camera-250g");
+    const Vec3 home = world.vehicle().bodyState().position;
+    input::ControlInputs c = takeOff(world);
+    c.flightMode = 3;
+    c.pitch = 1.0;
+    run(world, c, 6.0);
+    c.pitch = 0.0;
+    c.linkValid = false;
+    run(world, c, 2.0);
+    EXPECT_TRUE(world.vehicle().telemetry().failsafe);
+    EXPECT_EQ(world.vehicle().telemetry().mode, FlightMode::ReturnToHome);
+    run(world, c, 90.0);
+    EXPECT_FALSE(world.vehicle().armed());
+    const Vec3 d = world.vehicle().bodyState().position - home;
+    EXPECT_LT(std::hypot(d.x, d.z), 4.0);
+}
+
+TEST(FlightController, GpsModesNeedAFix) {
+    const AerialProfile p = loadProfile("camera-250g");
+    ControllerHarness h(p);
+    PilotCommand c;
+    c.mode = FlightMode::PositionHold;
+    c.throttle = 0.5;
+    h.tick(c);
+    c.arm = true;
+    h.tick(c);
+    EXPECT_FALSE(h.fc.armed());
+    EXPECT_EQ(h.fc.armBlock(), ArmBlock::NoGpsFix);
+    c.arm = false;
+    c.returnToHome = true;
+    h.tick(c);
+    c.arm = true;
+    c.mode = FlightMode::AltitudeHold;
+    h.tick(c);
+    EXPECT_EQ(h.fc.armBlock(), ArmBlock::RthSwitchOn);
+    c.arm = false;
+    c.returnToHome = false;
+    h.tick(c);
+    c.arm = true;
+    h.tick(c);
+    ASSERT_TRUE(h.fc.armed());
+    EXPECT_FALSE(h.fc.home().has_value());
+    // Position hold without a fix flies as altitude hold; the RTH switch is ignored.
+    c.mode = FlightMode::PositionHold;
+    h.tick(c, 10);
+    EXPECT_EQ(h.fc.mode(), FlightMode::AltitudeHold);
+    EXPECT_TRUE(h.fc.gpsModeUnavailable());
+    c.mode = FlightMode::Angle;
+    c.returnToHome = true;
+    h.tick(c, 10);
+    EXPECT_EQ(h.fc.mode(), FlightMode::Angle);
+    EXPECT_TRUE(h.fc.gpsModeUnavailable());
+    // The first fix sets home; then both work.
+    h.state.positionValid = true;
+    h.state.position = Vec3(40.0, 20.0, -30.0);
+    h.tick(c, 10);
+    ASSERT_TRUE(h.fc.home().has_value());
+    EXPECT_EQ(*h.fc.home(), Vec3(40.0, 0.0, -30.0));
+    EXPECT_EQ(h.fc.mode(), FlightMode::ReturnToHome);
+    EXPECT_EQ(h.fc.rthStage(), RthStage::Descend);  // At home already: lands at once.
+    EXPECT_FALSE(h.fc.gpsModeUnavailable());
+}
+
 TEST(FlightController, AngleModeLimitsTilt) {
     for (const char* key : kProfiles) {
         const AerialProfile p = loadProfile(key);

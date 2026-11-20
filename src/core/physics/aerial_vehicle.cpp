@@ -558,6 +558,8 @@ VehicleTelemetry AerialVehicle::telemetry() const {
     t.onGround = onGround_;
     t.failsafe = controller_.failsafe();
     t.mode = controller_.mode();
+    t.rthStage = controller_.rthStage();
+    t.gpsModeUnavailable = controller_.gpsModeUnavailable();
     t.armBlock = controller_.armBlock();
     t.throttle = throttle_;
     double sum = 0.0;

@@ -40,6 +40,7 @@ ControlInputs InputSelector::poll(double dt) {
             case KeyboardAction::Mode3: keyboard_.setFlightMode(2); break;
             case KeyboardAction::Mode4: keyboard_.setFlightMode(3); break;
             case KeyboardAction::ToggleLights: keyboard_.toggleLights(); break;
+            case KeyboardAction::ToggleReturnToHome: keyboard_.toggleReturnToHome(); break;
             case KeyboardAction::Reset: keyboard_.reset(); break;
         }
     }

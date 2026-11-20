@@ -167,6 +167,8 @@ struct VehicleTelemetry {
     bool onGround = false;                   ///< Landing gear touching the ground.
     bool failsafe = false;                   ///< RC-loss failsafe active.
     FlightMode mode = FlightMode::Angle;     ///< Flight mode.
+    std::optional<RthStage> rthStage;        ///< Stage of a return to home.
+    bool gpsModeUnavailable = false;         ///< Position hold / RTH asked for without GPS.
     ArmBlock armBlock = ArmBlock::None;      ///< Last arming refusal.
     double throttle = 0.0;                   ///< Pilot throttle 0–1.
     std::array<double, 4> motorCommand{};    ///< ESC commands 0–1.

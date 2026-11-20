@@ -4,7 +4,9 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string_view>
+#include <utility>
 
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/physics/estimator.hpp"
@@ -13,7 +15,8 @@
 /// @file
 /// @brief Onboard flight controller of the aerial drone (FR-PHY-12/13/14): rate curves,
 /// cascaded PID (angle → rate) with filtered D-term, X-quad mixer with airmode, flight modes
-/// Acro / Angle / Altitude hold, arming with pre-arm checks, RC-loss failsafe (landing).
+/// Acro / Angle / Altitude hold / Position hold / Return to home, arming with pre-arm checks,
+/// RC-loss failsafe (return to home with GPS, else landing).
 /// @details Implemented from the control-engineering literature; no code from existing
 /// flight-control firmware is used (SPECIFICATION §12.3).
 /// @ingroup physics
@@ -26,6 +29,11 @@ struct VehicleConditions {
     bool crashed = false;          ///< The vehicle crashed.
     bool landed = false;           ///< Landing detector (ground contact).
 };
+
+/// @brief Horizontal distance from home under which RTH skips the climb, m.
+inline constexpr double kRthNoClimbRadiusM = 10.0;
+/// @brief RTH starts descending within this distance of home, m.
+inline constexpr double kRthArrivalRadiusM = 1.5;
 
 /// @brief Output of one controller tick.
 struct ControllerOutput {
@@ -98,9 +106,26 @@ public:
     [[nodiscard]] double collective() const noexcept { return collective_; }
     /// @brief Seconds since arming.
     [[nodiscard]] double armedTime() const noexcept { return armedTime_; }
+    /// @brief Home (estimated world position at arming, or at the first GPS fix after it).
+    [[nodiscard]] std::optional<Vec3> home() const noexcept { return home_; }
+    /// @brief Stage of the return to home (empty unless the mode is ReturnToHome).
+    [[nodiscard]] std::optional<RthStage> rthStage() const noexcept;
+    /// @brief The pilot asked for a GPS mode (Position hold or RTH) that has no GPS fix or no
+    /// home: Position hold flies as Altitude hold, the RTH switch is ignored.
+    [[nodiscard]] bool gpsModeUnavailable() const noexcept { return gpsModeUnavailable_; }
+    /// @brief Horizontal position target of Position hold (while holding).
+    [[nodiscard]] std::optional<Vec3> holdTarget() const noexcept;
 
 private:
+    enum class HoldPhase { Braking, Holding, Moving };
+
     void enterMode(FlightMode mode, const EstimatedState& state);
+    // Tilt targets (roll, pitch) that make the horizontal velocity follow @p velocity (world,
+    // y ignored).
+    [[nodiscard]] std::pair<double, double> velocityControl(const Vec3& velocity,
+                                                            const EstimatedState& state, double dt);
+    // Velocity setpoint of Position hold from the sticks or the hold target.
+    [[nodiscard]] Vec3 positionHold(const PilotCommand& command, const EstimatedState& state);
 
     AerialProfile profile_;
     std::array<Pid, 3> pid_;
@@ -119,6 +144,14 @@ private:
     double collective_ = 0.0;
     double armedTime_ = 0.0;
     bool lastSaturated_ = false;
+    double armAltitude_ = 0.0;
+    std::optional<Vec3> home_;
+    HoldPhase holdPhase_ = HoldPhase::Braking;
+    Vec3 holdTarget_{0.0};
+    Vec3 velocityIntegrator_{0.0};
+    RthStage rthStage_ = RthStage::Climb;
+    double rthAltitude_ = 0.0;
+    bool gpsModeUnavailable_ = false;
 };
 
 }  // namespace ds::physics
