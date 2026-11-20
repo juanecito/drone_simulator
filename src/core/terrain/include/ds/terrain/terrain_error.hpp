@@ -22,7 +22,10 @@ enum class TerrainErrorCode {
     FileNotFound,       ///< Missing or unreadable file.
     UnsupportedFormat,  ///< File extension / format not supported.
     MixedFormats,       ///< Rasters mixed with point clouds, or format ≠ declared format.
+    MixedCrs,           ///< Files of one terrain in different CRSs (FR-TER-F04).
     MissingCrs,         ///< No CRS in the file and none in the mission.
+    CorruptData,        ///< The file opens but its contents are unusable.
+    NotCovered,         ///< The requested origin or extent lies outside the data.
     Sha256Mismatch,     ///< File does not match its declared sha256 (FR-TER-F09).
     TooLarge,           ///< Over the size limits of FR-TER-F08 / FR-TER-I08.
     NotSupported,       ///< Valid but not supported in this version (e.g. DSM).

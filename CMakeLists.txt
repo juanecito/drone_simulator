@@ -74,6 +74,14 @@ find_package(SDL3 3.2 REQUIRED CONFIG COMPONENTS SDL3-shared)
 # libcurl (curl licence, MIT-style): HTTP(S) to data providers (§4.6), used only inside core/net.
 find_package(CURL 7.85 REQUIRED)
 
+# GDAL (MIT, brings PROJ): elevation rasters and orthophotos (§4.5.4, §4.5.5), used only inside
+# core/terrain; GDAL types never appear in ds/terrain headers.
+# GDAL's package version file only accepts the same minor version, so check the minimum here.
+find_package(GDAL CONFIG REQUIRED)
+if(GDAL_VERSION VERSION_LESS 3.6)
+    message(FATAL_ERROR "GDAL ${GDAL_VERSION} found; 3.6 or newer is required")
+endif()
+
 # ---------------------------------------------------------------------------
 # Project
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ add_executable(ds_unit_tests
     modules_test.cpp
     net_test.cpp
     physics_test.cpp
+    raster_source_test.cpp
     renderer_test.cpp
     replay_test.cpp
     sim_test.cpp
@@ -35,6 +36,8 @@ target_link_libraries(ds_unit_tests PRIVATE
 target_compile_definitions(ds_unit_tests PRIVATE
     DS_TEST_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures"
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
+# GDAL writes the raster fixtures (SPECIFICATION §9: fixtures generated in-test).
+target_link_libraries(ds_unit_tests PRIVATE GDAL::GDAL)
 ds_set_warnings(ds_unit_tests)
 gtest_discover_tests(ds_unit_tests
     TEST_PREFIX "unit."

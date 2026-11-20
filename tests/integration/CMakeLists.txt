@@ -8,6 +8,14 @@
 #                  creates legacy GL contexts, so these tests are skipped — not failed — when no
 #                  display or no OpenGL 4.5 core context is available.
 
+# Sanitizer builds run 3–5 times slower: the longest end-to-end runs (a mission driven at
+# dusk takes about 56 s under ASan on a loaded machine) need more than the normal 60 s.
+if(DS_ENABLE_SANITIZERS OR DS_ENABLE_COVERAGE)
+    set(DS_INTEGRATION_TIMEOUT 180)
+else()
+    set(DS_INTEGRATION_TIMEOUT 60)
+endif()
+
 function(ds_add_integration_test target)
     cmake_parse_arguments(ARG "FORCE_OFFSCREEN" "" "SOURCES" ${ARGN})
     add_executable(${target} test_main.cpp ${ARG_SOURCES})
@@ -18,7 +26,7 @@ function(ds_add_integration_test target)
     ds_set_warnings(${target})
     gtest_discover_tests(${target}
         TEST_PREFIX "integration."
-        PROPERTIES LABELS integration TIMEOUT 60
+        PROPERTIES LABELS integration TIMEOUT ${DS_INTEGRATION_TIMEOUT}
         DISCOVERY_MODE PRE_TEST)
 endfunction()
 

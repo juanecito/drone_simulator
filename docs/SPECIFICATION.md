@@ -1639,14 +1639,52 @@ so Markdown pages appear in the generated site.
 - **Tests:** the network tests use a small in-process HTTP/1.1 server written for the test suite
   (`tests/unit/mock_http_server.hpp`) instead of cpp-httplib, so no extra test dependency is
   needed. CI never contacts real providers.
-- **Next steps (need `libgdal-dev` and `libpdal-dev`):** raster source (GDAL, COG/GeoTIFF/`.hgt`/
-  `.asc`/`.img`, partial reads, overviews, VRT mosaics), online DEM source decoding GeoTIFF
-  payloads from `/vsimem/`, LAS/LAZ → DTM rasterization with PDAL and the COG cache,
-  orthophoto mosaics and GPU streaming, attribution overlay, Terrain tab (online/file),
-  Settings → Data providers with the OS keyring (QtKeychain), and the integration tests.
-- **Online orthophoto provider (moved here from M7 step 9):** WMTS and XYZ/TMS (S), WMS
-  GetMap (C), built after the orthophoto files of §4.5.5. It uses the same reprojection and
-  streaming, plus the Web-Mercator tile math of FR-GEO-02b.
+- **Plan for the remaining work** (dependencies: `libgdal-dev`, `liblaszip-dev`,
+  `qtkeychain-qt6-dev`):
+  1. network foundation (done);
+  2. GDAL raster source;
+  3. file terrain in the application: missions, Terrain tab, edge handling, attribution;
+  4. online DEM source (OpenTopography) with block streaming and area download;
+  5. Settings → Data providers with the OS keyring;
+  6. LAS/LAZ → DTM with LASzip and the COG cache;
+  7. orthophoto files with GPU streaming;
+  8. the online orthophoto provider (moved here from M7 step 9: WMTS and XYZ/TMS (S), WMS
+     GetMap (C), using the Web-Mercator tile math of FR-GEO-02b);
+  9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md`.
+- **LAS/LAZ without PDAL:** PDAL is not packaged in Debian 13. LAS is read in project code,
+  LAZ through LASzip (`liblaszip-dev`), and the DTM rasterization (TIN, IDW, hole filling) is
+  project code. Automatic ground classification (`classifyGround`, SMRF, S) waits for a
+  ground filter of its own; until then a cloud without ground points fails with a clear
+  message (FR-TER-L04, M part).
+- **Step 2 — GDAL raster source (done):** `terrain::RasterSource` opens COG / GeoTIFF,
+  `.hgt`, `.asc` and `.img` files, alone or as a mosaic (an in-memory GDAL VRT).
+  - *GDAL set-up:* every driver except the elevation and orthophoto ones and GDAL's own
+    VRT / MEM / COG is deregistered, so GDAL has no network drivers. Network paths are refused,
+    and no `.aux.xml` files are written into mission folders. The block cache is 256 MB.
+  - *Validation:* data type (Int16, UInt16, Int32, Float32, Float64), band, size
+    (40 000 px a side), georeferencing, CRS (or the mission's `crs`), one CRS for all files,
+    unit (metres, feet, US survey feet), and the origin and extent inside the data. Each
+    problem is a TerrainError with its own code (new: `MixedCrs`, `CorruptData`,
+    `NotCovered`).
+  - *Reprojection:* each world point goes to WGS84 through the scene's `LocalFrame`, at the
+    origin altitude like the app's frame, then into the raster CRS with PROJ. Heights are
+    bilinear between pixel centres. A plane in UTM is reproduced within 1 mm against the
+    project's own UTM code.
+  - *Levels of detail:* grids up to the level-0 spacing (2 m) read full-resolution pixels, so
+    meshes and height queries agree bit for bit. Coarser grids read GDAL's average over
+    aligned power-of-two blocks, from overviews when present. These agree between windows
+    only to float rounding (≈ 1e-5 m), which is enough for render levels.
+  - *NoData (FR-TER-C01):* a void pixel takes the inverse-distance mean of the valid pixels
+    within 8 pixels, otherwise the lowest elevation of the data. Read errors in a damaged file
+    count as NoData and are counted for the UI.
+  - *Placement:* the default origin is the centre of the data, and an AGL origin takes the
+    ground height there. Without a mission extent the terrain is the largest origin-centred
+    rectangle the data covers, because `Extent` is always centred on the origin.
+  - *Speed (release build):* 6 ms for a 131 × 131 chunk grid, 0.5 µs for a point query.
+    Each thread reads through its own GDAL handle and PROJ transformation.
+  - *Not done here:* the cached COG copy for large rasters without overviews (C02; it comes
+    with the COG writer of step 6). Until then the metadata suggests converting such files
+    with `gdal_translate -of COG`.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 
