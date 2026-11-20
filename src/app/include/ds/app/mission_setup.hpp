@@ -28,8 +28,8 @@ struct MissionScene {
 };
 
 /// @brief Why this build cannot fly @p mission, or nullopt if it can.
-/// @details Ground vehicles arrive with milestone M6; online and file terrain need the raster
-/// sources of M4 (GDAL), which this build does not have yet.
+/// @details Online and file terrain need the raster sources of M4 (GDAL), which this build does
+/// not have yet. Both vehicle types are playable.
 [[nodiscard]] std::optional<std::string> unplayableReason(
     const missions::MissionDefinition& mission);
 

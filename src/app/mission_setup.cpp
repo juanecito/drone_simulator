@@ -27,9 +27,6 @@ const BuiltInPreset* findPreset(std::string_view name) {
 }  // namespace
 
 std::optional<std::string> unplayableReason(const missions::MissionDefinition& mission) {
-    if (mission.vehicle.type == physics::VehicleType::Ground) {
-        return "ground vehicles are not available yet (milestone M6)";
-    }
     switch (mission.terrain.source) {
         case missions::TerrainSource::Procedural: break;
         case missions::TerrainSource::Online:

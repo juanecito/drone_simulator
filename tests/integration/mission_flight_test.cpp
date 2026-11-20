@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
 // SPDX-License-Identifier: MIT
 
-// Missions flown in the real simulation (M5): the world, the flight model, the flight controller
-// and the mission runner together, driven by a simple autopilot on the pilot's sticks — the
-// same inputs a pilot gives. Headless and deterministic.
+// Missions flown in the real simulation (M5) and driven (M6): the world, the vehicle model, its
+// controller and the mission runner together, run by a simple autopilot on the pilot's sticks
+// (or a driver on the rover's drive and steering) — the same inputs a pilot gives. Headless and
+// deterministic.
 
 #include <gtest/gtest.h>
 
@@ -12,7 +13,9 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <numbers>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +25,7 @@
 #include "ds/missions/mission_runner.hpp"
 #include "ds/missions/mission_world.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/ground_profile.hpp"
 #include "ds/sim/mission_session.hpp"
 #include "ds/sim/world.hpp"
 
@@ -64,14 +68,16 @@ struct MissionWorld {
     std::unique_ptr<sim::World> world;
     missions::MissionDefinition mission;
 
-    explicit MissionWorld(missions::MissionDefinition m) : mission(std::move(m)) {
+    explicit MissionWorld(missions::MissionDefinition m,
+                          physics::VehicleProfile profile = cameraProfile())
+        : mission(std::move(m)) {
         missions::MissionPlacement placement;
         placement.origin = mission.terrain.origin;
         placement.ground = [](double, double) { return 0.0; };
         auto runner = missions::MissionRunner::create(mission, placement);
         EXPECT_TRUE(runner.has_value()) << (runner ? "" : runner.error().message);
         sim::WorldConfig c;
-        c.profile = cameraProfile();
+        c.profile = std::move(profile);
         c.seed = 7;
         c.ground = sim::flatGround(0.0);
         c.startPosition = (*runner)->spawnPosition();
@@ -451,6 +457,188 @@ TEST(MissionFlight, FreeModeRulesWarnAndEndTheFlightOnlyWhenEnforced) {
         EXPECT_TRUE(warned) << "enforce " << enforce;
         EXPECT_EQ(ended > 0, enforce);
     }
+}
+
+}  // namespace
+}  // namespace ds
+
+// --- Ground missions (M6) -------------------------------------------------------------------
+
+namespace ds {
+namespace {
+
+physics::GroundProfile roverProfile() {
+    auto p = physics::loadGroundProfile(assets() / "vehicles" / "ground" / "rover-4wd-3kg.json");
+    EXPECT_TRUE(p.has_value());
+    return *p;
+}
+
+/// Driver on the rover's drive and steering controls (Manual mode): steers towards a point,
+/// holds a speed and brakes on arrival — the inputs a player gives.
+class RoverPilot {
+public:
+    explicit RoverPilot(sim::World& world) : world_(&world) {}
+
+    /// Drives towards @p target at @p speedMs; with @p stop, slows down and brakes on it.
+    input::ControlInputs controls(const glm::dvec3& target, double speedMs,
+                                  bool stop = false) const {
+        input::ControlInputs c;
+        c.lights = true;
+        if (!world_->vehicle().armed()) {
+            c.arm = std::exchange(primed_, true);  // Off, then on, with the drive neutral.
+            return c;
+        }
+        c.arm = true;
+        const physics::RigidBodyState& b = world_->vehicle().bodyState();
+        const glm::dvec2 to(target.x - b.position.x, target.z - b.position.z);
+        const double distance = glm::length(to);
+        const double yaw = physics::eulerFromOrientation(b.orientation).yaw;
+        const glm::dvec2 forward(std::sin(yaw), -std::cos(yaw));
+        const double v = world_->vehicle().telemetry().ground.speedMs;
+        if (stop && (distance < 0.04 || (distance < 0.3 && glm::dot(to, forward) < 0.0))) {
+            c.brake = true;  // On the spot, or just past it.
+            return c;
+        }
+        const double heading = std::atan2(to.x, -to.y);
+        const double error = std::remainder(heading - yaw, 2.0 * std::numbers::pi);
+        c.steering = std::clamp(1.6 * error, -1.0, 1.0);
+        double want = stop ? std::min(speedMs, 0.25 + 0.5 * distance) : speedMs;
+        if (std::abs(error) > 0.5) {
+            want *= 0.25;  // Turn first.
+        }
+        c.drive = std::clamp(0.55 * want + 0.8 * (want - v), -1.0, 1.0);
+        return c;
+    }
+
+private:
+    sim::World* world_;
+    mutable bool primed_ = false;
+};
+
+/// Position of the item @p key the mission's objectives point at.
+glm::dvec3 itemPosition(const MissionWorld& m, const char* key) {
+    const items::Item* item = m.world->mission()->runner().items().find(key);
+    EXPECT_NE(item, nullptr) << key;
+    return item != nullptr ? item->transform.position : glm::dvec3(0.0);
+}
+
+/// Forward direction of the item @p key (its heading).
+glm::dvec3 itemForward(const MissionWorld& m, const char* key) {
+    const items::Item* item = m.world->mission()->runner().items().find(key);
+    return item != nullptr ? item->transform.directionToWorld({0.0, 0.0, -1.0})
+                           : glm::dvec3(0.0, 0.0, -1.0);
+}
+
+/// Drives into the parking zone @p key along its heading and stops on its centre.
+void park(MissionWorld& m, const RoverPilot& pilot, const char* key) {
+    sim::World& w = *m.world;
+    const glm::dvec3 centre = itemPosition(m, key);
+    const glm::dvec3 forward = itemForward(m, key);
+    const auto near = [&](const glm::dvec3& p, double r) {
+        return [&w, p, r] { return horizontalDistance(w.vehicle().bodyState().position, p) < r; };
+    };
+    for (const double back : {3.0, 1.5}) {
+        const glm::dvec3 lineUp = centre - back * forward;
+        ASSERT_TRUE(fly(
+            w, [&] { return pilot.controls(lineUp, 1.0); }, near(lineUp, 0.25), 90.0))
+            << key;
+    }
+    ASSERT_TRUE(fly(
+        w, [&] { return pilot.controls(centre, 0.5, true); },
+        [&] { return m.status().result.has_value(); }, 20.0))
+        << key << ": " << m.status().objectives.back().detail;
+}
+
+void expectSucceeded(const MissionWorld& m, int minStars) {
+    const sim::MissionStatus s = m.status();
+    ASSERT_TRUE(s.result.has_value());
+    EXPECT_EQ(s.result->outcome, MissionState::Succeeded) << s.result->failureReason;
+    EXPECT_GE(s.result->stars, minStars);
+}
+
+TEST(MissionDrive, FirstDriveIsDrivenAndParked) {
+    MissionWorld m(loadMission(assets() / "missions" / "ground-01-first-drive.mission.json"),
+                   roverProfile());
+    sim::World& w = *m.world;
+    const RoverPilot pilot(w);
+    EXPECT_EQ(m.status().state, MissionState::PreFlight);
+    ASSERT_TRUE(fly(
+        w, [&] { return pilot.controls(w.vehicle().bodyState().position, 0.0); },
+        [&] { return w.vehicle().armed(); }, 2.0));
+    for (const auto& [key, index] : {std::pair{"red", 0U}, std::pair{"blue", 1U}}) {
+        const glm::dvec3 marker = itemPosition(m, key);
+        ASSERT_TRUE(fly(
+            w, [&] { return pilot.controls(marker, 1.2); },
+            [&] { return m.status().objectives.at(index).state == ObjectiveState::Completed; },
+            90.0))
+            << key;
+    }
+    EXPECT_EQ(m.status().state, MissionState::InProgress);
+    park(m, pilot, "bay");
+    expectSucceeded(m, 2);
+    EXPECT_TRUE(m.status().preflightProblems.empty());
+}
+
+TEST(MissionDrive, TightParkingBetweenTwoRovers) {
+    MissionWorld m(loadMission(assets() / "missions" / "ground-02-parking.mission.json"),
+                   roverProfile());
+    const RoverPilot pilot(*m.world);
+    park(m, pilot, "bay3");
+    expectSucceeded(m, 2);
+    ASSERT_TRUE(m.status().result->objectives.at(0).errorM.has_value());
+    EXPECT_LT(*m.status().result->objectives.at(0).errorM, 0.25);
+}
+
+TEST(MissionDrive, SampleRunAtDuskWithTheHeadlightsOn) {
+    MissionWorld m(loadMission(assets() / "missions" / "ground-03-sample-run.mission.json"),
+                   roverProfile());
+    sim::World& w = *m.world;
+    const RoverPilot pilot(w);
+    EXPECT_LT(w.sunElevationDeg(), 0.0) << "after sunset";
+    const glm::dvec3 station = itemPosition(m, "station");
+    ASSERT_TRUE(fly(
+        w, [&] { return pilot.controls(station, 1.2, true); },
+        [&] { return m.status().payloadKg > 0.0; }, 120.0));
+    EXPECT_NEAR(m.status().payloadKg, 1.0, 1e-9);
+    const glm::dvec3 lab = itemPosition(m, "lab");
+    ASSERT_TRUE(fly(
+        w, [&] { return pilot.controls(lab, 1.2, true); },
+        [&] { return m.status().objectives.at(0).state == ObjectiveState::Completed; }, 120.0));
+    EXPECT_DOUBLE_EQ(m.status().payloadKg, 0.0);
+    park(m, pilot, "garage");
+    expectSucceeded(m, 1);
+}
+
+TEST(MissionDrive, BridgeCourseIsDrivenOverTheDeckAndTheKicker) {
+    MissionWorld m(loadMission(assets() / "missions" / "ground-04-bridge-course.mission.json"),
+                   roverProfile());
+    sim::World& w = *m.world;
+    const RoverPilot pilot(w);
+    const auto via = [&](const glm::dvec3& p, double speed) {
+        ASSERT_TRUE(fly(
+            w, [&] { return pilot.controls(p, speed); },
+            [&] { return horizontalDistance(w.vehicle().bodyState().position, p) < 0.3; }, 90.0))
+            << p.x << ", " << p.z;
+    };
+    // Each gate: lined up 2 m before it, out 2 m after it.
+    double deck = 0.0;
+    for (const char* gate : {"g1", "g2", "g3"}) {
+        const glm::dvec3 g = itemPosition(m, gate);
+        const glm::dvec3 f = itemForward(m, gate);
+        via(g - 2.0 * f, 1.0);
+        via(g + 2.0 * f, 0.7);
+        if (std::string_view(gate) == "g2") {
+            deck = w.vehicle().bodyState().position.y;
+            via(g + 5.5 * f, 0.7);  // Off the bridge, straight.
+        }
+    }
+    EXPECT_GT(deck, 0.3) << "on the deck";
+    EXPECT_EQ(m.status().objectives.at(0).state, ObjectiveState::Completed)
+        << m.status().objectives.at(0).detail;
+    // Over the kicker, then into the finish bay.
+    via(itemPosition(m, "kicker") - 1.5 * itemForward(m, "kicker"), 1.0);
+    park(m, pilot, "finish");
+    expectSucceeded(m, 1);
 }
 
 }  // namespace

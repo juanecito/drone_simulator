@@ -59,6 +59,7 @@ QString typeText(ItemType type) {
         case ItemType::NoFlyZone: return ItemsPanel::tr("No-fly zone");
         case ItemType::Geofence: return ItemsPanel::tr("Geofence");
         case ItemType::PilotPosition: return ItemsPanel::tr("Pilot");
+        case ItemType::ParkingZone: return ItemsPanel::tr("Parking zone");
         case ItemType::Ramp: return ItemsPanel::tr("Ramp");
         case ItemType::Bridge: return ItemsPanel::tr("Bridge");
         default: return QString::fromUtf8(items::itemTypeName(type).data());
@@ -361,6 +362,9 @@ void ItemsPanel::loadEditor() {
         width_->setValue(p["sizeM"][0].get<double>());
         height_->setValue(p["sizeM"][1].get<double>());
         length_->setValue(p["sizeM"][2].get<double>());
+    } else if (p.contains("sizeM") && p["sizeM"].is_array() && p["sizeM"].size() == 2) {
+        width_->setValue(p["sizeM"][0].get<double>());  // Parking zone: width × length.
+        length_->setValue(p["sizeM"][1].get<double>());
     } else {
         height_->setValue(number(p, "heightM", 8.0));
     }
@@ -401,8 +405,9 @@ void ItemsPanel::updateFieldVisibility() {
     auto* form = static_cast<QFormLayout*>(editor_->layout());
     form->setRowVisible(shape_, obstacle);
     form->setRowVisible(radius_, hasRadius);
-    form->setRowVisible(width_, boxy || type == ItemType::Gate);
-    form->setRowVisible(length_, boxy);
+    const bool bay = type == ItemType::ParkingZone;  // Width × length, on the ground.
+    form->setRowVisible(width_, boxy || bay || type == ItemType::Gate);
+    form->setRowVisible(length_, boxy || bay);
     form->setRowVisible(height_, obstacle || drivable || type == ItemType::Gate ||
                                      type == ItemType::PickupZone || type == ItemType::DropZone);
     form->setRowVisible(mass_, obstacle);
@@ -480,6 +485,8 @@ void ItemsPanel::applyEdits() {
     if (item.type == ItemType::Gate) {
         p["widthM"] = width_->value();
         p["heightM"] = height_->value();
+    } else if (item.type == ItemType::ParkingZone) {
+        p["sizeM"] = common::Json::array({width_->value(), length_->value()});
     } else if (form->isRowVisible(length_)) {
         p["sizeM"] = common::Json::array({width_->value(), height_->value(), length_->value()});
         p.erase("heightM");

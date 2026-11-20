@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "ground-03-sample-run",
+  "title": "Sample run at dusk",
+  "briefing": "The sun has just set. Turn on the headlights (L), collect the 1 kg soil sample at the field station 60 m north (stop in the green zone), take it to the lab 40 m east of the start (blue zone) and park in the garage bay, facing south. The lights must stay on.",
+  "difficulty": 2,
+  "chapter": "ground",
+  "order": 3,
+  "terrain": {
+    "source": "procedural",
+    "seed": 613,
+    "preset": "flatlands",
+    "origin": {
+      "geo": [41.6455, -0.8930, 200],
+      "altRef": "AMSL"
+    },
+    "extent": {
+      "widthM": 600,
+      "lengthM": 600
+    }
+  },
+  "environment": {
+    "utc": "2026-05-12T19:30:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 5,
+      "preset": "few-clouds",
+      "temperatureC": 16,
+      "wind": {
+        "level": 2,
+        "fromDeg": 270
+      }
+    }
+  },
+  "vehicle": {
+    "type": "ground",
+    "profile": "rover-4wd-3kg"
+  },
+  "spawn": {
+    "local": [0, 0, 0],
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 420,
+    "maxStuckS": 20,
+    "requireLightsOn": true
+  },
+  "items": [
+    {
+      "type": "pickupZone",
+      "id": "station",
+      "name": "Field station",
+      "local": [0, 0, -60],
+      "radiusM": 1.5,
+      "heightM": 2
+    },
+    {
+      "type": "dropZone",
+      "id": "lab",
+      "name": "Lab",
+      "local": [40, 0, -10],
+      "radiusM": 1.5,
+      "heightM": 2
+    },
+    {
+      "type": "parkingZone",
+      "id": "garage",
+      "name": "Garage bay",
+      "local": [2, 0, 4],
+      "sizeM": [0.7, 0.9],
+      "headingDeg": 180
+    },
+    {
+      "type": "obstacle",
+      "id": "lab-building",
+      "name": "Lab",
+      "local": [45, 0, -10],
+      "shape": "building",
+      "sizeM": [5, 3, 6]
+    },
+    {
+      "type": "obstacle",
+      "id": "station-shed",
+      "name": "Field station shed",
+      "local": [0, 0, -65],
+      "headingDeg": 0,
+      "shape": "house",
+      "sizeM": [3, 2.5, 3]
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "sample",
+      "type": "deliver",
+      "title": "Bring the sample to the lab",
+      "pickup": "station",
+      "drop": "lab",
+      "cargoKg": 1.0
+    },
+    {
+      "id": "park",
+      "type": "park",
+      "target": "garage",
+      "maxErrorM": 0.3,
+      "maxHeadingErrorDeg": 12
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 300
+      },
+      {
+        "maxTimeS": 200,
+        "maxErrorM": 0.2
+      }
+    ]
+  }
+}

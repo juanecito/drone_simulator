@@ -61,6 +61,7 @@ common::Json defaultProperties(const ItemTemplate& t) {
         case ItemType::Geofence: return {{"radiusM", 50.0}};
         case ItemType::InspectionTarget: return {{"radiusM", 0.5}};
         case ItemType::Ramp: return {{"sizeM", Json::array({1.0, 0.25, 1.5})}};
+        case ItemType::ParkingZone: return {{"sizeM", Json::array({0.7, 0.9})}};  // Rover bay.
         case ItemType::Bridge: return {{"sizeM", Json::array({1.0, 0.5, 3.0})}};
         default: return Json::object();
     }
@@ -82,6 +83,7 @@ const std::vector<ItemTemplate>& itemPalette() {
         {ItemType::PickupZone, "", "Pickup zone"},
         {ItemType::DropZone, "", "Drop zone"},
         {ItemType::NoFlyZone, "", "No-fly zone"},
+        {ItemType::ParkingZone, "", "Parking zone"},
         {ItemType::Ramp, "", "Ramp"},
         {ItemType::Bridge, "", "Bridge"},
     };

@@ -479,12 +479,18 @@ std::shared_ptr<Mesh> translucentVolume(const Shape& s, const glm::vec3& color, 
     return m;
 }
 
+// Painted bay: white lines (their width scaled to the bay, at most 12 cm) and a yellow
+// heading mark towards the front edge.
 std::shared_ptr<Mesh> parkingZone(const Shape& s) {
     auto m = std::make_shared<Mesh>();
-    appendOutline(*m, outlineOf(s), 0.12F, 0.03F, {kWhite, 1.0F, kMarkerGlow});
-    // Heading mark at the front edge.
-    graphics::appendBox(*m, glm::vec3(0.0F, 0.03F, static_cast<float>(-0.7 * s.halfExtentsM.z)),
-                        glm::vec3(0.06F, 0.01F, 0.25F), {kYellow, 1.0F, kMarkerGlow});
+    const auto hx = static_cast<float>(s.halfExtentsM.x);
+    const auto hz = static_cast<float>(s.halfExtentsM.z);
+    const float line = std::clamp(0.1F * std::min(hx, hz), 0.03F, 0.12F);
+    // 5 cm up: bays are on level ground within 5 cm, and the paint must not sink into it.
+    constexpr float kPaintY = 0.05F;
+    appendOutline(*m, outlineOf(s), line, kPaintY, {kWhite, 1.0F, kMarkerGlow});
+    graphics::appendBox(*m, glm::vec3(0.0F, kPaintY, -0.6F * hz),
+                        glm::vec3(0.5F * line, 0.01F, 0.25F * hz), {kYellow, 1.0F, kMarkerGlow});
     return m;
 }
 
@@ -562,7 +568,7 @@ std::shared_ptr<const Mesh> ItemVisuals::meshFor(const items::Item& item, bool s
             return showMarkers ? translucentVolume(item.shape, kSurveyColor, 0.25F,
                                                    std::pair<float, float>{-1.0F, 2.0F})
                                : nullptr;
-        case ItemType::ParkingZone: return showMarkers ? parkingZone(item.shape) : nullptr;
+        case ItemType::ParkingZone: return parkingZone(item.shape);  // Painted on the ground.
     }
     return nullptr;
 }

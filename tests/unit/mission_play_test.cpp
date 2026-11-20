@@ -241,14 +241,14 @@ TEST(MissionSetup, ProfileIsTheMissionsOwn) {
     EXPECT_EQ(asked, "survey-1500g");
 }
 
-TEST(MissionSetup, OnlineTerrainAndGroundVehiclesAreNotPlayableYet) {
+TEST(MissionSetup, OnlineTerrainIsNotPlayableYetGroundVehiclesAre) {
     auto online = parse(kMission);
     online.terrain.source = missions::TerrainSource::Online;
     EXPECT_NE(app::unplayableReason(online).value_or("").find("M4"), std::string::npos);
     EXPECT_FALSE(app::missionTerrain(online).has_value());
     auto ground = parse(kMission);
     ground.vehicle.type = physics::VehicleType::Ground;
-    EXPECT_NE(app::unplayableReason(ground).value_or("").find("M6"), std::string::npos);
+    EXPECT_FALSE(app::unplayableReason(ground).has_value());
 }
 
 }  // namespace

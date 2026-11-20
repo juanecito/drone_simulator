@@ -1857,9 +1857,22 @@ so Markdown pages appear in the generated site.
   - *Editing and missions:* the Items tab palette has *Ramp* and *Bridge* (width, height,
     length); the mission schema and validator accept `rampLengthM` and `kerbs` on bridges.
     Items are drawn as they collide (wedge faces wound outwards).
-- **Next steps:** the parking-zone item and objective; at least four ground missions;
-  calibration wizard for ground mappings; shadows of the headlights and lights on items
-  (FR-GFX-08d, S) later; steering of Ackermann layouts.
+- **Step 5 — Ground missions and the parking zone (done, FR-MIS-03a/04a, FR-ITM-13 M):**
+  - *Playable:* ground missions are no longer blocked (`unplayableReason()` only rejects
+    online and file terrain, M4). The runner already scored the ground objectives (2D
+    waypoints, deliveries "stopped" in the zones, `park` with position, heading, speed and
+    hold time, `maxStuckS`, rollover and `maxCollisionSpeedMs` failures).
+  - *Parking zone:* drawn always as a bay painted on the ground (white lines scaled to the bay,
+    yellow heading mark, 5 cm above the ground), placeable from the Items tab (*Parking zone*,
+    width × length, default 0.7 × 0.9 m for the rover).
+  - *Missions:* a `ground` chapter of four built-in missions for the rover-4wd-3kg — *First
+    drive*, *Tight parking*, *Sample run at dusk* (headlights required) and *Bridge course*
+    (gates on the ground and on a bridge deck, a kicker ramp). The pack test checks that
+    ground gates open at the driving surface (terrain or deck) and that bays, ramps and
+    bridges stand on level ground; a scripted driver on the drive and steering controls
+    completes each mission in the simulation (`MissionDrive.*`).
+- **Next steps:** calibration wizard for ground mappings; shadows of the headlights and lights
+  on items (FR-GFX-08d, S) later; steering of Ackermann layouts.
 
 ---
 
