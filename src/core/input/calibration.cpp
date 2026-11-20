@@ -20,7 +20,34 @@ CalibrationWizard::CalibrationWizard(int axisCount, InputMapping base)
     used_.assign(n, false);
 }
 
+bool CalibrationWizard::ground() const noexcept {
+    return mapping_.vehicle == VehicleControls::Ground;
+}
+
 std::string_view CalibrationWizard::prompt() const noexcept {
+    if (ground()) {
+        switch (step_) {
+            case Step::CenterSticks:
+                return "Centre the sticks or the steering wheel and release the triggers, then "
+                       "press Next.";
+            case Step::MoveExtremes:
+                return "Move every stick, trigger and the steering wheel through its full travel "
+                       "several times, then press Next.";
+            case Step::DriveForward:
+                return "Drive forward: push the drive stick fully forward, or press the forward "
+                       "trigger fully, and hold it, then press Next.";
+            case Step::DriveReverse:
+                return driveIsStick_
+                           ? "Reverse: pull the same control fully back and hold it, then press "
+                             "Next."
+                           : "Reverse: release the forward trigger, press the reverse trigger "
+                             "fully and hold it, then press Next.";
+            case Step::SteerRight:
+                return "Steer fully right (stick or wheel) and hold it, then press Next.";
+            case Step::Done: return "Calibration complete.";
+            default: break;
+        }
+    }
     switch (step_) {
         case Step::CenterSticks:
             return "Centre all sticks and put the throttle at minimum, then press Next.";
@@ -34,6 +61,7 @@ std::string_view CalibrationWizard::prompt() const noexcept {
         case Step::RollRight:
             return "Push the roll stick fully right and hold it, then press Next.";
         case Step::Done: return "Calibration complete.";
+        default: break;
     }
     return "";
 }
@@ -62,6 +90,132 @@ int CalibrationWizard::mostDeflectedAxis() const noexcept {
         }
     }
     return best;
+}
+
+int CalibrationWizard::pickAxis(double needed) const {
+    int best = -1;
+    double bestRel = needed;
+    for (std::size_t i = 0; i < current_.size(); ++i) {
+        if (used_[i]) {
+            continue;
+        }
+        const double range = std::max(max_[i] - min_[i], 1e-6);
+        const double rel = std::abs(current_[i] - centre_[i]) / range;
+        if (rel >= bestRel) {
+            bestRel = rel;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
+bool CalibrationWizard::restsAtAnEnd(std::size_t i) const {
+    const double range = max_[i] - min_[i];
+    if (range <= 1e-6) {
+        return false;
+    }
+    const double margin = kTriggerRestFraction * range;
+    return centre_[i] - min_[i] < margin || max_[i] - centre_[i] < margin;
+}
+
+bool CalibrationWizard::assignStick(std::size_t slot, int axis) {
+    const auto i = static_cast<std::size_t>(axis);
+    AxisCalibration& c = mapping_.channels[slot];
+    const double deadzone = c.deadzone;
+    const double expo = c.expo;
+    c = AxisCalibration{};
+    c.axis = axis;
+    c.deadzone = deadzone;
+    c.expo = expo;
+    c.min = min_[i];
+    c.max = max_[i];
+    c.center = centre_[i];
+    c.inverted = current_[i] < centre_[i];
+    used_[i] = true;
+    return true;
+}
+
+void CalibrationWizard::assignTrigger(std::size_t slot, int axis) {
+    const auto i = static_cast<std::size_t>(axis);
+    AxisCalibration& c = mapping_.channels[slot];
+    const double deadzone = c.axis >= 0 ? c.deadzone : 0.05;
+    const double expo = c.expo;
+    c = AxisCalibration{};
+    c.axis = axis;
+    c.deadzone = deadzone;
+    c.expo = expo;
+    // Released at the resting end, pressed at the far end (calibrateTrigger()).
+    c.min = centre_[i];
+    c.center = centre_[i];
+    c.max = current_[i] >= centre_[i] ? max_[i] : min_[i];
+    used_[i] = true;
+}
+
+bool CalibrationWizard::nextGround() {
+    const auto slot = [](GroundChannel ch) { return static_cast<std::size_t>(ch); };
+    const auto clear = [&](GroundChannel ch) { mapping_.channels[slot(ch)].axis = -1; };
+    switch (step_) {
+        case Step::DriveForward: {
+            const int axis = pickAxis(0.5 * kMinDeflection);
+            if (axis < 0) {
+                error_ = "No movement detected — push the drive control fully and hold it.";
+                return false;
+            }
+            driveIsStick_ = !restsAtAnEnd(static_cast<std::size_t>(axis));
+            if (driveIsStick_) {
+                assignStick(slot(GroundChannel::Drive), axis);
+                clear(GroundChannel::Forward);
+                clear(GroundChannel::Reverse);
+            } else {
+                assignTrigger(slot(GroundChannel::Forward), axis);
+                clear(GroundChannel::Drive);
+            }
+            error_.clear();
+            step_ = Step::DriveReverse;
+            return true;
+        }
+        case Step::DriveReverse: {
+            if (driveIsStick_) {
+                // The drive stick, now on the other side of its centre.
+                const AxisCalibration& d = mapping_.channels[slot(GroundChannel::Drive)];
+                const auto i = static_cast<std::size_t>(d.axis);
+                const double range = std::max(max_[i] - min_[i], 1e-6);
+                const double rel = (current_[i] - centre_[i]) / range;
+                const bool back =
+                    d.inverted ? rel > 0.25 * kMinDeflection : rel < -0.25 * kMinDeflection;
+                if (!back) {
+                    error_ = "Pull the same drive control fully back and hold it.";
+                    return false;
+                }
+            } else {
+                const int axis = pickAxis(0.5 * kMinDeflection);
+                if (axis < 0 || !restsAtAnEnd(static_cast<std::size_t>(axis))) {
+                    error_ = "No reverse trigger detected — press the other trigger fully.";
+                    return false;
+                }
+                assignTrigger(slot(GroundChannel::Reverse), axis);
+            }
+            error_.clear();
+            step_ = Step::SteerRight;
+            return true;
+        }
+        case Step::SteerRight: {
+            const int axis = pickAxis(0.5 * kMinDeflection);
+            if (axis < 0) {
+                error_ = "No steering movement detected — steer fully right and hold it.";
+                return false;
+            }
+            if (restsAtAnEnd(static_cast<std::size_t>(axis))) {
+                error_ = "That is a trigger — steer with a stick or the wheel.";
+                return false;
+            }
+            assignStick(slot(GroundChannel::Steering), axis);
+            error_.clear();
+            step_ = Step::Done;
+            return true;
+        }
+        default: return false;
+    }
 }
 
 bool CalibrationWizard::assign(Channel channel) {
@@ -123,7 +277,7 @@ bool CalibrationWizard::next() {
                 return false;
             }
             error_.clear();
-            step_ = Step::ThrottleUp;
+            step_ = ground() ? Step::DriveForward : Step::ThrottleUp;
             return true;
         }
         case Step::ThrottleUp:
@@ -150,6 +304,9 @@ bool CalibrationWizard::next() {
             }
             step_ = Step::Done;
             return true;
+        case Step::DriveForward:
+        case Step::DriveReverse:
+        case Step::SteerRight: return nextGround();
         case Step::Done: return true;
     }
     return false;

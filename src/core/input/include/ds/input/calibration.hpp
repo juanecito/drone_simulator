@@ -12,6 +12,8 @@
 /// @brief Calibration wizard logic (FR-IN-02): records stick centres and end points and finds
 /// which axis is which, and in which direction, from guided stick movements — so the channel
 /// order (AETR, TAER, …), the stick mode and axis inversion are detected automatically.
+/// For ground mappings (FR-IN-03a) the steps find the drive control — a self-centring stick or
+/// pistol-grip trigger, or a pair of gamepad triggers (forward and reverse) — and the steering.
 /// The GUI shows the prompts and feeds raw samples; this class has no GUI or device code.
 /// @ingroup input
 
@@ -28,11 +30,14 @@ public:
         YawRight,      ///< Push yaw fully right.
         PitchForward,  ///< Push pitch fully forward.
         RollRight,     ///< Push roll fully right.
+        DriveForward,  ///< Ground: push the drive control (stick or trigger) fully forward.
+        DriveReverse,  ///< Ground: pull it fully back (the same stick, or the other trigger).
+        SteerRight,    ///< Ground: steer fully right.
         Done,          ///< Finished: result() is valid.
     };
 
     /// @brief Starts a calibration of a device with @p axisCount axes, keeping the switches
-    /// and other settings of @p base.
+    /// and other settings of @p base; its vehicle type chooses the aerial or ground steps.
     CalibrationWizard(int axisCount, InputMapping base);
 
     /// @brief Current step.
@@ -53,9 +58,19 @@ public:
 
     /// @brief Minimum deflection (fraction of the axis range) to recognise a movement.
     static constexpr double kMinDeflection = 0.5;
+    /// @brief An axis that rests within this fraction of its range from one end is a trigger.
+    static constexpr double kTriggerRestFraction = 0.1;
 
 private:
     bool assign(Channel channel);
+    /// Unused axis deflected most (relative to its range), or −1 below @p needed.
+    [[nodiscard]] int pickAxis(double needed) const;
+    /// True if axis @p i rests at one end of its travel (a trigger).
+    [[nodiscard]] bool restsAtAnEnd(std::size_t i) const;
+    bool assignStick(std::size_t slot, int axis);
+    void assignTrigger(std::size_t slot, int axis);
+    bool nextGround();
+    [[nodiscard]] bool ground() const noexcept;
 
     int axisCount_;
     InputMapping mapping_;
@@ -66,6 +81,7 @@ private:
     std::vector<double> current_;
     std::vector<bool> used_;
     std::string error_;
+    bool driveIsStick_ = true;  ///< Ground: drive on a stick (else on two triggers).
 };
 
 }  // namespace ds::input

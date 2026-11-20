@@ -396,6 +396,127 @@ TEST(CalibrationWizard, AssignsAxesFromGuidedMoves) {
     EXPECT_NEAR(at({0.02, -0.01, 0.0, 0.95, 0.0}).roll, 0.0, 1e-9);
 }
 
+namespace {
+
+InputMapping groundBase() {
+    InputMapping m = groundGamepadMapping(true);
+    m.name = "Calibrated";
+    return m;
+}
+
+std::size_t slot(GroundChannel ch) { return static_cast<std::size_t>(ch); }
+
+}  // namespace
+
+TEST(CalibrationWizard, GroundDriveStickAndSteering) {
+    // Pistol-grip radio or gamepad sticks: drive on axis 1 (forward = negative), steering on
+    // axis 2, both self-centring; axis 0 idle.
+    CalibrationWizard w(3, groundBase());
+    w.sample(rawState({0.0, 0.01, -0.02}));
+    ASSERT_TRUE(w.next());
+    for (const double v : {-1.0, 1.0}) {
+        w.sample(rawState({0.0, v, v}));
+    }
+    ASSERT_TRUE(w.next());
+    EXPECT_EQ(w.step(), CalibrationWizard::Step::DriveForward);
+    EXPECT_NE(w.prompt().find("forward"), std::string_view::npos);
+    w.sample(rawState({0.0, -1.0, -0.02}));
+    ASSERT_TRUE(w.next());
+    EXPECT_EQ(w.step(), CalibrationWizard::Step::DriveReverse);
+    // Reverse must be the same stick pulled back: still forward is refused.
+    EXPECT_FALSE(w.next());
+    EXPECT_FALSE(w.error().empty());
+    w.sample(rawState({0.0, 1.0, -0.02}));
+    ASSERT_TRUE(w.next());
+    EXPECT_EQ(w.step(), CalibrationWizard::Step::SteerRight);
+    w.sample(rawState({0.0, 0.01, 1.0}));
+    ASSERT_TRUE(w.next());
+    ASSERT_EQ(w.step(), CalibrationWizard::Step::Done);
+
+    const InputMapping& m = w.result();
+    EXPECT_EQ(m.vehicle, VehicleControls::Ground);
+    EXPECT_EQ(m.name, "Calibrated");
+    EXPECT_EQ(m.channels[slot(GroundChannel::Drive)].axis, 1);
+    EXPECT_EQ(m.channels[slot(GroundChannel::Steering)].axis, 2);
+    // The preset's triggers are dropped: the stick drives.
+    EXPECT_EQ(m.channels[slot(GroundChannel::Forward)].axis, -1);
+    EXPECT_EQ(m.channels[slot(GroundChannel::Reverse)].axis, -1);
+    // The switches of the base mapping are kept.
+    EXPECT_EQ(m.switches, groundBase().switches);
+    const auto at = [&](std::vector<double> axes) {
+        return mapControls(m, rawState(axes), {}, {});
+    };
+    EXPECT_NEAR(at({0.0, -1.0, -0.02}).drive, 1.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 1.0, -0.02}).drive, -1.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.01, -0.02}).drive, 0.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.01, 1.0}).steering, 1.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.01, -1.0}).steering, -1.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.01, -0.02}).steering, 0.0, 1e-9);
+}
+
+TEST(CalibrationWizard, GroundTriggerPairAndSteeringStick) {
+    // Gamepad: steering on axis 0 (reversed: right = negative), triggers on axes 4 (reverse)
+    // and 5 (forward) resting at −1, a raw joystick API reporting −1 … 1.
+    CalibrationWizard w(6, InputMapping{.vehicle = VehicleControls::Ground});
+    w.sample(rawState({0.0, 0.0, 0.0, 0.0, -1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    for (const double v : {-1.0, 1.0}) {
+        w.sample(rawState({v, v, v, v, v, v}));
+    }
+    ASSERT_TRUE(w.next());
+    w.sample(rawState({0.0, 0.0, 0.0, 0.0, -1.0, 1.0}));
+    ASSERT_TRUE(w.next());
+    EXPECT_NE(w.prompt().find("trigger"), std::string_view::npos);
+    // Nothing pressed for reverse; then a stick instead of a trigger: both refused.
+    w.sample(rawState({0.0, 0.0, 0.0, 0.0, -1.0, -1.0}));
+    EXPECT_FALSE(w.next());
+    w.sample(rawState({0.0, 0.0, 0.0, 1.0, -1.0, -1.0}));
+    EXPECT_FALSE(w.next());
+    w.sample(rawState({0.0, 0.0, 0.0, 0.0, 1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    // Steering right on a stick wired reversed.
+    w.sample(rawState({-1.0, 0.0, 0.0, 0.0, -1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    ASSERT_EQ(w.step(), CalibrationWizard::Step::Done);
+
+    const InputMapping& m = w.result();
+    EXPECT_EQ(m.channels[slot(GroundChannel::Drive)].axis, -1);
+    EXPECT_EQ(m.channels[slot(GroundChannel::Forward)].axis, 5);
+    EXPECT_EQ(m.channels[slot(GroundChannel::Reverse)].axis, 4);
+    EXPECT_EQ(m.channels[slot(GroundChannel::Steering)].axis, 0);
+    const auto at = [&](std::vector<double> axes) {
+        return mapControls(m, rawState(axes), {}, {});
+    };
+    EXPECT_NEAR(at({0.0, 0.0, 0.0, 0.0, -1.0, -1.0}).drive, 0.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.0, 0.0, 0.0, -1.0, 1.0}).drive, 1.0, 1e-9);
+    EXPECT_NEAR(at({0.0, 0.0, 0.0, 0.0, 1.0, -1.0}).drive, -1.0, 1e-9);
+    EXPECT_GT(at({0.0, 0.0, 0.0, 0.0, -1.0, 0.0}).drive, 0.4);
+    EXPECT_NEAR(at({-1.0, 0.0, 0.0, 0.0, -1.0, -1.0}).steering, 1.0, 1e-9);
+    EXPECT_NEAR(at({1.0, 0.0, 0.0, 0.0, -1.0, -1.0}).steering, -1.0, 1e-9);
+}
+
+TEST(CalibrationWizard, GroundSteeringOnATriggerIsRefused) {
+    // Forward on a trigger, reverse on the other, then the user presses a third
+    // trigger-like axis (a throttle lever resting at an end) to steer.
+    CalibrationWizard w(4, InputMapping{.vehicle = VehicleControls::Ground});
+    w.sample(rawState({0.0, -1.0, -1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    for (const double v : {-1.0, 1.0}) {
+        w.sample(rawState({v, v, v, v}));
+    }
+    ASSERT_TRUE(w.next());
+    w.sample(rawState({0.0, 1.0, -1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    w.sample(rawState({0.0, -1.0, 1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    w.sample(rawState({0.0, -1.0, -1.0, 1.0}));
+    EXPECT_FALSE(w.next());
+    EXPECT_NE(w.error().find("trigger"), std::string_view::npos);
+    w.sample(rawState({1.0, -1.0, -1.0, -1.0}));
+    ASSERT_TRUE(w.next());
+    EXPECT_EQ(w.result().channels[slot(GroundChannel::Steering)].axis, 0);
+}
+
 // --- SDL joystick service --------------------------------------------------------------------
 
 template <typename Predicate>
