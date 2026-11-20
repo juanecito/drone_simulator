@@ -96,15 +96,20 @@ struct FailsafeEvent {
 };
 /// @brief Invalid numbers were detected and the vehicle state was reset (FR-PHY-17).
 struct NumericalResetEvent {};
+/// @brief An injected failure started or ended (FR-PHY-15).
+struct FailureEvent {
+    std::string title;    ///< "GPS loss", …
+    bool started = true;  ///< Started (true) or ended (false).
+};
 
 /// @brief Event bus of the simulation.
 using EventBus =
     common::EventBus<CollisionEvent, CrashEvent, GatePassedEvent, ZoneEnteredEvent, ZoneExitedEvent,
                      PayloadAttachedEvent, PayloadReleasedEvent, ObjectiveCompletedEvent,
                      ObjectiveFailedEvent, MissionSucceededEvent, MissionFailedEvent,
-                     MissionMessageEvent, FlightRuleBrokenEvent, BatteryWarningEvent, RolloverEvent, VehicleStuckEvent, WaterEnteredEvent,
-                     SimResetEvent, ArmingEvent, ArmRefusedEvent, FailsafeEvent,
-                     NumericalResetEvent>;
+                     MissionMessageEvent, FlightRuleBrokenEvent, BatteryWarningEvent, RolloverEvent,
+                     VehicleStuckEvent, WaterEnteredEvent, SimResetEvent, ArmingEvent,
+                     ArmRefusedEvent, FailsafeEvent, NumericalResetEvent, FailureEvent>;
 /// @brief Any simulation event.
 using Event = EventBus::Event;
 

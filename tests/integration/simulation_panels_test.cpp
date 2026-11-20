@@ -345,6 +345,36 @@ TEST_F(SimulationPanelsTest, PanelsEditTheSimulation) {
     EXPECT_EQ(device->count(), 1);  // Keyboard only (no joystick service in tests).
 }
 
+TEST_F(SimulationPanelsTest, FailureInjectionFromTheSimulationTab) {
+    // FR-PHY-15 in free mode: pick, inject, see it active, clear.
+    app::SimulationPanel panel(*sim_);
+    auto* type = panel.findChild<QComboBox*>(QStringLiteral("FailureTypeCombo"));
+    auto* motor = panel.findChild<QSpinBox*>(QStringLiteral("FailureMotorSpin"));
+    auto* inject = panel.findChild<QPushButton*>(QStringLiteral("InjectFailureButton"));
+    auto* clear = panel.findChild<QPushButton*>(QStringLiteral("ClearFailuresButton"));
+    auto* active = panel.findChild<QLabel*>(QStringLiteral("ActiveFailuresLabel"));
+    ASSERT_TRUE(type && motor && inject && clear && active);
+    EXPECT_EQ(type->count(), static_cast<int>(physics::kFailureTypes.size()));
+    type->setCurrentIndex(type->findData(static_cast<int>(physics::FailureType::GpsLoss)));
+    EXPECT_FALSE(motor->isEnabled());
+    inject->click();
+    type->setCurrentIndex(type->findData(static_cast<int>(physics::FailureType::MotorFailure)));
+    EXPECT_TRUE(motor->isEnabled());
+    motor->setValue(3);
+    inject->click();
+    run(0.1);
+    ASSERT_EQ(sim_->snapshot().activeFailures.size(), 2U);
+    EXPECT_EQ(sim_->snapshot().activeFailures[0], "GPS loss");
+    panel.refresh();
+    EXPECT_EQ(active->text(), QStringLiteral("GPS loss, Motor failure"));
+    EXPECT_FALSE(sim_->snapshot().telemetry.gps.fix);
+    clear->click();
+    run(0.1);
+    EXPECT_TRUE(sim_->snapshot().activeFailures.empty());
+    panel.refresh();
+    EXPECT_EQ(active->text(), QStringLiteral("none"));
+}
+
 // --- Ground drone (M6 step 2) ---------------------------------------------------------------
 
 TEST_F(SimulationPanelsTest, VehicleTypeSwitchesAndIsRemembered) {

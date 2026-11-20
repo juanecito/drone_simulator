@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QVBoxLayout>
 
 #include <array>
@@ -64,6 +65,8 @@ SimulationPanel::SimulationPanel(SimulationController& simulation, QWidget* pare
         camera_->setCurrentIndex(static_cast<int>(simulation_->cameraMode()));
     });
     connect(simulation_, &SimulationController::simulationEvent, this, &SimulationPanel::addEvent);
+    connect(simulation_, &SimulationController::missionActiveChanged, this,
+            &SimulationPanel::updateFailureControls);
     updateButtons();
     refresh();
 }
@@ -165,6 +168,66 @@ void SimulationPanel::buildUi() {
     telemetryLayout->addWidget(telemetry_);
     layout->addWidget(telemetryBox);
 
+    // --- Failure injection (FR-PHY-15) -------------------------------------------------------
+    failureBox_ = new QGroupBox(tr("Failure injection"));
+    failureBox_->setObjectName(QStringLiteral("FailureBox"));
+    auto* failureForm = new QFormLayout(failureBox_);
+    failureType_ = new QComboBox;
+    failureType_->setObjectName(QStringLiteral("FailureTypeCombo"));
+    for (const physics::FailureType t : physics::kFailureTypes) {
+        failureType_->addItem(tr(physics::failureTitle(t).data()), static_cast<int>(t));
+    }
+    failureType_->setToolTip(
+        tr("GPS drift: 0.5 m/s up to 20 m. Battery cell fault: 30 % of the capacity lost. "
+           "Compass interference: 30° off. Barometer drift: 0.2 m/s up to 15 m."));
+    failureForm->addRow(tr("Failure:"), failureType_);
+    failureMotor_ = new QSpinBox;
+    failureMotor_->setObjectName(QStringLiteral("FailureMotorSpin"));
+    failureMotor_->setRange(1, static_cast<int>(physics::kMaxFailureMotors));
+    failureMotor_->setToolTip(tr("Motor (aerial) or driven wheel (ground)."));
+    failurePower_ = new QSpinBox;
+    failurePower_->setObjectName(QStringLiteral("FailurePowerSpin"));
+    failurePower_->setRange(0, 100);
+    failurePower_->setSuffix(tr(" % left"));
+    failurePower_->setToolTip(tr("Thrust (rotor) or drive (wheel) left: 0 % = the motor stops."));
+    auto* motorRow = new QHBoxLayout;
+    motorRow->addWidget(failureMotor_);
+    motorRow->addWidget(failurePower_, 1);
+    failureForm->addRow(tr("Motor:"), motorRow);
+    failureDuration_ = new QSpinBox;
+    failureDuration_->setObjectName(QStringLiteral("FailureDurationSpin"));
+    failureDuration_->setRange(0, 3600);
+    failureDuration_->setSuffix(tr(" s"));
+    failureDuration_->setSpecialValueText(tr("until reset"));
+    failureForm->addRow(tr("Duration:"), failureDuration_);
+    auto* inject = new QPushButton(tr("Inject"));
+    inject->setObjectName(QStringLiteral("InjectFailureButton"));
+    auto* clear = new QPushButton(tr("Clear all"));
+    clear->setObjectName(QStringLiteral("ClearFailuresButton"));
+    auto* failureButtons = new QHBoxLayout;
+    failureButtons->addWidget(inject);
+    failureButtons->addWidget(clear);
+    failureForm->addRow(failureButtons);
+    activeFailures_ = new QLabel;
+    activeFailures_->setObjectName(QStringLiteral("ActiveFailuresLabel"));
+    activeFailures_->setWordWrap(true);
+    failureForm->addRow(tr("Active:"), activeFailures_);
+    connect(failureType_, &QComboBox::currentIndexChanged, this,
+            &SimulationPanel::updateFailureControls);
+    connect(inject, &QPushButton::clicked, this, [this] {
+        physics::Failure f = physics::defaultFailure(
+            static_cast<physics::FailureType>(failureType_->currentData().toInt()));
+        f.motor = failureMotor_->value();
+        f.efficiency = failurePower_->value() / 100.0;
+        if (failureDuration_->value() > 0) {
+            f.durationS = failureDuration_->value();
+        }
+        simulation_->injectFailure(f);
+    });
+    connect(clear, &QPushButton::clicked, this, [this] { simulation_->clearFailures(); });
+    layout->addWidget(failureBox_);
+    updateFailureControls();
+
     auto* statsBox = new QGroupBox(tr("This flight"));
     auto* statsLayout = new QVBoxLayout(statsBox);
     stats_ = new QLabel;
@@ -190,6 +253,18 @@ void SimulationPanel::buildUi() {
     outer->addWidget(scroll);
 }
 
+void SimulationPanel::updateFailureControls() {
+    // Missions schedule their own failures.
+    failureBox_->setEnabled(!simulation_->missionActive());
+    const bool motor = static_cast<physics::FailureType>(failureType_->currentData().toInt()) ==
+                       physics::FailureType::MotorFailure;
+    failureMotor_->setEnabled(motor);
+    failurePower_->setEnabled(motor);
+    const bool once = static_cast<physics::FailureType>(failureType_->currentData().toInt()) ==
+                      physics::FailureType::BatteryDrop;
+    failureDuration_->setEnabled(!once);
+}
+
 void SimulationPanel::updateButtons() {
     const sim::RunState state = simulation_->state();
     const bool running = state == sim::RunState::Running;
@@ -213,6 +288,13 @@ void SimulationPanel::addEvent(const QString& text) {
 
 void SimulationPanel::refresh() {
     const sim::WorldSnapshot& s = simulation_->snapshot();
+    {
+        QStringList names;
+        for (const std::string& f : s.activeFailures) {
+            names << tr(f.c_str());
+        }
+        activeFailures_->setText(names.isEmpty() ? tr("none") : names.join(QStringLiteral(", ")));
+    }
     const sim::HudModel& hud = simulation_->hud();
     const auto percent = [](double v) { return static_cast<int>(std::lround(100.0 * v)); };
     const input::ControlInputs& c = s.controls;

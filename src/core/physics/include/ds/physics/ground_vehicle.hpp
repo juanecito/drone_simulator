@@ -55,6 +55,8 @@ public:
     void setBodyState(const RigidBodyState& state) noexcept override { body_ = state; }
     void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2) override;
     void releasePayload() override;
+    void setFaults(const VehicleFaults& faults) override;
+    void loseBatteryCapacity(double fraction) override { battery_.loseCapacity(fraction); }
 
     /// @brief Profile.
     [[nodiscard]] const GroundProfile& profile() const noexcept { return profile_; }
@@ -108,6 +110,7 @@ private:
     StateEstimator estimator_;
     DriveController controller_;
     Battery battery_;
+    VehicleFaults faults_;
     RigidBodyState body_;
     MassProperties mass_;
     std::vector<Vec3> mounts_;            // Suspension mounts (body, from the reference point).

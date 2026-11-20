@@ -79,6 +79,8 @@ public:
     void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2) override;
     /// @brief Releases the payload.
     void releasePayload() override;
+    void setFaults(const VehicleFaults& faults) override;
+    void loseBatteryCapacity(double fraction) override { battery_.loseCapacity(fraction); }
     /// @brief Rain water carried on the airframe, kg (FR-WX-06).
     [[nodiscard]] double waterMassKg() const noexcept { return waterMassKg_; }
     /// @brief Force of the falling precipitation on the airframe in @p env for a vehicle in
@@ -108,6 +110,7 @@ private:
     StateEstimator estimator_;
     FlightController controller_;
     Battery battery_;
+    VehicleFaults faults_;
     common::GaussianRandom random_{0};
     RigidBodyState body_;
     MassProperties mass_;

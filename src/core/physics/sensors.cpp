@@ -79,14 +79,16 @@ const SensorReadings& SensorSuite::update(const SensorTruth& t, double dt) {
                 ? -kBaroGroundEffectM * std::exp(-std::max(t.heightAboveGroundM, 0.0) / 0.5)
                 : 0.0;
         readings_.baro.altitudeM = pressureAltitudeM(t.staticPressurePa, t.qnhHpa) +
-                                   random_.next(params_.baroNoiseM) + groundEffect;
+                                   random_.next(params_.baroNoiseM) + groundEffect +
+                                   faults_.baroOffsetM;
         readings_.baro.fresh = true;
     }
 
     // Compass.
     const Vec3 forward = worldToNed(t.body.orientation * Vec3(1.0, 0.0, 0.0));
     readings_.mag.headingRad = common::wrapRadiansPi(
-        std::atan2(forward.y, forward.x) + random_.next(common::degToRad(params_.magNoiseDeg)));
+        std::atan2(forward.y, forward.x) + random_.next(common::degToRad(params_.magNoiseDeg)) +
+        faults_.compassOffsetRad);
 
     // GPS: slowly varying position error (Gauss–Markov), white velocity noise.
     const double a = std::exp(-dt / kGpsErrorTimeConstantS);
@@ -99,17 +101,19 @@ const SensorReadings& SensorSuite::update(const SensorTruth& t, double dt) {
     readings_.gps.fresh = false;
     if (gpsTimer_ >= 1.0 / params_.gpsRateHz) {
         gpsTimer_ = std::fmod(gpsTimer_, 1.0 / params_.gpsRateHz);
-        const bool fix = sinceOn_ >= params_.gpsAcquisitionS;
+        const bool fix = sinceOn_ >= params_.gpsAcquisitionS && !faults_.gpsLost;
         readings_.gps.fix = fix;
-        // Satellites appear during acquisition; then 10–16 in view.
+        // Satellites appear during acquisition; then 10–16 in view (none while lost).
         const double progress =
-            std::clamp(sinceOn_ / std::max(params_.gpsAcquisitionS, 1e-3), 0.0, 1.0);
+            faults_.gpsLost
+                ? 0.0
+                : std::clamp(sinceOn_ / std::max(params_.gpsAcquisitionS, 1e-3), 0.0, 1.0);
         readings_.gps.satellites =
             static_cast<int>(std::lround(progress * (10.0 + satelliteDrift_)));
         readings_.gps.hdop =
             readings_.gps.satellites > 3 ? 0.5 + 6.0 / readings_.gps.satellites : 99.9;
         if (fix) {
-            readings_.gps.position = t.body.position + gpsError_;
+            readings_.gps.position = t.body.position + gpsError_ + faults_.gpsOffset;
             readings_.gps.velocity =
                 t.body.velocity + gaussian(random_, params_.gpsVelocityNoiseMs);
         }

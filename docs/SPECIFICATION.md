@@ -1748,8 +1748,7 @@ so Markdown pages appear in the generated site.
   Each sits on real-world coordinates and site elevations; a test checks that pads are on
   level ground, beacons and gates above the terrain and everything inside the terrain area.
 - **Deferred:** the 4 ground missions (M6) and the real-terrain missions (GDAL/online sources
-  of M4); physical effects of scheduled failures (the runner raises the events; the flight
-  model reacts in M7, with failure injection); mouse picking of items in the viewport
+  of M4); physical effects of scheduled failures (done in M7 step 6); mouse picking of items in the viewport
   (FR-ITM-06, *S*); a gate-course timer in free flight; the mission editor (FR-MIS-14, *C*);
   the History tab (M7).
 - **Tests:** headless missions flown by a stick autopilot through the real world, flight
@@ -2074,6 +2073,32 @@ so Markdown pages appear in the generated site.
     1.5 m for the camera and survey drones, 2.3 m for the racer. RTH lands within about 2 m
     of home. No terrain following: the return height is barometric above the take-off
     point, so the pilot must keep it above obstacles on the way.
+- **Step 6 — Failure injection (done, FR-PHY-15 S, FR-MIS-07 S):**
+  - *Model:* `physics::FailureInjector` holds the active failures, each with its own clock
+    (`durationS`, or until reset). Every tick `sim::World` turns them into `VehicleFaults` and
+    hands them to the vehicle:
+    - sensor errors in `SensorSuite`: GPS without a fix, a GPS offset that grows at `driftMs`
+      up to `magnitudeM` in a seeded direction, a compass offset, a baro offset growing the
+      same way;
+    - the share of thrust each rotor keeps (the ESC output scaled by its square root) or the
+      drive voltage of a wheel motor.
+
+    A battery drop takes `fraction` of the rated capacity at once (`Battery::loseCapacity`).
+    RC loss clears the link of the controls the vehicle sees.
+  - *Behaviour:* the effects come out of the existing models, not scripts:
+    - Position hold follows a drifting GPS, and becomes altitude hold without a fix.
+    - Altitude hold sinks when the baro reads high.
+    - A compass offset turns the estimated heading.
+    - With 70 % thrust left on one motor all three quads lurch, then fly on level. A dead
+      motor brings a quad down; on the rover it drags its side.
+    - RC loss starts the failsafe (RTH with GPS).
+  - *Missions:* the runner's `FailureInjected` event becomes `World::injectFailure` with the
+    file's parameters (`sim::missionFailure`). The loader rejects a motor above 4 on an
+    aerial drone. A reset or a retry ends every failure.
+  - *Free mode:* a **Failure injection** group in the Simulation tab (type, motor and
+    thrust left, duration, *Inject*, *Clear all*, the active list); disabled during missions.
+  - *Events:* `FailureEvent` (started / ended) in the event log. The HUD shows only what the
+    pilot would see (GPS no fix, failsafe, the drone's behaviour).
 
 ---
 

@@ -704,6 +704,12 @@ private:
                     f.params[key] = value;
                 }
             }
+            if (f.type == "motorFailure" && m.vehicle.type == VehicleType::Aerial &&
+                number(j, "motor", 1) > physics::AerialProfile::kMotorCount) {
+                error(std::format("failures[{}].motor", i),
+                      std::format("an aerial drone has {} motors",
+                                  physics::AerialProfile::kMotorCount));
+            }
             if (m.rules.timeLimitS && f.atS > *m.rules.timeLimitS) {
                 warning(std::format("failures[{}].atS", i),
                         "is after the time limit, so it never happens");

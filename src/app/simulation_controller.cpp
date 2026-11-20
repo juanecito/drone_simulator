@@ -906,6 +906,17 @@ void SimulationController::keyboardAction(input::KeyboardAction action) {
     selector_->keyboardAction(action);
 }
 
+void SimulationController::injectFailure(const physics::Failure& failure) {
+    if (mission_) {
+        return;
+    }
+    loop_->post([failure](sim::World& w) { w.injectFailure(failure); });
+}
+
+void SimulationController::clearFailures() {
+    loop_->post([](sim::World& w) { w.clearFailures(); });
+}
+
 common::Result<void> SimulationController::setJoystickMapping(
     std::optional<input::InputMapping> mapping) {
     if (mapping && mapping->vehicle != vehicleControls()) {

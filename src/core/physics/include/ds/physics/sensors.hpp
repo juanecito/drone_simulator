@@ -7,6 +7,7 @@
 
 #include "ds/common/random.hpp"
 #include "ds/physics/aerial_profile.hpp"
+#include "ds/physics/failures.hpp"
 #include "ds/physics/rigid_body.hpp"
 
 /// @file
@@ -75,6 +76,8 @@ public:
     const SensorReadings& update(const SensorTruth& truth, double dt);
     /// @brief Last readings.
     [[nodiscard]] const SensorReadings& readings() const noexcept { return readings_; }
+    /// @brief Failure injection (FR-PHY-15): errors added from the next update on.
+    void setFaults(const SensorFaults& faults) noexcept { faults_ = faults; }
     /// @brief Current gyro bias (tests).
     [[nodiscard]] const Vec3& gyroBias() const noexcept { return gyroBias_; }
 
@@ -91,6 +94,7 @@ private:
     double baroTimer_ = 0.0;
     double gpsTimer_ = 0.0;
     double satelliteDrift_ = 0.0;
+    SensorFaults faults_;
 };
 
 }  // namespace ds::physics

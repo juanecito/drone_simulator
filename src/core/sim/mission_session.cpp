@@ -11,6 +11,28 @@
 #include "ds/sim/world.hpp"
 
 namespace ds::sim {
+
+std::optional<physics::Failure> missionFailure(const missions::FailureSpec& spec) {
+    const auto type = physics::parseFailureType(spec.type);
+    if (!type) {
+        return std::nullopt;
+    }
+    physics::Failure f = physics::defaultFailure(*type);
+    const common::Json& p = spec.params;
+    const auto number = [&p](const char* key, double fallback) {
+        return p.contains(key) && p[key].is_number() ? p[key].get<double>() : fallback;
+    };
+    if (p.contains("durationS") && p["durationS"].is_number()) {
+        f.durationS = p["durationS"].get<double>();
+    }
+    f.magnitudeM = number("magnitudeM", f.magnitudeM);
+    f.driftMs = number("driftMs", f.driftMs);
+    f.motor = static_cast<int>(std::lround(number("motor", f.motor)));
+    f.efficiency = number("efficiency", f.efficiency);
+    f.fraction = number("fraction", f.fraction);
+    f.offsetDeg = number("offsetDeg", f.offsetDeg);
+    return f;
+}
 namespace {
 
 using missions::MissionEvent;
@@ -148,7 +170,12 @@ void MissionSession::handleMissionEvents(World& world) {
                 bus.publish(PayloadReleasedEvent{});
                 break;
             case MissionEvent::Kind::FailureInjected:
-                bus.publish(MissionMessageEvent{"Failure injected: " + e.text});
+                // World::injectFailure() publishes the FailureEvent.
+                if (auto failure = missionFailure({0.0, e.text, e.params})) {
+                    world.injectFailure(*failure);
+                } else {
+                    bus.publish(MissionMessageEvent{"Unknown failure: " + e.text});
+                }
                 break;
             case MissionEvent::Kind::Succeeded: bus.publish(MissionSucceededEvent{}); break;
             case MissionEvent::Kind::Failed: bus.publish(MissionFailedEvent{e.text}); break;

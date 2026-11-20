@@ -346,6 +346,11 @@ void GroundVehicle::sampleTerrain(const EnvironmentSample& env) {
     waterDepth_ = env.waterLevelM ? std::max(0.0, *env.waterLevelM - env.ground.heightM) : 0.0;
 }
 
+void GroundVehicle::setFaults(const VehicleFaults& faults) {
+    faults_ = faults;
+    sensors_.setFaults(faults.sensors);
+}
+
 double GroundVehicle::motorCurrent(int wheel, double omega) const noexcept {
     const DrivetrainParams& d = profile_.drivetrain;
     const bool right = profile_.isRightWheel(wheel);
@@ -357,6 +362,9 @@ double GroundVehicle::motorCurrent(int wheel, double omega) const noexcept {
         return 0.0;  // Neutral: the ESC lets the motor coast.
     } else {
         volts = command * supplyVolts_;
+        if (wheel >= 0 && static_cast<std::size_t>(wheel) < kMaxFailureMotors) {
+            volts *= faults_.motorEfficiency[static_cast<std::size_t>(wheel)];
+        }
     }
     const double backEmf = d.gearRatio * omega / kvRad(d);
     return std::clamp((volts - backEmf) / d.motorResistanceOhm, -d.maxCurrentA, d.maxCurrentA);

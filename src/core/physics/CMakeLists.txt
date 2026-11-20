@@ -11,6 +11,7 @@ ds_add_core_module(physics
         atmosphere.cpp
         drive_controller.cpp
         estimator.cpp
+        failures.cpp
         flight_controller.cpp
         frames.cpp
         ground_profile.cpp

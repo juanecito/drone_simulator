@@ -12,6 +12,7 @@
 
 #include "ds/common/error.hpp"
 #include "ds/missions/mission_runner.hpp"
+#include "ds/physics/failures.hpp"
 
 /// @file
 /// @brief A mission flown in the simulation (FR-MIS-08, FR-LOOP-05): couples a
@@ -23,6 +24,10 @@
 namespace ds::sim {
 
 class World;
+
+/// @brief The failure a mission's `failures[]` entry injects (FR-MIS-07): its type and the
+/// parameters it gives (the others keep defaultFailure()). Empty for an unknown type.
+[[nodiscard]] std::optional<physics::Failure> missionFailure(const missions::FailureSpec& spec);
 
 /// @brief Interval between two points of the recorded flight path (debrief), seconds.
 inline constexpr double kPathSampleS = 0.5;

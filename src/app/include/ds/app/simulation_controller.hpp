@@ -215,6 +215,11 @@ public:
     void setFlightKeys(std::uint32_t keys);
     /// @brief One-shot keyboard action (arm, modes, lights).
     void keyboardAction(input::KeyboardAction action);
+    /// @brief Failure injection in free mode (FR-PHY-15); ignored during a mission, which
+    /// schedules its own.
+    void injectFailure(const physics::Failure& failure);
+    /// @brief Ends every injected failure.
+    void clearFailures();
     /// @brief Flies the current vehicle type with @p mapping (a joystick mapping of that
     /// type), or with the keyboard if empty; remembered per vehicle type.
     common::Result<void> setJoystickMapping(std::optional<input::InputMapping> mapping);

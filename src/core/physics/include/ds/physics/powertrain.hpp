@@ -81,6 +81,8 @@ public:
     void reset(double temperatureC, double soc = 1.0);
     /// @brief Draws @p currentA for @p dt seconds with the air at @p ambientC.
     void update(double currentA, double ambientC, double dt);
+    /// @brief A cell fault (FR-PHY-15): @p fraction of the rated capacity is lost at once.
+    void loseCapacity(double fraction) noexcept;
 
     /// @brief Terminal voltage at the current load.
     [[nodiscard]] double voltage() const noexcept { return voltage_; }

@@ -256,6 +256,7 @@ The checks run in `ctest`. The most relevant tests:
 | Battery in the cold (NFR-REAL-11) | `physics_test.cpp`: delivered capacity and mid-discharge voltage vs. temperature |
 | Rain (FR-WX-06) | `flight_test.cpp`: water film mass, drop momentum |
 | Controller | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Angle-mode limits, Acro step response |
+| Failure injection (FR-PHY-15) | `flight_test.cpp`, `ground_test.cpp`: injector timing, sensor faults in the readings, GPS loss and drift in position hold, degraded and dead motors, cell fault, compass and baro errors, RC loss; `mission_flight_test.cpp`: scheduled failures reach the vehicle |
 | Position hold and RTH (FR-PHY-13, FR-WIND-06) | `flight_test.cpp`: hold within 2 m (estimate) up to each profile's wind limit and blown away 3 levels above it, stick speed and braking, RTH climb → return → land within the GPS error of home, failsafe RTH, GPS pre-arm checks |
 
 ### Acro step response

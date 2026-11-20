@@ -9,6 +9,8 @@
 
 class QComboBox;
 class QLabel;
+class QSpinBox;
+class QGroupBox;
 class QListWidget;
 class QProgressBar;
 class QPushButton;
@@ -37,6 +39,7 @@ private:
     void buildUi();
     void updateButtons();
     void addEvent(const QString& text);
+    void updateFailureControls();
 
     SimulationController* simulation_;
     QPushButton* start_ = nullptr;
@@ -57,6 +60,13 @@ private:
     QLabel* telemetry_ = nullptr;
     QLabel* stats_ = nullptr;
     QListWidget* events_ = nullptr;
+    // Failure injection (FR-PHY-15).
+    QGroupBox* failureBox_ = nullptr;
+    QComboBox* failureType_ = nullptr;
+    QSpinBox* failureMotor_ = nullptr;
+    QSpinBox* failurePower_ = nullptr;
+    QSpinBox* failureDuration_ = nullptr;
+    QLabel* activeFailures_ = nullptr;
 };
 
 }  // namespace ds::app

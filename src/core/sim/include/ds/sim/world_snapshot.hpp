@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "ds/astro/time.hpp"
 #include "ds/input/control.hpp"
@@ -65,6 +66,7 @@ struct WorldSnapshot {
     std::array<weather::Drift, weather::kMaxCloudLayers> cloudDrift{};  ///< Cloud motion.
     weather::GroundCover groundCover;     ///< Wet ground and lying snow.
     double visibilityM = 50'000.0;        ///< Visibility at the vehicle's height.
+    std::vector<std::string> activeFailures;  ///< Injected failures now (FR-PHY-15).
     SessionStats stats;                   ///< Flight statistics.
     double sunElevationDeg = 45.0;        ///< Apparent sun elevation at the origin.
     /// Flight-rule warnings (the mission's, or free mode's, FR-MIS-06b/06d).

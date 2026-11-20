@@ -15,6 +15,7 @@
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/physics/atmosphere.hpp"
 #include "ds/physics/estimator.hpp"
+#include "ds/physics/failures.hpp"
 #include "ds/physics/pilot_command.hpp"
 #include "ds/physics/powertrain.hpp"
 #include "ds/physics/rigid_body.hpp"
@@ -243,6 +244,10 @@ public:
     virtual void attachPayload(double massKg, const Vec3& offsetBody, double dragAreaM2) = 0;
     /// @brief Releases the payload.
     virtual void releasePayload() = 0;
+    /// @brief Failure injection (FR-PHY-15): sensor errors and motor power, from now on.
+    virtual void setFaults(const VehicleFaults& faults) = 0;
+    /// @brief Failure injection: a battery cell fault loses @p fraction of the capacity.
+    virtual void loseBatteryCapacity(double fraction) = 0;
 };
 
 }  // namespace ds::physics

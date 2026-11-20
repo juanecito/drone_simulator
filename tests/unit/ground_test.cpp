@@ -300,6 +300,23 @@ TEST(GroundVehicle, ReachesTheTopSpeedOfItsProfileAndDrivesStraight) {
     EXPECT_GT(t.ground.odometerM, 4.0);
 }
 
+TEST(GroundVehicle, AFailedWheelMotorPullsToItsSide) {
+    // FR-PHY-15: motor 1 (front left) dead — the left side drives on one motor and drags, so
+    // the rover is slower and veers left.
+    sim::World world(roverWorld());
+    Driver d{world};
+    d.arm();
+    physics::Failure f = physics::defaultFailure(physics::FailureType::MotorFailure);
+    f.motor = 1;
+    world.injectFailure(f);
+    d.controls.drive = 1.0;
+    d.run(4.0);
+    const double expected = physics::computeGroundStats(rover()).topSpeedMs;
+    EXPECT_LT(world.vehicle().telemetry().ground.speedMs, 0.95 * expected);
+    EXPECT_LT(headingDeg(world), -2.0);
+    EXPECT_FALSE(world.vehicle().telemetry().ground.rolledOver);
+}
+
 TEST(GroundVehicle, AcceleratesAsTheDerivedFiguresSay) {
     sim::World world(roverWorld());
     Driver d{world};

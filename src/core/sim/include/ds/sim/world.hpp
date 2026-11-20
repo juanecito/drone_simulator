@@ -15,6 +15,7 @@
 #include "ds/items/registry.hpp"
 #include "ds/missions/flight_rules.hpp"
 #include "ds/physics/aerial_vehicle.hpp"
+#include "ds/physics/failures.hpp"
 #include "ds/physics/ground_vehicle.hpp"
 #include "ds/physics/vehicle_factory.hpp"
 #include "ds/physics/wind.hpp"
@@ -101,6 +102,13 @@ public:
     void reset();
     /// @brief Moves the take-off point and resets.
     void resetAt(const physics::Vec3& position, double headingRad);
+    /// @brief Failure injection (FR-PHY-15): starts @p failure now (missions schedule them;
+    /// free mode injects from the Simulation tab). A reset ends every failure.
+    void injectFailure(const physics::Failure& failure);
+    /// @brief Ends every injected failure.
+    void clearFailures();
+    /// @brief The active injected failures.
+    [[nodiscard]] const physics::FailureInjector& failures() const noexcept { return failures_; }
     /// @brief Advances one step of @p dt seconds with @p controls (FR-LOOP-05 order).
     void tick(const input::ControlInputs& controls, double dt);
 
@@ -212,6 +220,7 @@ private:
     physics::EnvironmentSample env_;
     physics::SurfaceQuery surfaceQuery_;  ///< surfaceAt(), for the vehicle's contacts.
     EventBus events_;
+    physics::FailureInjector failures_;
     double time_ = 0.0;
     std::uint64_t ticks_ = 0;
     std::uint64_t resets_ = 0;

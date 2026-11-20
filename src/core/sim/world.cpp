@@ -93,9 +93,11 @@ std::string describe(const Event& event) {
             } else if constexpr (std::is_same_v<T, ArmRefusedEvent>) {
                 return "Cannot arm: " + e.reason;
             } else if constexpr (std::is_same_v<T, FailsafeEvent>) {
-                return e.active ? "Failsafe: RC link lost — landing" : "RC link restored";
+                return e.active ? "Failsafe: RC link lost" : "RC link restored";
             } else if constexpr (std::is_same_v<T, NumericalResetEvent>) {
                 return "Numerical error — vehicle state reset";
+            } else if constexpr (std::is_same_v<T, FailureEvent>) {
+                return (e.started ? "Failure: " : "Failure ended: ") + e.title;
             } else if constexpr (std::is_same_v<T, PayloadAttachedEvent>) {
                 return std::format("Payload attached ({:.2f} kg)", e.massKg);
             } else if constexpr (std::is_same_v<T, PayloadReleasedEvent>) {
@@ -129,7 +131,8 @@ std::string describe(const Event& event) {
         event);
 }
 
-World::World(WorldConfig config) : config_(std::move(config)) {
+World::World(WorldConfig config)
+    : config_(std::move(config)), failures_(common::mix64(config_.seed ^ 0x494E4A45ULL)) {
     if (!config_.ground) {
         config_.ground = flatGround();
     }
@@ -345,11 +348,26 @@ void World::reset() {
     lastPosition_ = home_;
     stats_ = {};
     controls_ = {};
+    failures_.clear();
+    vehicle_->setFaults({});
     stats_.startedAt = utc();
     if (freeMonitor_) {
         freeMonitor_->reset();
     }
     events_.publish(SimResetEvent{});
+}
+
+void World::injectFailure(const physics::Failure& failure) {
+    failures_.inject(failure);
+    events_.publish(FailureEvent{std::string(physics::failureTitle(failure.type)), true});
+}
+
+void World::clearFailures() {
+    for (const physics::FailureInjector::Active& a : failures_.active()) {
+        events_.publish(FailureEvent{std::string(physics::failureTitle(a.failure.type)), false});
+    }
+    failures_.clear();
+    vehicle_->setFaults({});
 }
 
 void World::resetAt(const physics::Vec3& position, double headingRad) {
@@ -495,6 +513,17 @@ void World::resolveObstacles() {
 void World::tick(const input::ControlInputs& controls, double dt) {
     controls_ = controls;
     physics::Vehicle& v = *vehicle_;
+    // Failure injection (FR-PHY-15): sensor errors, motor power, battery and RC link.
+    for (const physics::Failure& f : failures_.advance(dt)) {
+        events_.publish(FailureEvent{std::string(physics::failureTitle(f.type)), false});
+    }
+    v.setFaults(failures_.vehicleFaults());
+    for (const double fraction : failures_.takeBatteryDrops()) {
+        v.loseBatteryCapacity(fraction);
+    }
+    if (failures_.rcLost()) {
+        controls_.linkValid = false;
+    }
     // Environment at the vehicle (terrain queried once per tick).
     const physics::RigidBodyState& body = v.bodyState();
     const physics::GroundSample g = config_.ground(body.position.x, body.position.z);
@@ -506,7 +535,7 @@ void World::tick(const input::ControlInputs& controls, double dt) {
     // FR-LOOP-05: sensors → controller → physics → collisions → items and missions.
     incidents_.clear();
     v.updateSensors(env_, dt);
-    v.updateController(toPilotCommand(controls), dt);
+    v.updateController(toPilotCommand(controls_), dt);
     v.integrate(env_, dt);
     v.resolveCollisions(env_, dt);
     resolveObstacles();
@@ -546,6 +575,10 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.profileName = physics::profileName(config_.profile);
     s.body = v.bodyState();
     s.controls = controls_;
+    s.activeFailures.clear();
+    for (const physics::FailureInjector::Active& a : failures_.active()) {
+        s.activeFailures.emplace_back(physics::failureTitle(a.failure.type));
+    }
     s.attitude = physics::eulerFromOrientation(s.body.orientation);
     s.telemetry = v.telemetry();
     const physics::GroundSample g = surfaceAt(s.body.position);

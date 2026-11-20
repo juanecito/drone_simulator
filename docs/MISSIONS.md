@@ -210,9 +210,18 @@ the geofence, an empty battery; ground drones also fail on rollover, being stuck
 collisions.
 
 **Failure injection** (`failures[]`, FR-MIS-07): at `atS` seconds of mission time the given
-failure (`gpsDrift`, `gpsLoss`, `motorFailure`, `batteryDrop`, `compassError`, `rcLoss`,
-`baroDrift`) is handed to the simulation with its parameters. The physical effects of the
-injected failures arrive in M7.
+failure starts, lasting `durationS` seconds (until the end of the attempt without it). The
+event log shows it; the HUD shows only what the pilot would notice (no GPS fix, the failsafe).
+
+| `type` | Effect | Parameters (default) |
+|--------|--------|----------------------|
+| `gpsDrift` | The GPS position walks away from the truth in a random direction; position hold and RTH follow it | `driftMs` (0.5), `magnitudeM` (20) |
+| `gpsLoss` | No GPS fix: position hold flies as altitude hold, RTH is unavailable | — |
+| `motorFailure` | One motor keeps a share of its thrust (a ground drone's wheel motor, of its drive); a quad loses control with a dead motor | `motor` 1–4 for a quad (1), `efficiency` 0–1 (0) |
+| `batteryDrop` | A cell fault: a share of the rated capacity is lost at once | `fraction` (0.3) |
+| `compassError` | Magnetic interference: the heading is off, position hold circles or flies away | `offsetDeg` (30) |
+| `rcLoss` | The RC link is lost: the failsafe returns home (with GPS) or lands | — |
+| `baroDrift` | The barometric altitude walks away: altitude hold climbs or sinks | `driftMs` (0.2), `magnitudeM` (15) |
 
 ## Weather
 

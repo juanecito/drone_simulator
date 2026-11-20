@@ -133,6 +133,11 @@ void Battery::reset(double temperatureC, double soc) {
     voltage_ = openCircuitVoltage();
 }
 
+void Battery::loseCapacity(double fraction) noexcept {
+    consumedAh_ = std::min(consumedAh_ + std::clamp(fraction, 0.0, 1.0) * params_.capacityAh,
+                           params_.capacityAh);
+}
+
 double Battery::stateOfCharge() const noexcept {
     const double usable = params_.capacityAh * capacityFactor(params_.chemistry, temperatureC_);
     return std::clamp(1.0 - consumedAh_ / usable, 0.0, 1.0);

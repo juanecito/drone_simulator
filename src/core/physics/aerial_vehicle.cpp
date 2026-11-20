@@ -215,6 +215,11 @@ void AerialVehicle::updateController(const PilotCommand& command, double dt) {
     conditions.landed = onGround_;
     const ControllerOutput out = controller_.update(command, estimator_.state(), conditions, dt);
     commands_ = out.motors;
+    for (std::size_t i = 0; i < commands_.size(); ++i) {
+        // Failure injection: the share of thrust left (thrust grows with the square of the
+        // voltage the ESC applies).
+        commands_[i] *= std::sqrt(std::clamp(faults_.motorEfficiency[i], 0.0, 1.0));
+    }
     if (battery_.depleted()) {
         controller_.forceDisarm();
         commands_.fill(0.0);
@@ -548,6 +553,11 @@ void AerialVehicle::resolveObstacles(const ObstacleProbe& probe) {
     if (gear && n.y > 0.7) {
         onGround_ = true;
     }
+}
+
+void AerialVehicle::setFaults(const VehicleFaults& faults) {
+    faults_ = faults;
+    sensors_.setFaults(faults.sensors);
 }
 
 VehicleTelemetry AerialVehicle::telemetry() const {

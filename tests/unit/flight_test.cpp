@@ -12,8 +12,10 @@
 #include <numbers>
 #include <optional>
 
+#include "ds/common/math.hpp"
 #include "ds/physics/aerial_profile.hpp"
 #include "ds/physics/aerial_vehicle.hpp"
+#include "ds/physics/failures.hpp"
 #include "ds/physics/flight_controller.hpp"
 #include "ds/sim/world.hpp"
 #include "ds/weather/wind_levels.hpp"
@@ -761,6 +763,193 @@ TEST(ReturnToHome, FailsafeReturnsHomeWithGps) {
     EXPECT_FALSE(world.vehicle().armed());
     const Vec3 d = world.vehicle().bodyState().position - home;
     EXPECT_LT(std::hypot(d.x, d.z), 4.0);
+}
+
+// --- Failure injection (M7 step 6, FR-PHY-15) -------------------------------------------------
+
+TEST(FailureInjector, TimingCombinationAndNames) {
+    for (const FailureType t : kFailureTypes) {
+        EXPECT_EQ(parseFailureType(failureTypeName(t)), t);
+        EXPECT_FALSE(failureTitle(t).empty());
+    }
+    EXPECT_FALSE(parseFailureType("meteorStrike").has_value());
+
+    FailureInjector f(3);
+    Failure drift = defaultFailure(FailureType::GpsDrift);
+    drift.driftMs = 2.0;
+    drift.magnitudeM = 5.0;
+    drift.durationS = 10.0;
+    f.inject(drift);
+    Failure motor = defaultFailure(FailureType::MotorFailure);
+    motor.motor = 3;
+    motor.efficiency = 0.5;
+    f.inject(motor);
+    f.inject(motor);  // Two faults on one motor multiply.
+    Failure cell = defaultFailure(FailureType::BatteryDrop);
+    cell.fraction = 0.25;
+    f.inject(cell);
+    EXPECT_EQ(f.takeBatteryDrops(), std::vector<double>{0.25});
+    EXPECT_TRUE(f.takeBatteryDrops().empty());  // Once.
+    EXPECT_EQ(f.active().size(), 3U);
+
+    EXPECT_TRUE(f.advance(1.0).empty());
+    VehicleFaults v = f.vehicleFaults();
+    EXPECT_NEAR(glm::length(v.sensors.gpsOffset), 2.0, 1e-9);
+    EXPECT_NEAR(v.sensors.gpsOffset.y, 0.0, 1e-12);  // Horizontal.
+    EXPECT_DOUBLE_EQ(v.motorEfficiency[2], 0.25);
+    EXPECT_DOUBLE_EQ(v.motorEfficiency[0], 1.0);
+    f.advance(5.0);
+    EXPECT_NEAR(glm::length(f.vehicleFaults().sensors.gpsOffset), 5.0, 1e-9);  // Capped.
+    const std::vector<Failure> ended = f.advance(5.0);
+    ASSERT_EQ(ended.size(), 1U);
+    EXPECT_EQ(ended[0].type, FailureType::GpsDrift);
+    EXPECT_EQ(f.vehicleFaults().sensors.gpsOffset, Vec3(0.0));
+
+    Failure rc = defaultFailure(FailureType::RcLoss);
+    f.inject(rc);
+    EXPECT_TRUE(f.rcLost());
+    f.clear();
+    EXPECT_FALSE(f.rcLost());
+    EXPECT_EQ(f.vehicleFaults(), VehicleFaults{});
+}
+
+TEST(FailureInjection, SensorFaultsReachTheReadings) {
+    AerialProfile p = loadProfile("camera-250g");
+    p.sensors.gpsAcquisitionS = 0.0;
+    SensorSuite clean(p.sensors, 5);
+    SensorSuite faulty(p.sensors, 5);
+    faulty.setFaults({.gpsLost = false,
+                      .gpsOffset = Vec3(3.0, 0.0, -4.0),
+                      .compassOffsetRad = 0.5,
+                      .baroOffsetM = 7.0});
+    SensorTruth t;
+    for (int i = 0; i < 100; ++i) {
+        clean.update(t, kDt);
+        faulty.update(t, kDt);
+    }
+    const SensorReadings& a = clean.readings();
+    const SensorReadings& b = faulty.readings();
+    EXPECT_NEAR(glm::length(b.gps.position - a.gps.position), 5.0, 1e-9);
+    EXPECT_NEAR(b.mag.headingRad - a.mag.headingRad, 0.5, 1e-9);
+    EXPECT_NEAR(b.baro.altitudeM - a.baro.altitudeM, 7.0, 1e-9);
+    faulty.setFaults({.gpsLost = true});
+    for (int i = 0; i < 100; ++i) {
+        faulty.update(t, kDt);
+    }
+    EXPECT_FALSE(faulty.readings().gps.fix);
+    EXPECT_EQ(faulty.readings().gps.satellites, 0);
+}
+
+TEST(FailureInjection, GpsLossDropsPositionHoldUntilTheFixReturns) {
+    sim::World world = gpsWorld("camera-250g");
+    input::ControlInputs c = takeOff(world);
+    c.flightMode = 3;
+    run(world, c, 3.0);
+    ASSERT_EQ(world.vehicle().telemetry().mode, FlightMode::PositionHold);
+    Failure loss = defaultFailure(FailureType::GpsLoss);
+    loss.durationS = 5.0;
+    world.injectFailure(loss);
+    run(world, c, 1.0);
+    EXPECT_FALSE(world.vehicle().telemetry().gps.fix);
+    EXPECT_EQ(world.vehicle().telemetry().mode, FlightMode::AltitudeHold);
+    EXPECT_TRUE(world.vehicle().telemetry().gpsModeUnavailable);
+    run(world, c, 5.0);
+    EXPECT_TRUE(world.failures().active().empty());
+    EXPECT_EQ(world.vehicle().telemetry().mode, FlightMode::PositionHold);
+}
+
+TEST(FailureInjection, GpsDriftPullsPositionHoldAway) {
+    // Position hold follows the GPS: the drone moves opposite to the drift, by its size.
+    sim::World world = gpsWorld("camera-250g");
+    input::ControlInputs c = takeOff(world);
+    c.flightMode = 3;
+    run(world, c, 5.0);
+    const Vec3 before = world.vehicle().bodyState().position;
+    Failure drift = defaultFailure(FailureType::GpsDrift);
+    drift.magnitudeM = 15.0;
+    drift.driftMs = 1.0;
+    world.injectFailure(drift);
+    run(world, c, 25.0);
+    const Vec3 d = world.vehicle().bodyState().position - before;
+    const Vec3 dir = world.failures().active().front().direction;
+    EXPECT_NEAR(glm::dot(Vec3(d.x, 0.0, d.z), dir), -15.0, 3.0);
+}
+
+TEST(FailureInjection, MotorFailureDegradesOrBringsTheDroneDown) {
+    // 70 % thrust left on one motor: a lurch, then the controller commands that motor
+    // harder and the drone flies on level.
+    for (const char* key : kProfiles) {
+        sim::World degraded = gpsWorld(key);
+        input::ControlInputs c = takeOff(degraded);
+        const double height = degraded.vehicle().bodyState().position.y;
+        Failure weak = defaultFailure(FailureType::MotorFailure);
+        weak.motor = 2;
+        weak.efficiency = 0.7;
+        degraded.injectFailure(weak);
+        run(degraded, c, 10.0);
+        const VehicleTelemetry t = degraded.vehicle().telemetry();
+        EXPECT_FALSE(t.crashed) << key;
+        EXPECT_NEAR(degraded.vehicle().bodyState().position.y, height, 1.5) << key;
+        EXPECT_LT(tiltAngle(degraded.vehicle().bodyState().orientation), 5.0 * kDeg) << key;
+    }
+    input::ControlInputs c;
+
+    // A dead motor on a quad: no yaw-free hover is possible; it spins and falls.
+    sim::World dead = gpsWorld("camera-250g");
+    c = takeOff(dead, 6.0);
+    Failure stop = defaultFailure(FailureType::MotorFailure);
+    stop.motor = 1;
+    dead.injectFailure(stop);
+    run(dead, c, 8.0);
+    EXPECT_EQ(dead.vehicle().telemetry().motorCommand[0], 0.0);
+    EXPECT_TRUE(dead.vehicle().telemetry().crashed || dead.vehicle().bodyState().position.y < 1.0);
+}
+
+TEST(FailureInjection, BatteryCellFaultCompassAndBaro) {
+    sim::World world = gpsWorld("camera-250g");
+    input::ControlInputs c = takeOff(world);
+    const double soc = world.vehicle().battery().stateOfCharge();
+    Failure cell = defaultFailure(FailureType::BatteryDrop);
+    cell.fraction = 0.3;
+    world.injectFailure(cell);
+    run(world, c, 0.1);
+    EXPECT_NEAR(world.vehicle().battery().stateOfCharge(), soc - 0.3, 0.02);
+
+    // Compass interference: the estimated heading follows the compass.
+    Failure compass = defaultFailure(FailureType::CompassError);
+    compass.offsetDeg = 40.0;
+    world.injectFailure(compass);
+    run(world, c, 15.0);
+    const double trueYaw = eulerFromOrientation(world.vehicle().bodyState().orientation).yaw;
+    const double estimated = world.vehicle().telemetry().estimate.euler.yaw;
+    EXPECT_NEAR(common::wrapRadiansPi(estimated - trueYaw) / kDeg, 40.0, 4.0);
+
+    // Barometer reading 0.2 m/s too high for 20 s: altitude hold sinks about 4 m.
+    world.clearFailures();
+    run(world, c, 3.0);
+    const double before = world.vehicle().bodyState().position.y;
+    Failure baro = defaultFailure(FailureType::BaroDrift);
+    baro.durationS = 20.0;
+    world.injectFailure(baro);
+    run(world, c, 19.5);
+    EXPECT_NEAR(world.vehicle().bodyState().position.y - before, -3.9, 1.0);
+}
+
+TEST(FailureInjection, RcLossStartsTheFailsafeAndAResetEndsEverything) {
+    sim::World world = gpsWorld("camera-250g");
+    input::ControlInputs c = takeOff(world);
+    Failure rc = defaultFailure(FailureType::RcLoss);
+    rc.durationS = 4.0;
+    world.injectFailure(rc);
+    run(world, c, 2.0);
+    EXPECT_TRUE(world.vehicle().telemetry().failsafe);
+    EXPECT_EQ(world.vehicle().telemetry().mode, FlightMode::ReturnToHome);
+    run(world, c, 3.0);
+    EXPECT_FALSE(world.vehicle().telemetry().failsafe);  // Link back: the pilot has control.
+
+    world.injectFailure(defaultFailure(FailureType::GpsLoss));
+    world.reset();
+    EXPECT_TRUE(world.failures().active().empty());
 }
 
 TEST(FlightController, GpsModesNeedAFix) {

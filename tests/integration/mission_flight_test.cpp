@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <numbers>
@@ -426,6 +427,42 @@ TEST(MissionFlight, CrashFailsTheMissionAndAbortEndsIt) {
     EXPECT_EQ(retried.state, MissionState::PreFlight);
     EXPECT_FALSE(retried.result.has_value());
     EXPECT_EQ(retried.attempt, 1U);
+}
+
+TEST(MissionFlight, ScheduledFailuresReachTheVehicle) {
+    // FR-MIS-07: at its mission time a failure is injected with the file's parameters.
+    std::ifstream in(assets() / "default-missions" / "first-flight.mission.json");
+    common::Json json = common::Json::parse(in);
+    json["failures"] = common::Json::parse(
+        R"([{"atS": 1, "type": "motorFailure", "motor": 2, "efficiency": 0.8, "durationS": 30}])");
+    MissionWorld mw(parseMission(json.dump().c_str()));
+    sim::World& w = *mw.world;
+    std::vector<std::string> events;
+    w.events().subscribe([&](const sim::Event& e) { events.push_back(sim::describe(e)); });
+    const Autopilot pilot(w);
+    const glm::dvec3 pad = w.vehicle().bodyState().position;
+    ASSERT_TRUE(fly(
+        w, [&] { return pilot.controls(pad, 5.0, 0.0); },
+        [&] { return !w.failures().active().empty(); }, 30.0));
+    const physics::Failure& f = w.failures().active().front().failure;
+    EXPECT_EQ(f.type, physics::FailureType::MotorFailure);
+    EXPECT_EQ(f.motor, 2);
+    EXPECT_DOUBLE_EQ(f.efficiency, 0.8);
+    EXPECT_EQ(f.durationS, 30.0);
+    EXPECT_NE(std::ranges::find(events, "Failure: Motor failure"), events.end());
+    // It keeps flying on the weakened motor.
+    fly(w, [&] { return pilot.controls(pad, 5.0, 0.0); }, [] { return false; }, 5.0);
+    EXPECT_FALSE(w.vehicle().telemetry().crashed);
+
+    // The loader knows a quad has four motors.
+    auto validation = app::MissionValidation::create(assets(), {});
+    ASSERT_TRUE(validation.has_value());
+    json["failures"][0]["motor"] = 6;
+    const auto bad = missions::validateMission(json, (*validation)->context);
+    EXPECT_FALSE(bad.valid());
+    EXPECT_NE(bad.report().find("an aerial drone has 4 motors"), std::string::npos);
+    // Unknown types never reach the vehicle.
+    EXPECT_FALSE(sim::missionFailure({0.0, "meteorStrike", {}}).has_value());
 }
 
 TEST(MissionFlight, FreeModeRulesWarnAndEndTheFlightOnlyWhenEnforced) {
