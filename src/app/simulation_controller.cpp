@@ -426,21 +426,31 @@ void SimulationController::createLoop() {
 void SimulationController::updatePilotEye() {
     if (mission_ || replayMission_) {
         // The mission's pilot position (its pilot item, or the spawn point).
-        const double ground = scene_->query().height(missionPilot_.x, missionPilot_.z);
+        const double ground = standingHeight(missionPilot_.x, missionPilot_.z);
         rig_.setPilotEye({missionPilot_.x, ground + kPilotEyeHeightM, missionPilot_.z});
         return;
     }
     const glm::dvec3 behind = home_ - kPilotBehindHomeM * headingVector(homeHeadingRad_);
-    const double ground = scene_->query().height(behind.x, behind.z);
+    const double ground = standingHeight(behind.x, behind.z);
     rig_.setPilotEye({behind.x, ground + kPilotEyeHeightM, behind.z});
     applyFreeFlightRules();
+}
+
+double SimulationController::standingHeight(double x, double z) const {
+    // The pilot stands on the launch platform when it is under them (not inside it).
+    double ground = scene_->query().height(x, z);
+    const std::optional<sim::LaunchPlatform>& pad = loop_->snapshot().launchPlatform;
+    if (pad && pad->covers(x, z)) {
+        ground = std::max(ground, pad->centre.y);
+    }
+    return ground;
 }
 
 void SimulationController::applyFreeFlightRules() {
     // Free mode checks the default rules from the pilot's position behind the take-off point
     // (FR-MIS-06d); while a mission runs the world checks the mission's rules instead.
     const glm::dvec3 behind = home_ - kPilotBehindHomeM * headingVector(homeHeadingRad_);
-    const double ground = scene_->query().height(behind.x, behind.z);
+    const double ground = standingHeight(behind.x, behind.z);
     const sim::FreeFlightRules rules{
         .pilotPosition = {behind.x, ground, behind.z},
         .enforce = settings_ != nullptr && settings_->enforceFreeFlightRules()};
@@ -1366,6 +1376,11 @@ void SimulationController::updateFrame(double dt, double aspect) {
         if (s.resetCount != lastResetCount_) {
             lastResetCount_ = s.resetCount;
             rig_.reset({.position = s.body.position, .orientation = s.body.orientation});
+            // The launch platform of the new start, which the pilot may stand on.
+            if (s.launchPlatform != pilotPlatform_) {
+                pilotPlatform_ = s.launchPlatform;
+                updatePilotEye();
+            }
         }
     }
     saveRecordings();
@@ -1436,6 +1451,19 @@ void SimulationController::updateFrame(double dt, double aspect) {
         itemVisuals_->appendDrawItems(s.simTimeS, highlighted_, items_);
     } else if (freeVisuals_ && !mission_) {
         freeVisuals_->appendDrawItems(s.simTimeS, {}, items_);
+    }
+    // The launch platform on sloped ground (take-off and landing pad).
+    if (s.launchPlatform) {
+        if (!platformMesh_ || platformShown_ != s.launchPlatform) {
+            platformShown_ = s.launchPlatform;
+            platformMesh_ =
+                sim::launchPlatformMesh(s.launchPlatform->halfSizeM,
+                                        s.launchPlatform->centre.y - s.launchPlatform->bottomM);
+        }
+        graphics::DrawItem pad;
+        pad.mesh = platformMesh_;
+        pad.position = glm::dvec3(s.launchPlatform->centre);
+        items_.push_back(std::move(pad));
     }
     if (cameraMode_ != graphics::CameraMode::Fpv) {
         appendVehicleItems(s);

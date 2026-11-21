@@ -629,4 +629,34 @@ void ItemVisuals::appendDrawItems(double timeS, std::span<const std::string> hig
     }
 }
 
+std::shared_ptr<const graphics::Mesh> launchPlatformMesh(double halfSizeM, double depthM) {
+    auto m = std::make_shared<Mesh>();
+    const auto h = static_cast<float>(halfSizeM);
+    const auto d = static_cast<float>(std::max(depthM, 0.05));
+    // Plinth, and a thin dark deck on it.
+    constexpr float kDeck = 0.02F;
+    graphics::appendBox(*m, glm::vec3(0.0F, -0.5F * (d + kDeck), 0.0F),
+                        glm::vec3(h, 0.5F * (d - kDeck), h), {kConcrete});
+    graphics::appendBox(*m, glm::vec3(0.0F, -0.5F * kDeck, 0.0F), glm::vec3(h, 0.5F * kDeck, h),
+                        {kPadColor});
+    // Markings just above the deck: a yellow border, a white circle and an "H".
+    constexpr float y = 0.003F;
+    const MeshMaterial yellow{kYellow, 1.0F, kMarkerGlow};
+    const MeshMaterial white{kWhite, 1.0F, kMarkerGlow};
+    const float line = std::max(0.08F, 0.02F * h);
+    const float in = h - 0.5F * line - 0.05F;
+    for (const float s : {-1.0F, 1.0F}) {
+        graphics::appendBox(*m, glm::vec3(s * in, y, 0.0F), glm::vec3(0.5F * line, y, in), yellow);
+        graphics::appendBox(*m, glm::vec3(0.0F, y, s * in), glm::vec3(in, y, 0.5F * line), yellow);
+    }
+    const float r = 0.75F * h;
+    appendRing(*m, r - line, r, y + 0.001F, white);
+    const float hh = 0.4F * r;
+    const float w = 0.08F * r;
+    graphics::appendBox(*m, glm::vec3(0.0F, y, -0.3F * r), glm::vec3(hh, y, w), white);
+    graphics::appendBox(*m, glm::vec3(0.0F, y, 0.3F * r), glm::vec3(hh, y, w), white);
+    graphics::appendBox(*m, glm::vec3(0.0F, y, 0.0F), glm::vec3(w, y, 0.3F * r), white);
+    return m;
+}
+
 }  // namespace ds::sim

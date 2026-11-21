@@ -245,6 +245,13 @@ physics::GroundSample World::surfaceAt(const physics::Vec3& point) const {
     // A deck counts if its top is at most this far above the point (rounding at the joins).
     constexpr double kClimbM = 0.02;
     physics::GroundSample ground = config_.ground(point.x, point.z);
+    if (platform_ && platform_->covers(point.x, point.z) &&
+        platform_->centre.y <= point.y + kClimbM && platform_->centre.y > ground.heightM) {
+        ground.heightM = platform_->centre.y;
+        ground.normal = physics::Vec3(0.0, 1.0, 0.0);
+        ground.material = physics::SurfaceMaterial::Paved;
+        ground.friction = physics::surfaceProperties(ground.material).peakFriction;
+    }
     const items::ItemRegistry& registry = activeItems();
     if (registry.size() == 0) {
         return ground;
@@ -356,8 +363,12 @@ void World::reset() {
     weather_.restart();
     restartWind();
     const physics::Vec3 start = config_.startPosition;
+    placeLaunchPlatform();
     // Air where the vehicle will rest (the barometer starts from it).
-    const double ground = config_.ground(start.x, start.z).heightM;
+    double ground = config_.ground(start.x, start.z).heightM;
+    if (platform_) {
+        ground = std::max(ground, platform_->centre.y);
+    }
     env_ = sampleEnvironment(physics::Vec3(start.x, ground + vehicle_->restHeightM(), start.z));
     vehicle_->reset(start, config_.startHeadingRad, env_);
     home_ = vehicle_->bodyState().position;
@@ -391,6 +402,17 @@ void World::clearFailures() {
     vehicle_->setFaults({});
 }
 
+void World::placeLaunchPlatform() {
+    platform_.reset();
+    if (const auto* aerial = std::get_if<physics::AerialProfile>(&config_.profile)) {
+        const physics::Vec3 start = config_.startPosition;
+        platform_ =
+            launchPlatformFor(config_.ground, start.x, start.z,
+                              launchPlatformHalfSizeM(footprintRadiusM(vehicle_->collisionPoints()),
+                                                      aerial->sensors.gpsHorizontalNoiseM));
+    }
+}
+
 void World::resetAt(const physics::Vec3& position, double headingRad) {
     config_.startPosition = position;
     config_.startHeadingRad = headingRad;
@@ -406,10 +428,14 @@ void World::setGround(GroundFunction ground, std::optional<double> waterLevelM,
     if (freeRules_) {
         setFreeFlightRules(freeRules_);  // Its line-of-sight test uses the terrain.
     }
+    placeLaunchPlatform();  // On the new ground.
     // Lift the vehicle onto the new surface if it is now underground.
     physics::RigidBodyState body = vehicle_->bodyState();
-    const physics::GroundSample g = config_.ground(body.position.x, body.position.z);
-    const double minimum = g.heightM + vehicle_->restHeightM();
+    double surface = config_.ground(body.position.x, body.position.z).heightM;
+    if (platform_ && platform_->covers(body.position.x, body.position.z)) {
+        surface = std::max(surface, platform_->centre.y);
+    }
+    const double minimum = surface + vehicle_->restHeightM();
     if (body.position.y < minimum) {
         body.position.y = minimum + 0.002;
         body.velocity = physics::Vec3(0.0);
@@ -503,28 +529,42 @@ void World::setFreeItems(const std::vector<items::Item>& freeItems) {
 
 void World::resolveObstacles() {
     const items::ItemRegistry& registry = activeItems();
-    if (registry.size() == 0) {
-        return;
-    }
     // Items near the vehicle that stop it; gate posts reach a few metres below the opening.
     constexpr double kQueryRadiusM = 4.0;
     physics::Vehicle& v = *vehicle_;
+    const physics::Vec3 position = v.bodyState().position;
     struct Near {
         const items::Item* item;
         double massKg;
     };
     std::vector<Near> near;
-    for (const items::ItemId id : registry.queryRadius(v.bodyState().position, kQueryRadiusM)) {
-        const items::Item* item = registry.get(id);
-        if (item != nullptr && items::blocksVehicle(*item)) {
-            near.push_back({item, items::massKg(*item)});
+    if (registry.size() != 0) {
+        for (const items::ItemId id : registry.queryRadius(position, kQueryRadiusM)) {
+            const items::Item* item = registry.get(id);
+            if (item != nullptr && items::blocksVehicle(*item)) {
+                near.push_back({item, items::massKg(*item)});
+            }
         }
     }
-    if (near.empty()) {
+    // The launch platform's sides (and its top where it is not the vehicle's ground).
+    const LaunchPlatform* platform = nullptr;
+    bool topIsGround = false;
+    if (platform_ &&
+        std::abs(position.x - platform_->centre.x) < platform_->halfSizeM + kQueryRadiusM &&
+        std::abs(position.z - platform_->centre.z) < platform_->halfSizeM + kQueryRadiusM) {
+        platform = &*platform_;
+        topIsGround =
+            env_.ground.heightM == platform_->centre.y && platform_->covers(position.x, position.z);
+    }
+    if (near.empty() && platform == nullptr) {
         return;
     }
-    v.resolveObstacles([&near](const physics::Vec3& p) -> std::optional<physics::ObstacleContact> {
+    v.resolveObstacles([&near, platform, topIsGround](
+                           const physics::Vec3& p) -> std::optional<physics::ObstacleContact> {
         std::optional<physics::ObstacleContact> best;
+        if (platform != nullptr) {
+            best = launchPlatformContact(*platform, p, topIsGround);
+        }
         for (const auto& [item, mass] : near) {
             const auto c = items::obstacleContact(*item, p);
             if (c && (!best || c->depthM > best->depthM)) {
@@ -648,6 +688,7 @@ void World::fillSnapshot(WorldSnapshot& s) const {
     s.aglM = s.body.position.y - g.heightM - v.restHeightM();
     s.originAltitudeM = config_.originAltitudeM;
     s.home = home_;
+    s.launchPlatform = platform_;
     const weather::WeatherState& w = weather_.state();
     const weather::WindLevel level = config_.windTable.interpolated(w.conditions.windLevel);
     s.windLevel = static_cast<int>(std::lround(w.conditions.windLevel));

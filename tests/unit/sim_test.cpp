@@ -7,6 +7,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
+#include <filesystem>
 #include <thread>
 
 #include "ds/common/event_bus.hpp"
@@ -14,9 +16,11 @@
 #include "ds/common/math.hpp"
 #include "ds/common/triple_buffer.hpp"
 #include "ds/geo/coordinates.hpp"
+#include "ds/physics/ground_profile.hpp"
 #include "ds/sim/events.hpp"
 #include "ds/sim/fixed_step.hpp"
 #include "ds/sim/hud.hpp"
+#include "ds/sim/launch_platform.hpp"
 #include "ds/sim/simulation_loop.hpp"
 #include "ds/sim/world.hpp"
 
@@ -187,6 +191,86 @@ TEST(World, StartsOnTheGroundAndPublishesArmingEvents) {
     }));
     EXPECT_EQ(world.tickCount(), 3U);
     EXPECT_NEAR(world.time(), 0.006, 1e-12);
+}
+
+TEST(LaunchPlatform, OnlyOnSlopedGroundAndOnlyForAerialDrones) {
+    const auto plane = [](double slopeDeg) -> GroundFunction {
+        const double t = std::tan(common::degToRad(slopeDeg));
+        return [t](double x, double z) {
+            physics::GroundSample g;
+            g.heightM = t * (x + z) / std::sqrt(2.0);
+            g.normal = glm::normalize(physics::Vec3(-t / std::sqrt(2.0), 1.0, -t / std::sqrt(2.0)));
+            return g;
+        };
+    };
+    // Flat and gentle ground: none.
+    for (const double slope : {0.0, 4.0}) {
+        EXPECT_FALSE(launchPlatformFor(plane(slope), 0.0, 0.0, 1.0).has_value()) << slope;
+    }
+    // A bumpy but nowhere steep ground counts by its mean slope across the pad.
+    const GroundFunction steps = [](double x, double) {
+        physics::GroundSample g;
+        g.heightM = x > 0.0 ? 0.5 : 0.0;
+        return g;
+    };
+    EXPECT_TRUE(launchPlatformFor(steps, 0.0, 0.0, 1.0).has_value());
+
+    const auto pad = launchPlatformFor(plane(20.0), 10.0, -4.0, 3.0);
+    ASSERT_TRUE(pad.has_value());
+    EXPECT_DOUBLE_EQ(pad->halfSizeM, 3.0);
+    // Level with the highest corner, the plinth below the lowest.
+    const double t = std::tan(common::degToRad(20.0)) / std::sqrt(2.0);
+    EXPECT_NEAR(pad->centre.y, t * (13.0 - 1.0), 0.05);
+    EXPECT_LT(pad->bottomM, t * (7.0 - 7.0) - kLaunchPlatformFootingM + 1e-9);
+    EXPECT_TRUE(pad->covers(12.9, -1.1));
+    EXPECT_FALSE(pad->covers(13.1, -4.0));
+    // Sizes: footprint, margin and GPS error; at least 2 × 2 m.
+    EXPECT_DOUBLE_EQ(launchPlatformHalfSizeM(0.1, 0.0), 1.0);
+    EXPECT_DOUBLE_EQ(launchPlatformHalfSizeM(0.2, 1.0), 0.2 + kLaunchPlatformMarginM + 2.5);
+
+    // Sides push out; the top only when it is not the vehicle's ground.
+    const physics::Vec3 justUnderTop(10.0, pad->centre.y - 0.01, -4.0);
+    EXPECT_FALSE(launchPlatformContact(*pad, justUnderTop, true).has_value());
+    const auto roof = launchPlatformContact(*pad, justUnderTop, false);
+    ASSERT_TRUE(roof.has_value());
+    EXPECT_EQ(roof->normal, physics::Vec3(0.0, 1.0, 0.0));
+    const auto side =
+        launchPlatformContact(*pad, physics::Vec3(7.1, pad->centre.y - 1.0, -4.0), true);
+    ASSERT_TRUE(side.has_value());
+    EXPECT_EQ(side->normal, physics::Vec3(-1.0, 0.0, 0.0));
+    EXPECT_NEAR(side->depthM, 0.1, 1e-9);
+    EXPECT_FALSE(launchPlatformContact(*pad, physics::Vec3(6.9, pad->centre.y - 1.0, -4.0), true));
+
+    // In the world: an aerial drone gets one, its top is the ground, the snapshot has it.
+    WorldConfig config = cameraWorld();
+    config.ground = plane(25.0);
+    World world(std::move(config));
+    ASSERT_TRUE(world.launchPlatform().has_value());
+    const LaunchPlatform& p = *world.launchPlatform();
+    EXPECT_NEAR(world.vehicle().bodyState().position.y, p.centre.y + world.vehicle().restHeightM(),
+                0.01);
+    EXPECT_EQ(world.surfaceAt(physics::Vec3(0.3, p.centre.y + 0.5, 0.2)).heightM, p.centre.y);
+    EXPECT_EQ(world.surfaceAt(physics::Vec3(0.3, p.centre.y + 0.5, 0.2)).normal,
+              physics::Vec3(0.0, 1.0, 0.0));
+    // Under the top (beside the plinth) the terrain is the ground.
+    EXPECT_LT(world.surfaceAt(physics::Vec3(-p.halfSizeM - 1.0, -5.0, 0.0)).heightM, p.centre.y);
+    WorldSnapshot snapshot;
+    world.fillSnapshot(snapshot);
+    EXPECT_EQ(snapshot.launchPlatform, world.launchPlatform());
+    EXPECT_NEAR(snapshot.aglM, 0.0, 0.01);
+    // Moved to flat ground: gone.
+    world.resetAt(physics::Vec3(0.0), 0.0);
+    world.setGround(flatGround(3.0), std::nullopt, 0.0);
+    world.reset();
+    EXPECT_FALSE(world.launchPlatform().has_value());
+
+    // A ground drone drives on slopes (and could not drive off a raised pad): none.
+    auto rover = physics::loadGroundProfile(std::filesystem::path(DS_TEST_ASSETS_DIR) / "vehicles" /
+                                            "ground" / "rover-4wd-3kg.json");
+    ASSERT_TRUE(rover.has_value()) << rover.error().message;
+    world.setGround(plane(25.0), std::nullopt, 0.0);
+    world.setProfile(*rover);
+    EXPECT_FALSE(world.launchPlatform().has_value());
 }
 
 TEST(World, BarometerStartsAtTheTakeOffAltitude) {

@@ -71,4 +71,10 @@ private:
     std::vector<Part> parts_;
 };
 
+/// @brief Mesh of the launch platform (LaunchPlatform), its origin at the centre of the top: a
+/// concrete plinth @p depthM deep under a dark @p halfSizeM × 2 square top with a yellow
+/// border, a white circle and an "H" along the x axis.
+[[nodiscard]] std::shared_ptr<const graphics::Mesh> launchPlatformMesh(double halfSizeM,
+                                                                       double depthM);
+
 }  // namespace ds::sim

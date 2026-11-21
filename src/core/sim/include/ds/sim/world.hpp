@@ -20,6 +20,7 @@
 #include "ds/physics/vehicle_factory.hpp"
 #include "ds/physics/wind.hpp"
 #include "ds/sim/events.hpp"
+#include "ds/sim/launch_platform.hpp"
 #include "ds/sim/mission_session.hpp"
 #include "ds/sim/recording.hpp"
 #include "ds/sim/world_snapshot.hpp"
@@ -184,9 +185,14 @@ public:
     [[nodiscard]] double sunElevationDeg() const noexcept { return sunElevationDeg_; }
 
     /// @brief Surface a vehicle point at @p point stands on (FR-GND-03, FR-ITM-13): the terrain,
-    /// or the top of a ramp or bridge deck under the point that is not above it (by more than
-    /// 2 cm). Decks are paved.
+    /// or the top of a ramp, a bridge deck or the launch platform under the point that is not
+    /// above it (by more than 2 cm). Decks and the platform are paved.
     [[nodiscard]] physics::GroundSample surfaceAt(const physics::Vec3& point) const;
+    /// @brief The level pad an aerial drone starts from on sloped ground (and can land back
+    /// on), placed at every reset; nullopt on flat ground and for ground drones.
+    [[nodiscard]] const std::optional<LaunchPlatform>& launchPlatform() const noexcept {
+        return platform_;
+    }
 
     /// @brief Fills @p snapshot (allocation-free for a reused snapshot).
     void fillSnapshot(WorldSnapshot& snapshot) const;
@@ -238,6 +244,7 @@ private:
     physics::EnvironmentSample sampleEnvironment(const physics::Vec3& position) const;
     [[nodiscard]] const items::ItemRegistry& activeItems() const noexcept;
     void restartWind();
+    void placeLaunchPlatform();
     void rebuildWeather();
     void applyWeatherToWind();
     void publishVehicleEvents();
@@ -269,6 +276,7 @@ private:
     astro::UtcTime clockBase_{};
     double clockBaseTime_ = 0.0;
     physics::Vec3 home_{0.0};
+    std::optional<LaunchPlatform> platform_;
     SessionStats stats_;
     physics::Vec3 lastPosition_{0.0};
     input::ControlInputs controls_;

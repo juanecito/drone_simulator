@@ -379,8 +379,10 @@ starts a clean attempt from PreFlight.
    *Missions › Start Mission…*). The **briefing** shows a map of the area (items, take-off
    point, where you stand), the objectives, rules, weather and the day/night situation. If
    the mission allows it, choose the vehicle profile there. Press **Fly**.
-2. The panel hides and the drone waits on the take-off point. **Arm** it (Space, or the arm
-   switch of your transmitter): the clock starts. The HUD shows the mission panel (state,
+2. The panel hides and the drone waits on the take-off point. Where the ground slopes more
+   than 5°, an aerial drone stands on a level **launch platform** marked with an "H". It
+   serves for the take-off and as the landing spot: return to home lands back on it.
+   **Arm** the drone (Space, or the arm switch of your transmitter): the clock starts. The HUD shows the mission panel (state,
    timer, objectives with the distance to each target) and markers on the current targets.
 3. Rule warnings (height limit, distance, line of sight, no-fly zones, lights, …) appear in
    red; a rule still broken after the grace time (`rules.graceS`, 3 s by default) fails the

@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -17,6 +18,7 @@
 #include "ds/physics/aerial_vehicle.hpp"
 #include "ds/physics/failures.hpp"
 #include "ds/physics/flight_controller.hpp"
+#include "ds/sim/launch_platform.hpp"
 #include "ds/sim/world.hpp"
 #include "ds/weather/wind_levels.hpp"
 
@@ -811,6 +813,87 @@ TEST(ReturnToHome, ClimbsReturnsAndLandsAtHome) {
         world.tick(c, kDt);
         EXPECT_FALSE(world.vehicle().armed()) << key;
         EXPECT_EQ(world.vehicle().telemetry().armBlock, ArmBlock::RthSwitchOn) << key;
+    }
+}
+
+// --- Launch platform -----------------------------------------------------------------------
+
+// A plane rising @p slopeDeg towards +x.
+sim::GroundFunction slopedGround(double slopeDeg) {
+    const double t = std::tan(common::degToRad(slopeDeg));
+    return [t](double x, double /*z*/) {
+        GroundSample g;
+        g.heightM = t * x;
+        g.normal = glm::normalize(Vec3(-t, 1.0, 0.0));
+        return g;
+    };
+}
+
+double tiltDeg(const sim::World& world) {
+    const Vec3 up = world.vehicle().bodyState().orientation * Vec3(0.0, 0.0, -1.0);
+    return common::radToDeg(std::acos(std::clamp(up.y, -1.0, 1.0)));
+}
+
+TEST(LaunchPlatform, SteepStartStandsLevelAndReturnToHomeLandsBackOnIt) {
+    for (const char* key : kProfiles) {
+        AerialProfile p = loadProfile(key);
+        p.sensors.gpsAcquisitionS = 1.0;
+        sim::WorldConfig config;
+        config.profile = p;
+        config.seed = 7;
+        config.ground = slopedGround(25.0);
+        sim::World world(std::move(config));
+        ASSERT_TRUE(world.launchPlatform().has_value()) << key;
+        const sim::LaunchPlatform pad = *world.launchPlatform();
+        const double restY = pad.centre.y + world.vehicle().restHeightM();
+        // Without the platform these drones roll over on a 25° slope.
+        run(world, input::ControlInputs{}, 3.0);
+        EXPECT_LT(tiltDeg(world), 1.0) << key;
+        EXPECT_NEAR(world.vehicle().bodyState().position.y, restY, 0.01) << key;
+        EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+
+        // Away across and down the slope (the hill rises towards +x), then home.
+        input::ControlInputs c = takeOff(world);
+        c.flightMode = 3;
+        c.pitch = 1.0;
+        c.roll = -0.5;
+        run(world, c, 8.0);
+        EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+        c.pitch = c.roll = 0.0;
+        c.returnToHome = true;
+        double t = 0.0;
+        while (world.vehicle().armed() && t < 150.0) {
+            world.tick(c, kDt);
+            t += kDt;
+        }
+        // Landed and disarmed on the pad, level, despite the GPS error.
+        EXPECT_FALSE(world.vehicle().armed()) << key;
+        EXPECT_FALSE(world.vehicle().telemetry().crashed) << key;
+        const Vec3 at = world.vehicle().bodyState().position;
+        EXPECT_TRUE(pad.covers(at.x, at.z)) << key << " at " << at.x << ", " << at.z;
+        EXPECT_NEAR(at.y, restY, 0.02) << key;
+        EXPECT_LT(tiltDeg(world), 1.0) << key;
+    }
+}
+
+TEST(LaunchPlatform, ItsSidesAreSolid) {
+    AerialProfile p = loadProfile("camera-250g");
+    p.sensors.gpsAcquisitionS = 1.0;
+    sim::WorldConfig config;
+    config.profile = p;
+    config.ground = slopedGround(30.0);
+    sim::World world(std::move(config));
+    ASSERT_TRUE(world.launchPlatform().has_value());
+    const sim::LaunchPlatform pad = *world.launchPlatform();
+    // Below the top on the downhill side, moving at the platform's wall (−x side).
+    RigidBodyState body = world.vehicle().bodyState();
+    body.position = Vec3(pad.centre.x - pad.halfSizeM - 0.5, pad.centre.y - 1.0, pad.centre.z);
+    body.velocity = Vec3(1.5, 0.0, 0.0);
+    world.vehicle().setBodyState(body);
+    input::ControlInputs c;
+    for (int i = 0; i < 400; ++i) {
+        world.tick(c, kDt);
+        EXPECT_LE(world.vehicle().bodyState().position.x, pad.centre.x - pad.halfSizeM + 0.3);
     }
 }
 

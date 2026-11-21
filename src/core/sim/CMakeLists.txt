@@ -6,6 +6,7 @@ ds_add_core_module(sim
         fixed_step.cpp
         hud.cpp
         item_visuals.cpp
+        launch_platform.cpp
         mission_session.cpp
         module.cpp
         simulation_loop.cpp

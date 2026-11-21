@@ -230,6 +230,25 @@ four times per step.
   3 m/s for the camera and survey drones).
   The motors stop, and the vehicle must be reset.
 - **Water:** landing in water is a crash.
+- **Launch platform (`sim/launch_platform.hpp`):** an aerial drone starting where the ground
+  slopes more than 5° stands on a level, solid square pad instead of the hillside. It is
+  placed at every reset and is used for take-off and as the landing spot.
+  - Without it, a disarmed drone sits tilted with the slope. It rolls over from about 15°
+    (survey drone), 20° (camera drone) or 25° (racer).
+  - The slope is checked over the pad. A sample normal steeper than 5° counts, and so does
+    a height range across the diagonal of more than 5° (steps and bumps).
+  - The pad's half side is the drone's footprint plus 0.6 m plus 2.5 × the GPS error (1σ),
+    at least 1 m: about 6.5 × 6.5 m for the camera and survey drones and 9 × 9 m for the
+    racer. A return to home lands where the GPS puts home, measured up to 3.4 m (2.8σ)
+    away, so it still lands on the pad.
+  - The top is level with the highest ground under the pad, so the hillside never pokes
+    through. The concrete plinth reaches 0.5 m below the lowest ground under the pad.
+  - The top is the ground (paved) for every contact while the drone is over it, so AGL,
+    ground effect and landing detection use it. The sides are solid, and away from the pad
+    its top acts like a roof.
+  - Ground drones get no platform: they are built for slopes and could not drive off it.
+  - The free-flight pilot stands on the pad when behind the drone on it.
+  - The pad is drawn with a yellow border, a white circle and an "H".
 
 ## 9. Reference profiles (`assets/vehicles/aerial/`)
 
@@ -269,6 +288,7 @@ The checks run in `ctest`. The most relevant tests:
 | Rain (FR-WX-06) | `flight_test.cpp`: water film mass, drop momentum |
 | Controller (NFR-REAL-04) | `flight_test.cpp`: rate curves, mixer, pre-arm checks, failsafe, Acro step response (overshoot < 30 %, no sustained oscillation); Angle mode holds its tilt limit and self-levels without a GPS fix: at most 10° while braking, within 1.5° of level and below 1.5 m/s after 25 s |
 | Failure injection (FR-PHY-15) | `flight_test.cpp`, `ground_test.cpp`: injector timing, sensor faults in the readings, GPS loss and drift in position hold, degraded and dead motors, cell fault, compass and baro errors, RC loss; `mission_flight_test.cpp`: scheduled failures reach the vehicle |
+| Launch platform | `flight_test.cpp`: each profile on a 25° slope stands level on the pad, takes off, flies away, and its RTH lands back on the pad, level and uncrashed; the pad's sides stop the drone; `sim_test.cpp`: none on flat or 4° ground or for ground drones, one on bumpy ground, top at the highest ground, size, contacts, snapshot |
 | Position hold and RTH (FR-PHY-13, FR-WIND-06) | `flight_test.cpp`: hold within 2 m (estimate) up to each profile's wind limit and blown away (more than 20 m from the take-off point) at the first level whose mean wind is 20 % beyond the limit, stick speed and braking, RTH climb → return → land within the GPS error of home, failsafe RTH, GPS pre-arm checks |
 
 ### Holding position in a steady wind (NFR-REAL-08)

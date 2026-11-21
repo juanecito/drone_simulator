@@ -252,12 +252,24 @@ TEST_F(SimulationPanelsTest, CamerasDrawItemsAndHud) {
 
     sim_->setCameraMode(graphics::CameraMode::Fpv);
     run(0.01);
-    EXPECT_TRUE(sim_->drawItems().empty());  // Not drawn from its own camera.
+    // Not drawn from its own camera; only the launch platform of the sloped start remains.
+    EXPECT_EQ(sim_->drawItems().size(), sim_->snapshot().launchPlatform ? 1U : 0U);
     EXPECT_LT(glm::distance(sim_->vehicleCamera().position, sim_->vehiclePosition()), 0.2);
 
     sim_->setCameraMode(graphics::CameraMode::LineOfSight);
     run(0.01);
     EXPECT_FALSE(sim_->hud().pilotDistance.text.empty());
+    // The default terrain slopes about 10° at the start: the drone stands on a launch
+    // platform, and the pilot behind it stands on its top, not inside it.
+    const auto& pad = sim_->snapshot().launchPlatform;
+    ASSERT_TRUE(pad.has_value());
+    const glm::dvec3 eye = sim_->vehicleCamera().position;
+    if (pad->covers(eye.x, eye.z)) {
+        EXPECT_GT(eye.y, pad->centre.y + 1.5);
+    }
+    EXPECT_TRUE(std::ranges::any_of(sim_->drawItems(), [&](const graphics::DrawItem& d) {
+        return d.position == glm::dvec3(pad->centre);
+    }));
     sim_->cycleCameraMode();
     EXPECT_EQ(sim_->cameraMode(), graphics::CameraMode::Free);
 

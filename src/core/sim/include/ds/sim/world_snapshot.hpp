@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "ds/input/control.hpp"
 #include "ds/missions/flight_rules.hpp"
 #include "ds/physics/vehicle.hpp"
+#include "ds/sim/launch_platform.hpp"
 #include "ds/sim/mission_session.hpp"
 #include "ds/weather/weather.hpp"
 
@@ -65,6 +67,7 @@ struct WorldSnapshot {
     double aglM = 0.0;                    ///< Height of the landing gear above the terrain.
     double originAltitudeM = 0.0;         ///< AMSL altitude of world height 0.
     physics::Vec3 home{0.0};              ///< Take-off position.
+    std::optional<LaunchPlatform> launchPlatform;  ///< Pad under the take-off position, if any.
     int windLevel = 0;                    ///< Wind level 0–10.
     double windFromDeg = 0.0;             ///< Current mean wind direction (from), degrees true.
     double windMeanSpeedMs = 0.0;         ///< Level's mean speed at 10 m.

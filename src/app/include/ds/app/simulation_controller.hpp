@@ -366,6 +366,8 @@ private:
     [[nodiscard]] common::Result<std::unique_ptr<missions::MissionRunner>> enterMissionScene(
         const missions::MissionDefinition& mission, const std::filesystem::path& missionDir);
     void updatePilotEye();
+    // Height the pilot stands at: the terrain, or the launch platform's top over it.
+    [[nodiscard]] double standingHeight(double x, double z) const;
     void applyFreeFlightRules();
     void refuseInMission(const QString& what);
     [[nodiscard]] sim::GroundFunction groundFunction() const;
@@ -413,6 +415,10 @@ private:
     // Mission.
     std::optional<missions::MissionDefinition> mission_;
     std::unique_ptr<sim::ItemVisuals> itemVisuals_;
+    // Launch platform under the take-off position (sim::LaunchPlatform), its mesh and size.
+    std::shared_ptr<const graphics::Mesh> platformMesh_;
+    std::optional<sim::LaunchPlatform> platformShown_;
+    std::optional<sim::LaunchPlatform> pilotPlatform_;  // The pilot eye was placed with it.
     std::unique_ptr<sim::ItemVisuals> freeVisuals_;
     std::vector<std::string> highlighted_;
     glm::dvec3 missionSpawn_{0.0};
