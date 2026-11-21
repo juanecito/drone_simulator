@@ -123,6 +123,8 @@ private:
     bool commandKey(SimulationController& sim, int key);
     void captureMouse();
     void releaseGl();
+    // Next frame after a buffer swap: at once, or slowly while a file dialog is open.
+    void scheduleFrame();
     void renderScene(const graphics::FrameTarget& target);
     void paintHud(const SimulationController& sim);
     void renderInsets(const SimulationController& sim, const graphics::FrameTarget& target,
@@ -146,6 +148,7 @@ private:
     QElapsedTimer statsClock_;
     QElapsedTimer exposureClock_;
     QElapsedTimer reloadClock_;
+    bool slowFramePending_ = false;
     double animationTime_ = 0.0;
     int framesSinceStats_ = 0;
     double fps_ = 0.0;

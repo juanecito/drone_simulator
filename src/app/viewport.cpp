@@ -3,14 +3,17 @@
 
 #include "ds/app/viewport.hpp"
 
+#include <QApplication>
 #include <QCursor>
 #include <QDateTime>
+#include <QFileDialog>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QPainter>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -42,6 +45,8 @@ int toDevicePixels(double logical, qreal ratio) {
 
 constexpr double kMouseRadiansPerPixel = 0.0025;
 constexpr double kMaxFrameSeconds = 0.25;
+// Frame interval while a file dialog is open (scheduleFrame()).
+constexpr int kDialogFrameMs = 100;
 // Chase insets: width as a fraction of the viewport, at most this fraction of its height.
 constexpr double kInsetWidthFraction = 0.22;
 constexpr double kInsetMaxHeightFraction = 0.28;
@@ -124,7 +129,7 @@ void Viewport::initializeGL() {
             return;
         }
         // Continuous rendering, paced by the buffer swap (V-Sync).
-        connect(this, &QOpenGLWidget::frameSwapped, this, qOverload<>(&QWidget::update),
+        connect(this, &QOpenGLWidget::frameSwapped, this, &Viewport::scheduleFrame,
                 Qt::UniqueConnection);
     }
     clock_.start();
@@ -135,6 +140,23 @@ void Viewport::initializeGL() {
                      .arg(info->major)
                      .arg(info->minor)
                      .arg(QString::fromStdString(info->renderer)));
+}
+
+void Viewport::scheduleFrame() {
+    // A native file dialog (the GTK file chooser on GNOME) runs its own GLib loop and draws
+    // only when Qt has no posted events left. A repaint posted after every swap would starve
+    // it: the dialog never appears and the application looks frozen. Repaint slowly instead.
+    if (qobject_cast<QFileDialog*>(QApplication::activeModalWidget()) != nullptr) {
+        if (!slowFramePending_) {
+            slowFramePending_ = true;
+            QTimer::singleShot(kDialogFrameMs, this, [this] {
+                slowFramePending_ = false;
+                update();
+            });
+        }
+        return;
+    }
+    update();
 }
 
 void Viewport::paintGL() {
