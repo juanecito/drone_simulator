@@ -65,22 +65,34 @@ std::optional<std::string> onlineUnplayable(const missions::MissionDefinition& m
 
 }  // namespace
 
+namespace {
+
+std::optional<std::string> fileUnplayable(const missions::MissionDefinition& mission) {
+    if (!mission.terrain.file) {
+        return "the mission has no elevation files";
+    }
+    if (mission.terrain.file->resolvedElevationFiles.size() !=
+        mission.terrain.file->elevationFiles.size()) {
+        return "elevation files not found";
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 std::optional<std::string> unplayableReason(const missions::MissionDefinition& mission,
                                             DataServices* data) {
     switch (mission.terrain.source) {
         case missions::TerrainSource::Procedural: break;
         case missions::TerrainSource::Online: return onlineUnplayable(mission, data);
         case missions::TerrainSource::File:
-            if (!mission.terrain.file) {
-                return "the mission has no elevation files";
+            if (auto reason = fileUnplayable(mission)) {
+                return reason;
             }
-            if (mission.terrain.file->format == terrain::ElevationFormat::PointCloud) {
-                return "LAS/LAZ elevation files need the lidar rasterizer, not available in this "
-                       "build yet (milestone M4)";
-            }
-            if (mission.terrain.file->resolvedElevationFiles.size() !=
-                mission.terrain.file->elevationFiles.size()) {
-                return "elevation files not found";
+            // The DTM of a point cloud is cached with the downloaded data (FR-TER-L05).
+            if (mission.terrain.file->format == terrain::ElevationFormat::PointCloud &&
+                data == nullptr) {
+                return "LAS/LAZ terrain needs the data cache, not available in this session";
             }
             break;
     }
@@ -91,7 +103,7 @@ namespace {
 
 common::Result<TerrainConfig> fileMissionTerrain(const missions::MissionDefinition& mission) {
     const missions::TerrainSpec& t = mission.terrain;
-    if (auto reason = unplayableReason(mission)) {
+    if (auto reason = fileUnplayable(mission)) {
         return common::makeError(*reason);
     }
     const terrain::FileTerrainSpec& spec = *t.file;
@@ -104,6 +116,9 @@ common::Result<TerrainConfig> fileMissionTerrain(const missions::MissionDefiniti
     f.verticalDatum = spec.verticalDatum;
     f.attribution = spec.attribution;
     f.edge = terrain::EdgeMode::Cliff;
+    f.resolutionM = spec.resolutionM;
+    f.interpolation = spec.interpolation;
+    f.classifyGround = spec.classifyGround;
     if (t.origin) {
         f.origin = t.origin;
     } else if (spec.originLatDeg && spec.originLonDeg) {

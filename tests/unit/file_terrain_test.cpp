@@ -58,6 +58,26 @@ TEST(FileTerrain, ConfigJsonAndPresetRoundTrip) {
     EXPECT_EQ(preset->kind, app::TerrainKind::File);
     EXPECT_EQ(preset->file, c.file);
 
+    // Point-cloud settings.
+    app::TerrainConfig pc = fileConfig("/data/pc/a.LAZ");
+    EXPECT_TRUE(app::isPointCloud(pc.file));
+    EXPECT_FALSE(app::isPointCloud(c.file));
+    pc.file.resolutionM = 0.5;
+    pc.file.interpolation = terrain::LidarInterpolation::Idw;
+    pc.file.classifyGround = true;
+    auto pcBack = app::terrainFromJson(app::terrainToJson(pc));
+    ASSERT_TRUE(pcBack.has_value()) << pcBack.error().message;
+    EXPECT_EQ(*pcBack, pc);
+    QJsonObject bad = app::terrainToJson(pc);
+    QJsonObject badFile = bad.value(QStringLiteral("file")).toObject();
+    badFile.insert(QStringLiteral("resolutionM"), 0.1);
+    bad.insert(QStringLiteral("file"), badFile);
+    EXPECT_FALSE(app::terrainFromJson(bad).has_value());
+    badFile.insert(QStringLiteral("resolutionM"), 1.0);
+    badFile.insert(QStringLiteral("interpolation"), QStringLiteral("max"));
+    bad.insert(QStringLiteral("file"), badFile);
+    EXPECT_FALSE(app::terrainFromJson(bad).has_value());
+
     // No files, or a water edge, are not file terrain.
     QJsonObject json = app::terrainToJson(c);
     QJsonObject file = json.value(QStringLiteral("file")).toObject();
@@ -165,8 +185,19 @@ TEST(FileTerrain, MissionsOnElevationRastersArePlayable) {
     missions::MissionDefinition m = fileMission({});
     ASSERT_TRUE(app::unplayableReason(m).has_value());
     EXPECT_NE(app::unplayableReason(m)->find("not found"), std::string::npos);
+    // A point cloud needs the data cache, where its DTM is kept (FR-TER-L05).
+    m = fileMission({"/data/a.las"});
     m.terrain.file->format = terrain::ElevationFormat::PointCloud;
-    EXPECT_NE(app::unplayableReason(m)->find("LAS/LAZ"), std::string::npos);
+    m.terrain.file->resolutionM = 1.5;
+    m.terrain.file->interpolation = terrain::LidarInterpolation::Idw;
+    ASSERT_TRUE(app::unplayableReason(m).has_value());
+    EXPECT_NE(app::unplayableReason(m)->find("data cache"), std::string::npos);
+    auto lidar = app::missionTerrain(m);
+    ASSERT_TRUE(lidar.has_value()) << lidar.error().message;
+    EXPECT_TRUE(app::isPointCloud(lidar->file));
+    EXPECT_EQ(lidar->file.resolutionM, 1.5);
+    EXPECT_EQ(app::lidarOptions(lidar->file).interpolation, terrain::LidarInterpolation::Idw);
+    EXPECT_FALSE(app::buildTerrain(*lidar).has_value());  // No cache to read the DTM from.
 
     m = fileMission({"/data/a.tif"});
     EXPECT_FALSE(app::unplayableReason(m).has_value());

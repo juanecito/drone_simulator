@@ -153,6 +153,7 @@ common::Result<std::unique_ptr<DataServices>> DataServices::create(
                                     : options.cacheLimitBytes;
     d->cache_ =
         std::make_unique<net::DiskCache>(options.dataDirectory / "cache", *d->cacheIndex_, limit);
+    d->demDir_ = d->cache_->root() / "dem";  // FR-TER-L05; DiskCache only touches its index.
     net::HttpClientOptions http = options.http;
     d->proxy_ = saved.proxy;
     if (http.proxy.empty()) {
@@ -541,10 +542,30 @@ std::vector<net::CacheUsage> DataServices::cacheUsage() {
         log::warn("Cache: {}", u.error().message);
         return {};
     }
+    net::CacheUsage dem{.provider = std::string(kLidarDemCache)};
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(demDir_, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (it->path().extension() == ".tif" && it->is_regular_file(ec)) {
+            ++dem.entries;
+            dem.bytes += it->file_size(ec);
+        }
+    }
+    if (dem.entries > 0) {
+        u->push_back(std::move(dem));
+    }
     return std::move(*u);
 }
 
 common::Result<void> DataServices::clearCache(bool includePinned) {
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(demDir_, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (it->path().extension() == ".tif") {
+            std::error_code removed;
+            std::filesystem::remove(it->path(), removed);
+        }
+    }
     auto ok = cache_->clear({}, includePinned);
     emit networkSettingsChanged();
     if (!ok) {
@@ -565,6 +586,28 @@ common::Result<int> DataServices::releasePinnedAreas() {
 
 const std::filesystem::path& DataServices::cacheDirectory() const noexcept {
     return cache_->root();
+}
+
+common::Result<std::filesystem::path> DataServices::lidarDemPath(
+    std::span<const std::filesystem::path> files, const terrain::LidarOptions& options) const {
+    auto key = terrain::lidarDemKey(files, options);
+    if (!key) {
+        return common::makeError(key.error().message);
+    }
+    return demDir_ / (*key + ".tif");
+}
+
+common::Result<std::filesystem::path> DataServices::lidarDem(
+    std::span<const std::filesystem::path> files, const terrain::LidarOptions& options) const {
+    auto path = lidarDemPath(files, options);
+    if (!path) {
+        return path;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(*path, ec)) {
+        return common::makeError("the elevation model of the point cloud is not made yet");
+    }
+    return path;
 }
 
 void DataServices::setProxy(const std::string& proxy) {
@@ -674,6 +717,37 @@ common::Result<bool> ensureOnlineData(QWidget* parent, DataServices& data,
         return common::makeError(outcome->error().message);
     }
     log::info("Downloaded {} piece(s) of {} {}", (*outcome)->size(), provider.name, (*dataset)->id);
+    return true;
+}
+
+common::Result<bool> ensureLidarDem(QWidget* parent, DataServices& data,
+                                    std::span<const std::filesystem::path> files,
+                                    const terrain::LidarOptions& options) {
+    auto path = data.lidarDemPath(files, options);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(*path, ec)) {
+        return true;
+    }
+    using Outcome = terrain::TerrainResult<terrain::LidarSummary>;
+    auto outcome = runWithProgress<Outcome>(
+        parent,
+        QCoreApplication::translate("ds::app", "Making the elevation model of the point cloud…"),
+        [&](std::stop_token stop, const ProgressReport& report) {
+            return terrain::rasterizeLidar(files, options, *path, stop, report);
+        });
+    if (!outcome) {
+        return false;  // Cancelled.
+    }
+    if (!*outcome) {
+        if (outcome->error().code == terrain::TerrainErrorCode::Cancelled) {
+            return false;
+        }
+        return common::makeError(outcome->error().message);
+    }
+    emit data.networkSettingsChanged();  // Cache usage changed.
     return true;
 }
 

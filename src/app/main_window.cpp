@@ -589,6 +589,24 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
             log::warn("Mission {}: {}", key, warning);
         }
         terrainHash = (*prepared)->terrainDataHash;
+        // LAS / LAZ: the DTM is made once and cached (FR-TER-L05).
+        if (spec.format == terrain::ElevationFormat::PointCloud) {
+            if (data_ == nullptr) {
+                return common::makeError("LAS/LAZ terrain needs the data cache");
+            }
+            auto config = missionTerrain(mission);
+            if (!config) {
+                return std::unexpected(config.error());
+            }
+            auto made =
+                ensureLidarDem(this, *data_, config->file.files, lidarOptions(config->file));
+            if (!made) {
+                return std::unexpected(made.error());
+            }
+            if (!*made) {
+                return common::makeError("cancelled");
+            }
+        }
     }
     // Online terrain: the whole area is cached before PreFlight, so a scored attempt never
     // depends on the network (FR-TER-O09); offered here with its cost in provider calls.

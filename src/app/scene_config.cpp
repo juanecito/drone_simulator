@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <format>
@@ -87,6 +88,15 @@ QJsonObject fileToJson(const FileTerrainConfig& f) {
     if (f.originAltitudeM) {
         json.insert(QStringLiteral("originAltM"), *f.originAltitudeM);
     }
+    if (isPointCloud(f)) {
+        if (f.resolutionM) {
+            json.insert(QStringLiteral("resolutionM"), *f.resolutionM);
+        }
+        json.insert(QStringLiteral("interpolation"),
+                    f.interpolation == terrain::LidarInterpolation::Idw ? QStringLiteral("idw")
+                                                                        : QStringLiteral("tin"));
+        json.insert(QStringLiteral("classifyGround"), f.classifyGround);
+    }
     return json;
 }
 
@@ -130,6 +140,20 @@ common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
     if (auto r = readOptional(json, "originAltM", f.originAltitudeM); !r) {
         return std::unexpected(r.error());
     }
+    if (auto r = readOptional(json, "resolutionM", f.resolutionM); !r) {
+        return std::unexpected(r.error());
+    }
+    if (f.resolutionM && !(*f.resolutionM >= 0.25 && *f.resolutionM <= 100.0)) {
+        return common::makeError("'resolutionM' must be between 0.25 and 100 m");
+    }
+    const QString interpolation =
+        json.value(QStringLiteral("interpolation")).toString(QStringLiteral("tin"));
+    if (interpolation != QLatin1String("tin") && interpolation != QLatin1String("idw")) {
+        return common::makeError("'interpolation' must be \"tin\" or \"idw\"");
+    }
+    f.interpolation = interpolation == QLatin1String("idw") ? terrain::LidarInterpolation::Idw
+                                                            : terrain::LidarInterpolation::Tin;
+    f.classifyGround = json.value(QStringLiteral("classifyGround")).toBool(false);
     return f;
 }
 
@@ -591,22 +615,71 @@ common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config, DataServi
     }
     const FileTerrainConfig& f = config.file;
     terrain::RasterOptions options;
-    options.band = f.band;
-    options.crs = f.crs;
+    std::vector<std::filesystem::path> files = f.files;
+    std::optional<terrain::LidarSummary> lidar;
+    if (isPointCloud(f)) {
+        if (data == nullptr) {
+            return common::makeError("point-cloud terrain needs the data cache");
+        }
+        auto dem = data->lidarDem(f.files, lidarOptions(f));
+        if (!dem) {
+            return std::unexpected(dem.error());
+        }
+        auto summary = terrain::readLidarSummary(*dem);
+        if (!summary) {
+            return common::makeError(summary.error().message);
+        }
+        lidar = std::move(*summary);
+        files = {*dem};
+        options.band = 1;
+        options.crs.clear();  // Written into the DTM.
+    } else {
+        options.band = f.band;
+        options.crs = f.crs;
+    }
+
     options.verticalDatum = f.verticalDatum;
     options.origin = f.origin;
     options.originAltitudeM = f.originAltitudeM;
     options.extent = config.extent;
     options.edge = f.edge;
-    auto source = terrain::RasterSource::open(f.files, options);
+    auto source = terrain::RasterSource::open(files, options);
     if (!source) {
         return common::makeError(source.error().message);
     }
     built.metadata = (*source)->metadata();
+    if (lidar) {
+        // FR-TER-L06: what the DTM was made from.
+        terrain::SourceMetadata& m = *built.metadata;
+        std::string ext = f.files.front().extension().string();
+        std::ranges::transform(ext, ext.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        m.format = ext == ".laz" ? "LAZ point cloud → DTM" : "LAS point cloud → DTM";
+        m.fileCount = static_cast<int>(f.files.size());
+        m.notes.push_back(std::format(
+            "Point cloud: {} points, {} ground, {} noise or withheld dropped; {} cells filled "
+            "by {}, {} without data",
+            lidar->points, lidar->groundPoints, lidar->dropped, lidar->filledCells,
+            lidar->interpolation == "idw" ? "IDW" : "TIN", lidar->noDataCells));
+    }
     built.origin = built.metadata->origin;
     built.attribution = f.attribution;
     built.source = std::move(*source);
     return built;
+}
+
+bool isPointCloud(const FileTerrainConfig& f) {
+    return !f.files.empty() &&
+           terrain::elevationFormatOf(f.files.front()) == terrain::ElevationFormat::PointCloud;
+}
+
+terrain::LidarOptions lidarOptions(const FileTerrainConfig& f) {
+    terrain::LidarOptions o;
+    o.resolutionM = f.resolutionM;
+    o.interpolation = f.interpolation;
+    o.crs = f.crs;
+    o.classifyGround = f.classifyGround;
+    return o;
 }
 
 const std::vector<BuiltInPreset>& builtInPresets() {

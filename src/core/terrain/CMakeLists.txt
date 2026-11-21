@@ -7,6 +7,7 @@ ds_add_core_module(terrain
         chunk_selection.cpp
         gdal_support.cpp
         height_source.cpp
+        lidar.cpp
         module.cpp
         noise.cpp
         online_terrain.cpp
@@ -20,5 +21,6 @@ ds_add_core_module(terrain
         ds::geo
         ds::net)
 
-# GDAL (MIT) stays private: its types never appear in ds/terrain headers (§3.1).
-target_link_libraries(ds_terrain PRIVATE GDAL::GDAL)
+# GDAL (MIT) and LASzip (Apache-2.0) stay private: their types never appear in ds/terrain
+# headers (§3.1).
+target_link_libraries(ds_terrain PRIVATE GDAL::GDAL LASzip::LASzip)

@@ -1651,9 +1651,9 @@ so Markdown pages appear in the generated site.
   8. the online orthophoto provider (moved here from M7 step 9: WMTS and XYZ/TMS (S), WMS
      GetMap (C), using the Web-Mercator tile math of FR-GEO-02b);
   9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md`.
-- **LAS/LAZ without PDAL:** PDAL is not packaged in Debian 13. LAS is read in project code,
-  LAZ through LASzip (`liblaszip-dev`), and the DTM rasterization (TIN, IDW, hole filling) is
-  project code. Automatic ground classification (`classifyGround`, SMRF, S) waits for a
+- **LAS/LAZ without PDAL:** PDAL is not packaged in Debian 13. LAS and LAZ are read through
+  LASzip (`liblaszip-dev`), and the DTM rasterization (TIN, IDW, hole filling) is project
+  code. Automatic ground classification (`classifyGround`, SMRF, S) waits for a
   ground filter of its own; until then a cloud without ground points fails with a clear
   message (FR-TER-L04, M part).
 - **Step 2 — GDAL raster source (done):** `terrain::RasterSource` opens COG / GeoTIFF,
@@ -1797,6 +1797,64 @@ so Markdown pages appear in the generated site.
     - Offline mode, the limit and the proxy are saved as `net.offline`, `net.cacheLimitMb` and
       `net.proxy`.
   - *Not done:* imagery providers (steps 7–8); proxy settings without a restart (S).
+- **Step 6 — LAS / LAZ point clouds to a DTM (done, FR-TER-L01 … L06):**
+  - *Reading (FR-TER-L01):* `ds/terrain/lidar.hpp` reads LAS 1.0–1.4 and LAZ with **LASzip**
+    rather than PDAL (see above). LASzip is private to `ds_terrain`.
+    - Points are streamed one at a time; only the grid is kept in memory.
+    - Formats 6 and up use the extended classification and the withheld flag.
+    - The CRS comes from the WKT record (2112) or the GeoTIFF keys (34735, EPSG codes only).
+      Otherwise `crs` is needed. A geographic CRS is refused.
+    - `VerticalUnitsGeoKey` feet and US survey feet are converted to metres.
+    - COPC files read as plain LAZ (not tested).
+  - *Rasterization (FR-TER-L02, L03):*
+    - Ground (2) and water (9) points are averaged per cell.
+    - The automatic cell size is about 2 × sqrt(area / points), rounded to 0.25 m, within
+      0.5 … 20 m. It becomes coarser while the grid exceeds 32 M cells. An explicit
+      `resolutionM` that is too fine gives TooLarge, with the cell size that would fit.
+    - Gaps are found by flood fill. Gaps that touch the border, or are larger than 50 m on a
+      side, stay NoData (−9999) and are filled by the raster reader.
+    - The other gaps are filled from their rim cells. TIN uses a Bowyer–Watson triangulation
+      with barycentric heights, and IDW (power 2) covers any cell no triangle reaches. Rims
+      over 3000 cells are thinned evenly.
+  - *Unclassified clouds (FR-TER-L04, M part):* no ground points gives NotSupported, with a
+    message pointing to SMRF or `lasground`. `classifyGround` is accepted and reported, but
+    there is no SMRF yet (S).
+  - *Caching (FR-TER-L05):* the DTM is written as a COG (DEFLATE, predictor, 256-pixel blocks,
+    AVERAGE overviews) to `cache/dem/<key>.tif`. It is written beside the target and renamed
+    when complete, so a cancelled or failed run leaves no file.
+    - Deviation from the requirement: the key is a SHA-256 of each file's canonical path, size
+      and modification time, plus the settings (`lidarDemKey`), not of the file contents.
+      Finding a cached DTM therefore never re-reads gigabytes. The attempt's
+      `terrain_data_hash` still uses the content hashes (FR-TER-F09).
+    - The summary (points, ground, dropped, filled and NoData cells, CRS, interpolation) is
+      stored in the COG's metadata (`readLidarSummary`).
+    - DTMs appear in the cache usage as `lidar-dtm` and are removed by *Clear Cache*. The size
+      limit does not evict them, because rebuilding one can take minutes.
+  - *Progress (FR-TER-L06):* `ensureLidarDem()` runs the rasterization on a worker thread
+    behind a progress dialog with cancel.
+    - It runs at mission launch, after the file hashes are checked, and when the Terrain tab
+      applies a point-cloud source.
+    - `buildTerrain()` only opens the cached DTM, so point-cloud terrain needs DataServices.
+      Without them the mission is unavailable, with the reason "needs the data cache".
+  - *Terrain tab:* *Add…* accepts `.las` / `.laz` and refuses to mix rasters and point
+    clouds. A point cloud shows *DTM cell size* (automatic or a value) and *Gap filling* (TIN
+    or IDW) instead of *Band*.
+    - The metadata says "LAS/LAZ point cloud → DTM" and adds a line with the point counts
+      and the filled and NoData cells.
+    - The settings are saved in the scene and in presets: `resolutionM`, `interpolation` and
+      `classifyGround`.
+  - *Tests:* the fixtures are written in-test with LASzip from a known surface. They cover:
+    - LAS 1.2, LAS 1.4 and LAZ, and a DTM within 0.25 m of the surface;
+    - noise and withheld spikes ignored;
+    - gaps filled by TIN and IDW, large gaps left as NoData;
+    - seamless tiles;
+    - the automatic cell size, coarsening and feet;
+    - missing and mixed CRS, geographic CRS, unclassified clouds, a grid that is too large;
+    - cancel leaving no file, and the cache key.
+    - Integration tests cover the Terrain tab (made once, reused, a new DTM per setting,
+      metadata, cache usage and clearing) and a LAZ mission flown and recorded with its hash.
+      They also cover an unclassified mission refused with its message, and unavailability
+      without the data cache.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

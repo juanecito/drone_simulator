@@ -105,8 +105,8 @@ when the terrain changes. `geo` and `utm` positions need a geographic origin
 ### Terrain from elevation files
 
 A mission can fly over real terrain from **elevation rasters**: COG / GeoTIFF, SRTM `.hgt`,
-ESRI ASCII grid `.asc` (with its `.prj`) or ERDAS Imagine `.img`. LAS/LAZ lidar files are
-accepted by the validator, but they are not playable until the lidar rasterizer arrives.
+ESRI ASCII grid `.asc` (with its `.prj`) or ERDAS Imagine `.img`, or **classified lidar point
+clouds** in LAS 1.0–1.4 or LAZ (see *Terrain from lidar point clouds* below).
 
 - **Where the files are:** put the mission in a folder of its own, with the files next to it
   (usually in `dem/`). Paths are relative to that folder, or `library:<name>` for the geodata
@@ -123,6 +123,44 @@ accepted by the validator, but they are not playable until the lidar rasterizer 
   of the data and of the settings that change heights (`terrain_data_hash`), and the personal
   best of the debrief only counts attempts flown on the same data.
 - **Attribution:** `attribution` is shown at the bottom right of the view.
+
+### Terrain from lidar point clouds
+
+With `"format": "las"` or `"laz"`, the `elevationFiles` are point clouds. They are turned
+into a bare-earth elevation model (DTM) the first time the mission starts. A progress dialog
+shows the work and has a *Cancel* button. The DTM is then kept in the cache
+(`~/.drone_simulation/cache/dem/`), so later starts are immediate.
+
+```json
+"terrain": {
+  "source": "file",
+  "format": "laz",
+  "elevationFiles": [{ "path": "lidar/tile_1.laz" }, { "path": "lidar/tile_2.laz" }],
+  "resolutionM": 1.0,
+  "interpolation": "tin",
+  "attribution": "Lidar © National Mapping Agency, CC BY 4.0"
+}
+```
+
+- **The cloud must be classified.** Ground points (class 2) give the surface, together with
+  water (class 9). Vegetation, buildings and the other classes are ignored. Noise (classes 7
+  and 18) and points flagged *withheld* are dropped. A cloud with no ground points stops the
+  mission with a message. Classify it first, for example with PDAL's SMRF filter or LAStools'
+  `lasground`. `"classifyGround": true` is accepted, but automatic classification is not
+  available yet.
+- **CRS:** taken from the files (GeoTIFF keys or WKT). Files without one need `crs`. The CRS
+  must be projected (UTM or a national grid); geographic coordinates are rejected. Heights
+  stored in feet are converted to metres.
+- **`resolutionM`** is the cell size of the DTM, 0.25 to 100 m. Without it, the cell size is
+  about two point spacings (0.5 to 20 m). A grid of more than 32 million cells is refused:
+  use a coarser `resolutionM` or fewer tiles.
+- **`interpolation`** fills gaps without ground points, such as under buildings or over
+  water. `"tin"` (the default) triangulates the edge of the gap; `"idw"` uses inverse distance
+  weighting. Gaps up to 50 m across are filled. Larger gaps, and areas outside the data, stay
+  without data and are filled as for rasters.
+- **Several tiles** are joined into one DTM and must share one CRS.
+- A changed file or a changed setting makes a new DTM. *Settings › Data providers › Clear
+  Cache* removes the DTMs; they are made again when needed.
 
 ### Terrain from an online provider
 

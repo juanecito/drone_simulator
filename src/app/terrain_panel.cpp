@@ -168,8 +168,8 @@ void TerrainPanel::buildUi() {
     files_->setObjectName(QStringLiteral("FileList"));
     files_->setMaximumHeight(90);
     files_->setToolTip(
-        tr("Elevation rasters (COG, GeoTIFF, .hgt, .asc, .img) in one CRS; "
-           "several tiles are joined into one surface."));
+        tr("Elevation rasters (COG, GeoTIFF, .hgt, .asc, .img) or classified lidar point "
+           "clouds (.las, .laz) in one CRS; several tiles are joined into one surface."));
     fform->addRow(files_);
     auto* addFile = new QPushButton(tr("Add…"));
     addFile->setObjectName(QStringLiteral("AddFileButton"));
@@ -189,7 +189,39 @@ void TerrainPanel::buildUi() {
     band_ = new QSpinBox;
     band_->setObjectName(QStringLiteral("BandSpin"));
     band_->setRange(1, 1000);
-    fform->addRow(tr("Band:"), band_);
+    bandLabel_ = new QLabel(tr("Band:"));
+    fform->addRow(bandLabel_, band_);
+    // LAS / LAZ: the ground points become a DTM (FR-TER-L02, L03).
+    lidarBox_ = new QWidget;
+    lidarBox_->setObjectName(QStringLiteral("LidarBox"));
+    auto* lform = new QFormLayout(lidarBox_);
+    lform->setContentsMargins(0, 0, 0, 0);
+    lidarAuto_ = new QCheckBox(tr("Automatic"));
+    lidarAuto_->setObjectName(QStringLiteral("LidarAutoCheck"));
+    lidarAuto_->setChecked(true);
+    lidarAuto_->setToolTip(tr("About two point spacings, 0.5 … 20 m"));
+    lidarResolution_ = new QDoubleSpinBox;
+    lidarResolution_->setObjectName(QStringLiteral("LidarResolutionSpin"));
+    lidarResolution_->setRange(0.25, 100.0);
+    lidarResolution_->setSingleStep(0.25);
+    lidarResolution_->setValue(1.0);
+    lidarResolution_->setSuffix(tr(" m"));
+    auto* resolution = new QHBoxLayout;
+    resolution->addWidget(lidarAuto_);
+    resolution->addWidget(lidarResolution_);
+    lform->addRow(tr("DTM cell size:"), resolution);
+    lidarInterpolation_ = new QComboBox;
+    lidarInterpolation_->setObjectName(QStringLiteral("LidarInterpolationCombo"));
+    lidarInterpolation_->addItem(tr("Triangulation (TIN)"),
+                                 static_cast<int>(terrain::LidarInterpolation::Tin));
+    lidarInterpolation_->addItem(tr("Inverse distance (IDW)"),
+                                 static_cast<int>(terrain::LidarInterpolation::Idw));
+    lidarInterpolation_->setToolTip(
+        tr("Fills gaps up to %1 m across; larger gaps stay without data")
+            .arg(terrain::kLidarMaxHoleM));
+    lform->addRow(tr("Gap filling:"), lidarInterpolation_);
+    fform->addRow(lidarBox_);
+    connect(lidarAuto_, &QCheckBox::toggled, this, &TerrainPanel::updateEnabled);
     crs_ = new QLineEdit;
     crs_->setObjectName(QStringLiteral("CrsEdit"));
     crs_->setPlaceholderText(tr("from the files, e.g. EPSG:25830"));
@@ -465,6 +497,14 @@ TerrainConfig TerrainPanel::formConfig() const {
         f.verticalDatum = datum_->text().trimmed().toStdString();
         f.attribution = attribution_->text().trimmed().toStdString();
         f.edge = static_cast<terrain::EdgeMode>(fileEdge_->currentData().toInt());
+        if (isPointCloud(f)) {
+            f.band = 1;
+            if (!lidarAuto_->isChecked()) {
+                f.resolutionM = lidarResolution_->value();
+            }
+            f.interpolation = static_cast<terrain::LidarInterpolation>(
+                lidarInterpolation_->currentData().toInt());
+        }
         if (!autoOrigin_->isChecked()) {
             f.origin = geo::LatLon{latitude_->value(), longitude_->value()};
             f.originAltitudeM = altitude_->value();
@@ -531,6 +571,12 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     datum_->setText(QString::fromStdString(c.file.verticalDatum));
     attribution_->setText(QString::fromStdString(c.file.attribution));
     fileEdge_->setCurrentIndex(std::max(fileEdge_->findData(static_cast<int>(c.file.edge)), 0));
+    lidarAuto_->setChecked(!c.file.resolutionM);
+    if (c.file.resolutionM) {
+        lidarResolution_->setValue(*c.file.resolutionM);
+    }
+    lidarInterpolation_->setCurrentIndex(
+        std::max(lidarInterpolation_->findData(static_cast<int>(c.file.interpolation)), 0));
     autoOrigin_->setChecked((c.kind == TerrainKind::File && !c.file.origin) ||
                             (c.kind == TerrainKind::Online && !c.online.originAltitudeM));
     const int index = presets_->findData(QString::fromStdString(c.presetKey));
@@ -551,6 +597,9 @@ bool TerrainPanel::regenerate() {
         }
     }
     if (config.kind == TerrainKind::Online && !ensureDownloaded(config)) {
+        return false;
+    }
+    if (config.kind == TerrainKind::File && isPointCloud(config.file) && !ensureLidarDem(config)) {
         return false;
     }
     if (auto applied = scene_->setTerrain(config); !applied) {
@@ -596,6 +645,31 @@ bool TerrainPanel::ensureDownloaded(const TerrainConfig& config) {
         return false;
     }
     return true;
+}
+
+bool TerrainPanel::ensureLidarDem(const TerrainConfig& config) {
+    DataServices* services = scene_->dataServices();
+    if (services == nullptr) {
+        showStatus(tr("LAS/LAZ terrain needs the data cache, not available here."), true);
+        return false;
+    }
+    auto made = app::ensureLidarDem(this, *services, config.file.files, lidarOptions(config.file));
+    if (!made) {
+        showStatus(QString::fromStdString(made.error().message), true);
+        return false;
+    }
+    if (!*made) {
+        showStatus(tr("Cancelled."), true);
+        return false;
+    }
+    return true;
+}
+
+bool TerrainPanel::filesArePointClouds() const {
+    return files_->count() > 0 &&
+           terrain::elevationFormatOf(
+               files_->item(0)->data(Qt::UserRole).toString().toStdString()) ==
+               terrain::ElevationFormat::PointCloud;
 }
 
 bool TerrainPanel::downloadArea() {
@@ -676,14 +750,22 @@ void TerrainPanel::updateQuota() {
 void TerrainPanel::addFiles() {
     const QStringList chosen = QFileDialog::getOpenFileNames(
         this, tr("Add Elevation Files"), QString(),
-        tr("Elevation rasters (*.tif *.tiff *.hgt *.asc *.img);;All files (*)"));
+        tr("Elevation data (*.tif *.tiff *.hgt *.asc *.img *.las *.laz);;"
+           "Elevation rasters (*.tif *.tiff *.hgt *.asc *.img);;"
+           "Lidar point clouds (*.las *.laz);;All files (*)"));
     for (const QString& path : chosen) {
         const std::filesystem::path file(path.toStdString());
-        if (terrain::elevationFormatOf(file) != terrain::ElevationFormat::Raster) {
-            showStatus(tr("“%1” is not an elevation raster (LAS/LAZ files come in a later "
-                          "version).")
-                           .arg(QString::fromStdString(file.filename().string())),
+        const auto format = terrain::elevationFormatOf(file);
+        const QString name = QString::fromStdString(file.filename().string());
+        if (!format) {
+            showStatus(tr("“%1” is not an elevation raster or a LAS/LAZ point cloud.").arg(name),
                        true);
+            continue;
+        }
+        // One kind per terrain (FR-TER-F04).
+        if (files_->count() > 0 &&
+            (*format == terrain::ElevationFormat::PointCloud) != filesArePointClouds()) {
+            showStatus(tr("“%1”: rasters and point clouds cannot be mixed.").arg(name), true);
             continue;
         }
         auto* item = new QListWidgetItem(QString::fromStdString(file.filename().string()));
@@ -793,6 +875,11 @@ void TerrainPanel::updateEnabled() {
     longitude_->setEnabled(!(file && automatic));
     altitude_->setEnabled(!automatic);
     removeFile_->setEnabled(!files_->selectedItems().isEmpty());
+    const bool lidar = filesArePointClouds();
+    lidarBox_->setVisible(lidar);
+    band_->setVisible(!lidar);
+    bandLabel_->setVisible(!lidar);
+    lidarResolution_->setEnabled(!lidarAuto_->isChecked());
     widthKm_->setEnabled(custom);
     lengthKm_->setEnabled(custom);
     edge_->setEnabled(custom);

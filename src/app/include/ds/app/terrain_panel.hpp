@@ -68,6 +68,11 @@ private:
     // Downloads the online data of @p config if needed; false (with the status shown) if it
     // is not cached afterwards.
     bool ensureDownloaded(const TerrainConfig& config);
+    // Makes the DTM of a point-cloud @p config if needed; false (with the status shown) if it
+    // is not cached afterwards.
+    bool ensureLidarDem(const TerrainConfig& config);
+    // True if the listed files are LAS / LAZ.
+    [[nodiscard]] bool filesArePointClouds() const;
 
     SceneController* scene_;
     QComboBox* presets_ = nullptr;
@@ -102,6 +107,11 @@ private:
     QLineEdit* datum_ = nullptr;
     QLineEdit* attribution_ = nullptr;
     QComboBox* fileEdge_ = nullptr;
+    QWidget* lidarBox_ = nullptr;  // LAS / LAZ settings (FR-TER-L02, L03).
+    QCheckBox* lidarAuto_ = nullptr;
+    QDoubleSpinBox* lidarResolution_ = nullptr;
+    QComboBox* lidarInterpolation_ = nullptr;
+    QLabel* bandLabel_ = nullptr;
     QGroupBox* onlineBox_ = nullptr;
     QComboBox* provider_ = nullptr;
     QComboBox* dataset_ = nullptr;

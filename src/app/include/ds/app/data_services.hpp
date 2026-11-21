@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "ds/net/provider.hpp"
 #include "ds/net/quota.hpp"
 #include "ds/storage/provider_store.hpp"
+#include "ds/terrain/lidar.hpp"
 #include "ds/terrain/online_terrain.hpp"
 
 class QWidget;
@@ -189,10 +191,12 @@ public:
     common::Result<void> setCacheLimit(std::uint64_t bytes);
     /// @brief Cache size limit.
     [[nodiscard]] std::uint64_t cacheLimit() const;
-    /// @brief Cache usage per provider (empty if it cannot be read).
+    /// @brief Cache usage per provider (empty if it cannot be read), and the point-cloud
+    /// DTMs as provider @ref kLidarDemCache.
     [[nodiscard]] std::vector<net::CacheUsage> cacheUsage();
-    /// @brief Removes the cached data of every provider; pinned areas only if
-    /// @p includePinned. Emits networkSettingsChanged().
+    /// @brief Removes the cached data of every provider and the point-cloud DTMs (made again
+    /// from the files when needed); pinned areas only if @p includePinned. Emits
+    /// networkSettingsChanged().
     common::Result<void> clearCache(bool includePinned);
     /// @brief Unpins every downloaded area so the limit may evict it; returns how many pieces
     /// were pinned. Emits networkSettingsChanged().
@@ -204,6 +208,19 @@ public:
     void setProxy(const std::string& proxy);
     /// @brief The saved proxy.
     [[nodiscard]] const std::string& proxy() const noexcept { return proxy_; }
+
+    // --- Point-cloud DTMs (FR-TER-L05) -----------------------------------------------------
+
+    /// @brief "Provider" of the DTM entries in cacheUsage().
+    static constexpr std::string_view kLidarDemCache = "lidar-dtm";
+    /// @brief Folder of the DTMs made from point clouds (`<cache>/dem`).
+    [[nodiscard]] const std::filesystem::path& demDirectory() const noexcept { return demDir_; }
+    /// @brief Where the DTM of @p files with @p options is (or will be) cached.
+    [[nodiscard]] common::Result<std::filesystem::path> lidarDemPath(
+        std::span<const std::filesystem::path> files, const terrain::LidarOptions& options) const;
+    /// @brief The cached DTM of @p files with @p options; an error if it is not made yet.
+    [[nodiscard]] common::Result<std::filesystem::path> lidarDem(
+        std::span<const std::filesystem::path> files, const terrain::LidarOptions& options) const;
 
     // --- Downloads -------------------------------------------------------------------------
 
@@ -241,6 +258,7 @@ private:
     std::unique_ptr<net::HttpClient> http_;
     std::unique_ptr<net::DataClient> client_;
     std::vector<net::ProviderConfig> providers_;
+    std::filesystem::path demDir_;
     ConfirmDownload confirm_;
 };
 
@@ -251,6 +269,15 @@ private:
 ///         for a missing key, a used-up quota, offline mode or a failed download.
 [[nodiscard]] common::Result<bool> ensureOnlineData(QWidget* parent, DataServices& data,
                                                     const terrain::OnlineTerrainRequest& request);
+
+/// @brief Makes sure the DTM of the point cloud @p files is cached (FR-TER-L05): rasterizes
+/// it on a worker thread behind a progress dialog that can be cancelled, unless it is cached
+/// already (then it returns at once).
+/// @return true when the DTM is cached, false if the user cancelled; an error if the cloud
+///         cannot be used (no CRS, no ground points, …).
+[[nodiscard]] common::Result<bool> ensureLidarDem(QWidget* parent, DataServices& data,
+                                                  std::span<const std::filesystem::path> files,
+                                                  const terrain::LidarOptions& options);
 
 /// @brief Text of the confirmation question for @p request.
 [[nodiscard]] std::string downloadQuestion(const DownloadRequest& request);

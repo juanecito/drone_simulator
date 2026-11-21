@@ -16,6 +16,7 @@
 #include "ds/geo/coordinates.hpp"
 #include "ds/graphics/exposure.hpp"
 #include "ds/storage/terrain_preset_store.hpp"
+#include "ds/terrain/lidar.hpp"
 #include "ds/terrain/online_terrain.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/raster_source.hpp"
@@ -61,9 +62,20 @@ struct FileTerrainConfig {
     std::optional<geo::LatLon> origin;         ///< Empty ⇒ centre of the data.
     std::optional<double> originAltitudeM;     ///< AMSL of world height 0; empty ⇒ the ground.
     terrain::EdgeMode edge = terrain::EdgeMode::Cliff;  ///< Cliff or Fade (FR-TER-O08).
+    // LAS / LAZ point clouds (FR-TER-L02 … L04); unused for rasters.
+    std::optional<double> resolutionM;  ///< DTM cell size; empty ⇒ automatic.
+    terrain::LidarInterpolation interpolation = terrain::LidarInterpolation::Tin;  ///< Gaps.
+    bool classifyGround = false;  ///< Asked for automatic ground classification.
     /// @brief Equality.
     bool operator==(const FileTerrainConfig&) const = default;
 };
+
+/// @brief True if the files of @p f are LAS / LAZ point clouds (rasterized to a DTM first,
+/// ensureLidarDem()).
+[[nodiscard]] bool isPointCloud(const FileTerrainConfig& f);
+
+/// @brief The rasterization options of the point cloud @p f.
+[[nodiscard]] terrain::LidarOptions lidarOptions(const FileTerrainConfig& f);
 
 /// @brief Terrain of the scene: its source and placement.
 struct TerrainConfig {
@@ -173,7 +185,8 @@ class DataServices;
 
 /// @brief Builds the height source of @p config: procedural, the elevation files, or online
 /// data from the cache of @p data (never from the network: download it first,
-/// ensureOnlineData()). Online terrain needs @p data.
+/// ensureOnlineData()). Online terrain and point clouds need @p data; a point cloud is read
+/// from its cached DTM (made first with ensureLidarDem()).
 [[nodiscard]] common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config,
                                                         DataServices* data = nullptr);
 

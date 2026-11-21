@@ -82,6 +82,18 @@ if(GDAL_VERSION VERSION_LESS 3.6)
     message(FATAL_ERROR "GDAL ${GDAL_VERSION} found; 3.6 or newer is required")
 endif()
 
+# LASzip (Apache-2.0): LAS and LAZ point clouds (FR-TER-L01), used only inside core/terrain.
+# It ships no CMake package: find the header and the library that exports the laszip_* API.
+find_path(LASZIP_INCLUDE_DIR laszip/laszip_api.h)
+find_library(LASZIP_LIBRARY NAMES laszip)
+if(NOT LASZIP_INCLUDE_DIR OR NOT LASZIP_LIBRARY)
+    message(FATAL_ERROR "LASzip not found: install liblaszip-dev")
+endif()
+add_library(LASzip::LASzip UNKNOWN IMPORTED)
+set_target_properties(LASzip::LASzip PROPERTIES
+    IMPORTED_LOCATION "${LASZIP_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LASZIP_INCLUDE_DIR}")
+
 # QtKeychain (BSD-3-Clause): API keys in the OS keyring (FR-NET-07), app layer only.
 find_package(Qt6Keychain CONFIG REQUIRED)
 

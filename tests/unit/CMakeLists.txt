@@ -9,6 +9,7 @@ add_executable(ds_unit_tests
     command_line_test.cpp
     file_terrain_test.cpp
     online_terrain_test.cpp
+    lidar_test.cpp
     flight_test.cpp
     geo_test.cpp
     ground_test.cpp
@@ -39,7 +40,7 @@ target_compile_definitions(ds_unit_tests PRIVATE
     DS_TEST_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures"
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 # GDAL writes the raster fixtures (SPECIFICATION §9: fixtures generated in-test).
-target_link_libraries(ds_unit_tests PRIVATE GDAL::GDAL)
+target_link_libraries(ds_unit_tests PRIVATE GDAL::GDAL LASzip::LASzip)
 target_include_directories(ds_unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/support)
 ds_set_warnings(ds_unit_tests)
 gtest_discover_tests(ds_unit_tests
