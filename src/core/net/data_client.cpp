@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <format>
+#include <numbers>
 
 #include "ds/common/log.hpp"
 #include "ds/common/sha256.hpp"
@@ -29,22 +30,12 @@ std::string lower(std::string_view s) {
     return out;
 }
 
-NetResult<std::string> buildUrl(const ProviderConfig& p, const DatasetConfig& d,
-                                const GeoRect& area, std::string_view key) {
-    const std::string& tmpl = p.templateFor(d);
-    std::map<std::string, std::string, std::less<>> values{
-        {"dataset", d.id},
-        {"south", std::format("{:.7f}", area.south)},
-        {"north", std::format("{:.7f}", area.north)},
-        {"west", std::format("{:.7f}", area.west)},
-        {"east", std::format("{:.7f}", area.east)},
-        {"bbox", area.canonical()},
-        {"crs", p.crs},
-        {"format", p.format},
-    };
-    const double resKm = d.resolutionM / 1000.0;
-    values["width"] = std::format("{}", static_cast<long>(std::ceil(area.widthKm() / resKm)));
-    values["height"] = std::format("{}", static_cast<long>(std::ceil(area.heightKm() / resKm)));
+using Values = std::map<std::string, std::string, std::less<>>;
+
+// Expands the template with the key in its place: in the template, else appended to the
+// query when the provider wants it there.
+NetResult<std::string> finishUrl(const ProviderConfig& p, const std::string& tmpl, Values values,
+                                 std::string_view key) {
     const bool keyInTemplate = tmpl.find("{apiKey}") != std::string::npos;
     if (keyInTemplate) {
         values["apiKey"] = std::string(key);
@@ -57,6 +48,61 @@ NetResult<std::string> buildUrl(const ProviderConfig& p, const DatasetConfig& d,
         return appendQueryParameter(*url, p.apiKey.name, key);
     }
     return url;
+}
+
+NetResult<std::string> buildTileUrl(const ProviderConfig& p, const DatasetConfig& d,
+                                    const geo::TileId& t, std::string_view key) {
+    if (t.z < d.minZoom || t.z > d.maxZoom.value_or(kMaxImageryZoom)) {
+        return netError(NetErrorCode::InvalidRequest,
+                        std::format("zoom {} is outside {} … {} of {}", t.z, d.minZoom,
+                                    d.maxZoom.value_or(kMaxImageryZoom), d.name));
+    }
+    const std::int64_t n = std::int64_t{1} << t.z;
+    if (t.x < 0 || t.y < 0 || t.x >= n || t.y >= n) {
+        return netError(NetErrorCode::InvalidRequest,
+                        std::format("tile {}/{}/{} does not exist", t.z, t.x, t.y));
+    }
+    const GeoRect r = tileRect(t);
+    // EPSG:3857 bounds of the tile, exact from the grid.
+    const double world = 2.0 * std::numbers::pi * geo::kWebMercatorRadius;
+    const double size = world / static_cast<double>(n);
+    const double minX = -0.5 * world + static_cast<double>(t.x) * size;
+    const double maxY = 0.5 * world - static_cast<double>(t.y) * size;
+    Values values{
+        {"dataset", d.id},
+        {"z", std::format("{}", t.z)},
+        {"x", std::format("{}", t.x)},
+        {"y", std::format("{}", p.protocol == "tms" ? n - 1 - t.y : t.y)},
+        {"south", std::format("{:.7f}", r.south)},
+        {"north", std::format("{:.7f}", r.north)},
+        {"west", std::format("{:.7f}", r.west)},
+        {"east", std::format("{:.7f}", r.east)},
+        {"bbox", std::format("{:.3f},{:.3f},{:.3f},{:.3f}", minX, maxY - size, minX + size, maxY)},
+        {"width", std::format("{}", p.tileSizePx)},
+        {"height", std::format("{}", p.tileSizePx)},
+        {"crs", p.crs},
+        {"format", p.format},
+    };
+    return finishUrl(p, p.templateFor(d), std::move(values), key);
+}
+
+NetResult<std::string> buildUrl(const ProviderConfig& p, const DatasetConfig& d,
+                                const GeoRect& area, std::string_view key) {
+    const std::string& tmpl = p.templateFor(d);
+    Values values{
+        {"dataset", d.id},
+        {"south", std::format("{:.7f}", area.south)},
+        {"north", std::format("{:.7f}", area.north)},
+        {"west", std::format("{:.7f}", area.west)},
+        {"east", std::format("{:.7f}", area.east)},
+        {"bbox", area.canonical()},
+        {"crs", p.crs},
+        {"format", p.format},
+    };
+    const double resKm = d.resolutionM / 1000.0;
+    values["width"] = std::format("{}", static_cast<long>(std::ceil(area.widthKm() / resKm)));
+    values["height"] = std::format("{}", static_cast<long>(std::ceil(area.heightKm() / resKm)));
+    return finishUrl(p, tmpl, std::move(values), key);
 }
 
 std::optional<std::int64_t> expiry(const ProviderConfig& p, const HttpResponse* r,
@@ -129,6 +175,11 @@ NetResult<std::string> DataClient::cacheKey(const ProviderConfig& provider,
     return buildUrl(provider, dataset, area, {});
 }
 
+NetResult<std::string> DataClient::cacheKey(const ProviderConfig& provider,
+                                            const DatasetConfig& dataset, const geo::TileId& tile) {
+    return buildTileUrl(provider, dataset, tile, {});
+}
+
 NetResult<std::optional<QuotaStatus>> DataClient::quota(const ProviderConfig& provider) {
     if (!provider.dailyCallLimit || ledger_ == nullptr) {
         return std::optional<QuotaStatus>{};
@@ -150,18 +201,55 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
                      std::format("unknown dataset \"{}\" for {}", request.dataset, provider.name)));
         return 0;
     }
+    if (provider.isImagery()) {
+        callback(netError(NetErrorCode::InvalidRequest,
+                          std::format("{} serves tiles, not bounding boxes", provider.name)));
+        return 0;
+    }
     if (!request.area.valid()) {
         callback(netError(NetErrorCode::InvalidRequest, "invalid area"));
         return 0;
     }
-    auto key = cacheKey(provider, *dataset, request.area);
+    const Target target{dataset, request.area, request.noCache,
+                        [&provider, dataset, area = request.area](std::string_view key) {
+                            return buildUrl(provider, *dataset, area, key);
+                        }};
+    return fetchTarget(provider, target, priority, std::move(callback));
+}
+
+RequestId DataClient::fetch(const ProviderConfig& provider, const TileRequest& request,
+                            double priority, PayloadCallback callback) {
+    const DatasetConfig* dataset =
+        provider.dataset(request.dataset.empty() ? provider.defaultDataset : request.dataset);
+    if (dataset == nullptr) {
+        callback(
+            netError(NetErrorCode::InvalidRequest,
+                     std::format("unknown dataset \"{}\" for {}", request.dataset, provider.name)));
+        return 0;
+    }
+    if (!provider.isImagery()) {
+        callback(netError(NetErrorCode::InvalidRequest,
+                          std::format("{} does not serve imagery tiles", provider.name)));
+        return 0;
+    }
+    const Target target{dataset, tileRect(request.tile), request.noCache,
+                        [&provider, dataset, tile = request.tile](std::string_view key) {
+                            return buildTileUrl(provider, *dataset, tile, key);
+                        }};
+    return fetchTarget(provider, target, priority, std::move(callback));
+}
+
+RequestId DataClient::fetchTarget(const ProviderConfig& provider, const Target& target,
+                                  double priority, PayloadCallback callback) {
+    const DatasetConfig* dataset = target.dataset;
+    auto key = target.url({});
     if (!key) {
         callback(std::unexpected(key.error()));
         return 0;
     }
     const std::int64_t now = clock_();
 
-    const bool useCache = cache_ != nullptr && provider.allowCache && !request.noCache;
+    const bool useCache = cache_ != nullptr && provider.allowCache && !target.noCache;
     std::optional<CachedPayload> cached;
     if (useCache) {
         auto got = cache_->get(provider.key, *key, now);
@@ -206,7 +294,7 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
             std::format("{} needs an API key (Settings → Data providers)", provider.name)});
         return 0;
     }
-    auto url = buildUrl(provider, *dataset, request.area, secret);
+    auto url = target.url(secret);
     if (!url) {
         callback(std::unexpected(url.error()));
         return 0;
@@ -247,7 +335,7 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
     };
     if (ledger_ != nullptr) {
         http.onAttempt = [ledger = ledger_, clock = clock_, providerKey = provider.key,
-                          datasetId = dataset->id, area = request.area](const AttemptInfo& a) {
+                          datasetId = dataset->id, area = target.area](const AttemptInfo& a) {
             if (auto ok = ledger->record(
                     ProviderCall{providerKey, clock(), datasetId, area, a.httpStatus, a.bytes});
                 !ok) {
@@ -288,7 +376,9 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
             }
             return;
         }
-        if (auto ok = checkPayload(r->body, format); !ok) {
+        if (auto ok =
+                provider.isImagery() ? checkImagePayload(r->body) : checkPayload(r->body, format);
+            !ok) {
             failed();
             NetError e = ok.error();
             e.message = redact(e.message, secrets);
@@ -335,10 +425,34 @@ NetResult<std::optional<Payload>> DataClient::cached(const ProviderConfig& provi
         return netError(NetErrorCode::InvalidRequest, std::format("unknown dataset \"{}\" for {}",
                                                                   request.dataset, provider.name));
     }
+    return cachedTarget(provider,
+                        Target{dataset, request.area, false,
+                               [&provider, dataset, area = request.area](std::string_view key) {
+                                   return buildUrl(provider, *dataset, area, key);
+                               }});
+}
+
+NetResult<std::optional<Payload>> DataClient::cached(const ProviderConfig& provider,
+                                                     const TileRequest& request) {
+    const DatasetConfig* dataset =
+        provider.dataset(request.dataset.empty() ? provider.defaultDataset : request.dataset);
+    if (dataset == nullptr) {
+        return netError(NetErrorCode::InvalidRequest, std::format("unknown dataset \"{}\" for {}",
+                                                                  request.dataset, provider.name));
+    }
+    return cachedTarget(provider,
+                        Target{dataset, tileRect(request.tile), false,
+                               [&provider, dataset, tile = request.tile](std::string_view key) {
+                                   return buildTileUrl(provider, *dataset, tile, key);
+                               }});
+}
+
+NetResult<std::optional<Payload>> DataClient::cachedTarget(const ProviderConfig& provider,
+                                                           const Target& target) {
     if (cache_ == nullptr || !provider.allowCache) {
         return std::optional<Payload>{};
     }
-    auto key = cacheKey(provider, *dataset, request.area);
+    auto key = target.url({});
     if (!key) {
         return std::unexpected(key.error());
     }
@@ -361,6 +475,12 @@ NetResult<DownloadEstimate> DataClient::estimateDownload(const ProviderConfig& p
     if (dataset == nullptr) {
         return netError(NetErrorCode::InvalidRequest,
                         std::format("unknown dataset \"{}\"", datasetId));
+    }
+    if (provider.isImagery()) {
+        // Tile services generally forbid bulk downloads: imagery is streamed and cached.
+        return netError(
+            NetErrorCode::InvalidRequest,
+            std::format("{} imagery is streamed, not downloaded by area", provider.name));
     }
     auto plan = planExtentRequests(area, provider, *dataset);
     if (!plan) {
@@ -436,14 +556,14 @@ NetResult<std::shared_ptr<DownloadJob>> DataClient::downloadArea(
                 job->onProgress_(snapshot);
             }
             if (last) {
-                if (job->cancelled_.load()) {
-                    job->done_(netError(NetErrorCode::Cancelled, "download cancelled"));
-                } else if (job->firstError_) {
-                    job->done_(std::unexpected(*job->firstError_));
-                } else {
-                    job->done_(job->cacheKeys_);
-                }
+                NetResult<std::vector<std::string>> result =
+                    job->cancelled_.load() ? netError(NetErrorCode::Cancelled, "download cancelled")
+                    : job->firstError_
+                        ? NetResult<std::vector<std::string>>(std::unexpected(*job->firstError_))
+                        : NetResult<std::vector<std::string>>(job->cacheKeys_);
+                // Finished before the callback, which may look at the job.
                 job->finished_.store(true);
+                job->done_(std::move(result));
             }
         };
         if (job->cancelled_.load()) {
@@ -478,6 +598,34 @@ NetResult<void> checkPayload(std::string_view body, std::string_view format) {
         }
     }
     return {};
+}
+
+NetResult<void> checkImagePayload(std::string_view body) {
+    if (body.empty()) {
+        return netError(NetErrorCode::InvalidPayload, "empty response");
+    }
+    const bool jpeg = body.starts_with(std::string_view("\xFF\xD8\xFF", 3));
+    const bool png = body.starts_with(std::string_view("\x89PNG\r\n\x1A\n", 8));
+    const bool webp = body.size() >= 12 && body.starts_with("RIFF") && body.substr(8, 4) == "WEBP";
+    if (!jpeg && !png && !webp) {
+        const std::string_view head = body.substr(0, std::min<std::size_t>(body.size(), 120));
+        const bool printable = std::ranges::all_of(head, [](char c) {
+            return std::isprint(static_cast<unsigned char>(c)) != 0 || c == '\n' || c == '\r' ||
+                   c == '\t';
+        });
+        return netError(NetErrorCode::InvalidPayload,
+                        printable ? std::format("expected a JPEG, PNG or WebP tile, got: {}", head)
+                                  : std::string("expected a JPEG, PNG or WebP tile"));
+    }
+    return {};
+}
+
+GeoRect tileRect(const geo::TileId& tile) {
+    const auto b = geo::tileBounds(tile);
+    if (!b) {
+        return {};
+    }
+    return GeoRect{b->west, b->south, b->east, b->north};
 }
 
 }  // namespace ds::net

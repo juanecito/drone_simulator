@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "ds/geo/web_mercator.hpp"
 #include "ds/net/disk_cache.hpp"
 #include "ds/net/geo_rect.hpp"
 #include "ds/net/http_client.hpp"
@@ -34,6 +35,14 @@ struct BBoxRequest {
     GeoRect area;         ///< Requested area (EPSG:4326).
     /// Neither read nor write the cache: always one request (Test connection, FR-NET-11).
     bool noCache = false;
+};
+
+/// @brief One imagery tile (FR-TER-O10) on the Web-Mercator grid: XYZ numbering (y grows
+/// south); TMS providers get y flipped, WMS ones the tile's EPSG:3857 bounding box.
+struct TileRequest {
+    std::string dataset;   ///< Dataset id; empty ⇒ provider default.
+    geo::TileId tile;      ///< Tile.
+    bool noCache = false;  ///< Neither read nor write the cache (Test connection).
 };
 
 /// @brief What a provider served this session (FR-NET-09).
@@ -132,6 +141,14 @@ public:
     /// cache checks its SHA-256). nullopt if it is not cached.
     [[nodiscard]] NetResult<std::optional<Payload>> cached(const ProviderConfig& provider,
                                                            const BBoxRequest& request);
+    /// @brief Fetches one imagery tile (tile protocols). Returns 0 if the request was answered
+    /// at once. A tile the server does not have comes back as HttpStatus 404 (or 204 as
+    /// InvalidPayload "empty response").
+    RequestId fetch(const ProviderConfig& provider, const TileRequest& request, double priority,
+                    PayloadCallback callback);
+    /// @brief The cached payload of one imagery tile, without any request.
+    [[nodiscard]] NetResult<std::optional<Payload>> cached(const ProviderConfig& provider,
+                                                           const TileRequest& request);
     /// @brief Cancels a fetch.
     void cancel(RequestId id) { http_->cancel(id); }
 
@@ -159,6 +176,11 @@ public:
                                                          const DatasetConfig& dataset,
                                                          const GeoRect& area);
 
+    /// @brief Cache key of a tile request: the request URL without credentials.
+    [[nodiscard]] static NetResult<std::string> cacheKey(const ProviderConfig& provider,
+                                                         const DatasetConfig& dataset,
+                                                         const geo::TileId& tile);
+
     /// @brief The underlying HTTP client.
     [[nodiscard]] HttpClient& http() noexcept { return *http_; }
     /// @brief Statistics of @p providerKey since the client was created.
@@ -166,6 +188,18 @@ public:
 
 private:
     enum class Outcome { Hit, Request, Failure };
+    // What one fetch asks for: the dataset, its URL (with or without the key), the area
+    // recorded in the ledger and the cache rule.
+    struct Target {
+        const DatasetConfig* dataset = nullptr;
+        GeoRect area;
+        bool noCache = false;
+        std::function<NetResult<std::string>(std::string_view key)> url;
+    };
+    RequestId fetchTarget(const ProviderConfig& provider, const Target& target, double priority,
+                          PayloadCallback callback);
+    NetResult<std::optional<Payload>> cachedTarget(const ProviderConfig& provider,
+                                                   const Target& target);
     void count(std::string_view providerKey, Outcome outcome);
 
     [[nodiscard]] std::string apiKey(std::string_view providerKey) const;
@@ -187,5 +221,11 @@ private:
 /// @brief Cheap structural check of a payload (FR-TER-O15): non-empty, and a TIFF/BigTIFF
 /// signature for TIFF content. Full decoding checks happen in `core/terrain` (GDAL).
 [[nodiscard]] NetResult<void> checkPayload(std::string_view body, std::string_view format);
+
+/// @brief Structural check of an imagery tile: a JPEG, PNG or WebP signature (FR-TER-O15).
+[[nodiscard]] NetResult<void> checkImagePayload(std::string_view body);
+
+/// @brief Geographic bounds of @p tile as a GeoRect (latitude clamped to Web Mercator).
+[[nodiscard]] GeoRect tileRect(const geo::TileId& tile);
 
 }  // namespace ds::net

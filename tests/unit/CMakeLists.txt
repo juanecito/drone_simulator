@@ -10,6 +10,7 @@ add_executable(ds_unit_tests
     file_terrain_test.cpp
     online_terrain_test.cpp
     orthophoto_test.cpp
+    online_imagery_test.cpp
     lidar_test.cpp
     flight_test.cpp
     geo_test.cpp

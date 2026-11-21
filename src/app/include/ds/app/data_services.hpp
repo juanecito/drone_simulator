@@ -95,7 +95,7 @@ struct ProviderUsageInfo {
 
 /// @brief Outcome of *Test connection* (FR-NET-11).
 struct ConnectionTest {
-    bool ok = false;                       ///< A valid elevation raster came back.
+    bool ok = false;                       ///< A valid elevation raster or image came back.
     std::string message;                   ///< What happened, for the user.
     std::chrono::milliseconds latency{0};  ///< From the request to the answer.
     std::uint64_t bytes = 0;               ///< Response size.
@@ -131,6 +131,8 @@ public:
     }
     /// @brief The elevation providers with bounding-box requests (the ones the terrain uses).
     [[nodiscard]] std::vector<const net::ProviderConfig*> elevationProviders() const;
+    /// @brief The imagery providers with a tile protocol (FR-TER-O10).
+    [[nodiscard]] std::vector<const net::ProviderConfig*> imageryProviders() const;
     /// @brief The provider with @p key, or nullptr.
     [[nodiscard]] const net::ProviderConfig* provider(std::string_view key) const noexcept;
     /// @brief Adds or replaces the user-defined provider @p provider (FR-TER-O02), after
@@ -172,8 +174,9 @@ public:
     /// @brief Usage of @p provider (FR-NET-09).
     [[nodiscard]] ProviderUsageInfo usage(const net::ProviderConfig& provider);
     /// @brief *Test connection* (FR-NET-11): one uncached request for a ~1 km square inside
-    /// the dataset's coverage, decoded as an elevation raster. It is counted against the daily
-    /// budget. @p done runs on the GUI thread (not at all if the services are destroyed
+    /// the dataset's coverage, decoded as an elevation raster — or, for imagery, one tile at
+    /// zoom 15 (within the layer's range) there, decoded as an image. It is counted against
+    /// the daily budget. @p done runs on the GUI thread (not at all if the services are destroyed
     /// first).
     void testConnection(const net::ProviderConfig& provider, const std::string& dataset,
                         std::function<void(const ConnectionTest&)> done);

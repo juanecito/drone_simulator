@@ -14,7 +14,8 @@ ds_add_core_module(net
         quota.cpp
         url_template.cpp
     DEPS
-        ds::common)
+        ds::common
+        ds::geo)
 
 # libcurl (curl licence) stays private: its types never appear in ds/net headers (§3.1).
 target_link_libraries(ds_net PRIVATE CURL::libcurl)

@@ -159,6 +159,15 @@ common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
 }
 
 QJsonObject orthoToJson(const OrthoConfig& o) {
+    if (!o.provider.empty()) {
+        return QJsonObject{
+            {QStringLiteral("provider"), QString::fromStdString(o.provider)},
+            {QStringLiteral("dataset"), QString::fromStdString(o.dataset)},
+            {QStringLiteral("brightness"), o.color.brightness},
+            {QStringLiteral("contrast"), o.color.contrast},
+            {QStringLiteral("gamma"), o.color.gamma},
+        };
+    }
     QJsonArray files;
     for (const auto& file : o.files) {
         files.append(QString::fromStdString(file.string()));
@@ -180,6 +189,8 @@ QJsonObject orthoToJson(const OrthoConfig& o) {
 
 common::Result<OrthoConfig> orthoFromJson(const QJsonObject& json) {
     OrthoConfig o;
+    o.provider = json.value(QStringLiteral("provider")).toString().toStdString();
+    o.dataset = json.value(QStringLiteral("dataset")).toString().toStdString();
     for (const QJsonValue& v : json.value(QStringLiteral("files")).toArray()) {
         if (!v.isString() || v.toString().isEmpty()) {
             return common::makeError("'ortho.files' must list file paths");
@@ -374,7 +385,7 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
     if (c.kind == TerrainKind::Online) {
         json.insert(QStringLiteral("online"), onlineToJson(c.online));
     }
-    if (c.kind != TerrainKind::Procedural && !c.ortho.files.empty()) {
+    if (c.kind != TerrainKind::Procedural && c.ortho.any()) {
         json.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
     }
     return json;
@@ -582,7 +593,7 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     if (c.kind == TerrainKind::Online) {
         params.insert(QStringLiteral("online"), onlineToJson(c.online));
     }
-    if (c.kind != TerrainKind::Procedural && !c.ortho.files.empty()) {
+    if (c.kind != TerrainKind::Procedural && c.ortho.any()) {
         params.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
     }
     r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
@@ -664,11 +675,54 @@ namespace {
 // it, with a warning).
 void openOrtho(const TerrainConfig& config, DataServices* data, BuiltTerrain& built) {
     const OrthoConfig& o = config.ortho;
-    if (o.files.empty()) {
+    if (!o.any()) {
         return;
     }
     if (config.kind == TerrainKind::Procedural) {
-        built.orthoWarning = "orthophotos need file or online elevation; imagery disabled";
+        built.orthoWarning = "imagery needs file or online elevation; imagery disabled";
+        return;
+    }
+    if (!o.provider.empty()) {
+        // Online imagery (FR-TER-O10): streamed through the data services.
+        const net::ProviderConfig* provider =
+            data != nullptr ? data->provider(o.provider) : nullptr;
+        if (provider == nullptr || !provider->isImagery()) {
+            built.orthoWarning =
+                data == nullptr
+                    ? "online imagery is not available here; imagery disabled"
+                    : std::format("unknown imagery provider \"{}\"; imagery disabled", o.provider);
+            log::warn("Imagery: {}", built.orthoWarning);
+            return;
+        }
+        if (provider->requiresKey && !data->hasApiKey(provider->key)) {
+            built.orthoWarning =
+                std::format("{} needs an API key (Settings → Data providers); imagery disabled",
+                            provider->name);
+            log::warn("Imagery: {}", built.orthoWarning);
+            return;
+        }
+        terrain::OrthoOptions tiles;
+        auto opened = terrain::OnlineImagerySource::open(
+            data->client(), terrain::OnlineImageryRequest{*provider, o.dataset, o.color},
+            built.origin, {}, tiles);
+        if (!opened) {
+            built.orthoWarning = opened.error().message + "; imagery disabled";
+            log::warn("Imagery: {}", built.orthoWarning);
+            return;
+        }
+        const terrain::OrthoMetadata& m = (*opened)->metadata();
+        if (const auto extent = built.source->extent();
+            extent && !m.overlaps(-0.5 * extent->widthM, -0.5 * extent->lengthM,
+                                  0.5 * extent->widthM, 0.5 * extent->lengthM)) {
+            built.orthoWarning = std::format("{} has no imagery here", provider->name);
+        } else if (!extent && !m.overlaps(-1.0, -1.0, 1.0, 1.0)) {
+            built.orthoWarning = std::format("{} has no imagery at the origin", provider->name);
+        }
+        const net::DatasetConfig& d = (*opened)->dataset();
+        built.orthoAttribution = d.attribution.empty() || d.attribution == provider->attribution
+                                     ? provider->attribution
+                                     : provider->attribution + "; " + d.attribution;
+        built.ortho = std::move(*opened);
         return;
     }
     const std::vector<std::filesystem::path> files =

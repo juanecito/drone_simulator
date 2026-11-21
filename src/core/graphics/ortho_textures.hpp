@@ -43,7 +43,8 @@ struct OrthoTextureStats {
 /// is full, the least recently used tile not needed this frame gives up its layer. A tile
 /// that cannot be uploaded yet (upload limit per frame, full array, still being built) is
 /// replaced by its nearest resident ancestor, so the imagery sharpens progressively and the
-/// frame never waits.
+/// frame never waits. A tile rebuilt with more data (online imagery) is uploaded again into
+/// its layer.
 class OrthoTextures {
 public:
     /// @brief Tiles uploaded per frame at most (≈ 350 kB each).
@@ -75,11 +76,13 @@ private:
     struct Resident {
         int layer = 0;
         std::uint64_t lastUsed = 0;
+        std::uint64_t serial = 0;  // OrthoTile::serial of the image in the layer.
     };
 
     int layerLimit(int tileSizePx);
     int residentLayer(const terrain::OrthoTileKey& key);
     int upload(const terrain::OrthoTileKey& key, const terrain::OrthoTile& tile);
+    void write(int layer, const terrain::OrthoTile& tile);
     int freeLayer();
     bool grow(int tileSizePx);
     void clear();

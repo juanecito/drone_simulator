@@ -10,6 +10,8 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
+class QHBoxLayout;
 class QDoubleSpinBox;
 class QLabel;
 class QGroupBox;
@@ -64,6 +66,8 @@ private:
     void addOrthoFiles();
     void updateMetadata();
     void updateOrthoInfo();
+    void fillImageryProviders();
+    void fillImageryLayers();
     void fillProviders();
     void fillDatasets();
     void updateQuota();
@@ -122,6 +126,10 @@ private:
     QLabel* quota_ = nullptr;
     QTimer* refresh_ = nullptr;
     QGroupBox* orthoBox_ = nullptr;  // Orthophotos over file or online elevation (FR-TER-I10).
+    QFormLayout* orthoForm_ = nullptr;
+    QComboBox* orthoSource_ = nullptr;  // Files, or an online imagery provider (FR-TER-O10).
+    QComboBox* orthoLayer_ = nullptr;
+    QHBoxLayout* orthoButtons_ = nullptr;
     QListWidget* orthoFiles_ = nullptr;
     QPushButton* removeOrtho_ = nullptr;
     QLineEdit* orthoCrs_ = nullptr;

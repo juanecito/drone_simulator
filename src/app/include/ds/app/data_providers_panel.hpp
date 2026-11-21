@@ -16,6 +16,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -58,6 +59,9 @@ public:
 private:
     void addDataset(const net::DatasetConfig& dataset);
     void updateEnabled();
+    // Fills the protocols of the selected kind and adapts the form to it.
+    void kindChanged();
+    [[nodiscard]] bool imagery() const;
 
     net::ProviderConfig start_;
     QLineEdit* key_ = nullptr;
@@ -73,6 +77,9 @@ private:
     QSpinBox* dailyLimit_ = nullptr;
     QSpinBox* concurrent_ = nullptr;
     QDoubleSpinBox* blockSize_ = nullptr;
+    QSpinBox* tileSize_ = nullptr;
+    QLabel* crs_ = nullptr;
+    QFormLayout* form_ = nullptr;
     QCheckBox* insecure_ = nullptr;
     QCheckBox* allowCache_ = nullptr;
     QLineEdit* attribution_ = nullptr;

@@ -10,9 +10,9 @@
 namespace ds::net {
 namespace {
 
-constexpr std::array<std::string_view, 11> kPlaceholders{"dataset", "south",  "north", "west",
-                                                         "east",    "bbox",   "width", "height",
-                                                         "crs",     "format", "apiKey"};
+constexpr std::array<std::string_view, 14> kPlaceholders{
+    "dataset", "south", "north",  "west",   "east", "bbox", "width",
+    "height",  "crs",   "format", "apiKey", "z",    "x",    "y"};
 
 bool isUnreserved(char c) noexcept {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||

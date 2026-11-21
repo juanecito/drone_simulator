@@ -188,6 +188,39 @@ TEST(FileTerrain, MissionOrthophotoColourIsParsed) {
     EXPECT_FALSE(terrain::parseFileTerrain(j).has_value());
 }
 
+TEST(FileTerrain, MissionImageryProviderIsParsedAndSavedWithTheScene) {
+    common::Json j = {{"source", "file"},
+                      {"format", "raster"},
+                      {"elevationFiles", common::Json::array({{{"path", "dem/a.tif"}}})},
+                      {"imageryProvider", "ign-pnoa"},
+                      {"imageryDataset", "OI.OrthoimageCoverage"}};
+    auto spec = terrain::parseFileTerrain(j);
+    ASSERT_TRUE(spec.has_value()) << spec.error().message;
+    EXPECT_EQ(spec->imageryProvider, "ign-pnoa");
+    EXPECT_EQ(spec->imageryDataset, "OI.OrthoimageCoverage");
+    // Files or a provider, not both; a layer needs its provider.
+    j["orthophotoFiles"] = common::Json::array({{{"path", "ortho/a.tif"}}});
+    auto both = terrain::parseFileTerrain(j);
+    ASSERT_FALSE(both.has_value());
+    EXPECT_NE(both.error().message.find("imageryProvider"), std::string::npos);
+    j.erase("orthophotoFiles");
+    j.erase("imageryProvider");
+    EXPECT_FALSE(terrain::parseFileTerrain(j).has_value());
+
+    // The scene keeps the provider and its layer.
+    app::TerrainConfig c;
+    c.kind = app::TerrainKind::Online;  // Procedural terrain has no imagery.
+    c.online.provider = "opentopography";
+    c.origin = {40.4, -3.7, 0.0};
+    c.ortho.provider = "ign-pnoa";
+    c.ortho.dataset = "OI.OrthoimageCoverage";
+    auto again = app::terrainFromJson(app::terrainToJson(c));
+    ASSERT_TRUE(again.has_value()) << again.error().message;
+    EXPECT_EQ(again->ortho.provider, "ign-pnoa");
+    EXPECT_EQ(again->ortho.dataset, "OI.OrthoimageCoverage");
+    EXPECT_TRUE(again->ortho.any());
+}
+
 TEST(FileTerrain, FadeEdgeBlendsToTheLowestHeight) {
     TempDir dir("file_terrain");
     test::writeRaster(dir / "dem.tif", test::planarUtmSpec());

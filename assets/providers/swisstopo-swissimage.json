@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "key": "swisstopo-swissimage",
+  "name": "SWISSIMAGE (swisstopo)",
+  "kind": "imagery",
+  "protocol": "xyz",
+  "x-note": "REST WMTS of geo.admin.ch in EPSG:3857 ({z}/{x}/{y}); request format checked against the live service on 2026-11-21 (zoom 20 served, 21 refused). Licence and attribution from swisstopo's published terms; recheck before release.",
+  "urlTemplate": "https://wmts.geo.admin.ch/1.0.0/{dataset}/default/current/3857/{z}/{x}/{y}.jpeg",
+  "format": "image/jpeg",
+  "crs": "EPSG:3857",
+  "tileSizePx": 256,
+  "defaultDataset": "ch.swisstopo.swissimage",
+  "datasets": [
+    { "id": "ch.swisstopo.swissimage", "name": "SWISSIMAGE 10 cm (Switzerland)",
+      "minZoom": 0, "maxZoom": 20,
+      "coverage": { "west": 5.9, "south": 45.75, "east": 10.6, "north": 47.85 },
+      "attribution": "© swisstopo" }
+  ],
+  "requiresKey": false,
+  "attribution": "Imagery: © swisstopo (SWISSIMAGE)",
+  "licence": "Swiss open government data: free use with source attribution; fair use of the geo.admin.ch services.",
+  "termsUrl": "https://www.geo.admin.ch/en/general-terms-of-use-fsdi",
+  "allowCache": true,
+  "maxAgeDays": 180,
+  "rateLimitRps": 10,
+  "dailyCallLimit": null,
+  "maxConcurrent": 4,
+  "insecureHttp": false,
+  "maxResponseBytes": 4194304,
+  "contentTypes": ["image/jpeg", "image/png"],
+  "quotaErrorPatterns": []
+}

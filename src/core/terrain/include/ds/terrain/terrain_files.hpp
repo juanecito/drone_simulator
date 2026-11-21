@@ -66,6 +66,9 @@ struct FileTerrainSpec {
     std::string orthophotoAttribution;     ///< Imagery attribution.
     std::vector<int> orthophotoBands;      ///< e.g. {1, 2, 3}; empty ⇒ automatic.
     OrthoColor orthophotoColor;            ///< `orthophotoColor` adjustments (S).
+    // Online imagery instead of orthophoto files (FR-TER-O10).
+    std::string imageryProvider;  ///< Imagery provider key; empty ⇒ none.
+    std::string imageryDataset;   ///< Its layer; empty ⇒ the provider's default.
     /// Canonical paths of the elevation files, in order: filled by the mission loader when
     /// every file was found (not part of the JSON).
     std::vector<std::filesystem::path> resolvedElevationFiles;

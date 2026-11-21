@@ -507,7 +507,7 @@ orthophoto files in §4.5.5.
 | FR-TER-O07 | NoData voids and failed tiles are filled from the next coarser level or by interpolation; persistent gaps are reported in the UI. | M |
 | FR-TER-O08 | Extent: with dimensions (FR-TER-04a) a bounded rectangle, otherwise streaming around the drone within provider coverage. Outside the extent or coverage: *clamp edge*, *fade to base height* or *procedural fill*; a soft geofence warns before the edge. A requested extent outside provider coverage is rejected with a clear message. | M |
 | FR-TER-O09 | **Area pre-download:** "Download area" for a rectangle + max resolution with size estimate, progress and cancel. Missions on online terrain require their area **fully cached before PreFlight**, so a scored attempt never depends on the network. | M |
-| FR-TER-O10 | Online orthophoto providers (after the file-based orthophotos of §4.5.5): **WMTS** and **XYZ/TMS** (S), **WMS GetMap** (C); JPEG/PNG/WebP; reprojected and draped like orthophoto files. No imagery provider is chosen yet. | S / C |
+| FR-TER-O10 | Online orthophoto providers (after the file-based orthophotos of §4.5.5): **WMTS** and **XYZ/TMS** (S), **WMS GetMap** (C); JPEG/PNG/WebP; reprojected and draped like orthophoto files. Only Web-Mercator tile grids (EPSG:3857, the `GoogleMapsCompatible` matrix set) are supported. Imagery is streamed tile by tile while flying and never downloaded by area. Presets: IGN PNOA (Spain, WMTS), swisstopo SWISSIMAGE and USGS The National Map imagery. | S / C |
 | FR-TER-O11 | Vertical exaggeration factor (default 1.0; missions force 1.0). | S |
 | FR-TER-O12 | Metadata view: provider, protocol, CRS, coverage, resolution, cached area and size, min/max elevation of the loaded area, attribution. | M |
 | FR-TER-O13 | **Attribution:** the attribution required by each provider whose data is visible is shown in the viewport and in debrief screenshots. | M |
@@ -730,7 +730,7 @@ credentials, rate limits, retries, disk cache and offline operation.
 | Authentication | **Free personal API key** from the user's OpenTopography account. "One user, one key": the app never ships a key; each user enters their own (FR-NET-07). |
 | Area limit per request | 30 m datasets 450 000 km²; 90 m 4 050 000 km²; USGS 30 m 225 000 km², 10 m 25 000 km², 1 m 250 km². |
 | Rate limit | **Non-academic keys only: 50 calls / 24 h** for the Global and USGS APIs (academic keys are not targeted); more with OpenTopography Plus / Enterprise. |
-| Imagery | **None** — elevation only. Orthophotos come from files in the mission (§4.5.5). |
+| Imagery | **None** — elevation only. Orthophotos come from files in the mission (§4.5.5) or from an imagery provider (FR-TER-O10). |
 | Terms | Data free of copyright restrictions under the OpenTopography API agreement, but each dataset's licence and citation apply (e.g. Copernicus for COP30). The required OpenTopography acknowledgement and dataset citation are shown as attribution (FR-TER-O13). Commercial, for-profit integration of OpenTopography keys requires an Enterprise key (§12.4.1). |
 | Point Elevation / Catalog APIs | Not used in v1.0. |
 
@@ -1649,7 +1649,7 @@ so Markdown pages appear in the generated site.
   6. LAS/LAZ → DTM with LASzip and the COG cache;
   7. orthophoto files with GPU streaming (done);
   8. the online orthophoto provider (moved here from M7 step 9: WMTS and XYZ/TMS (S), WMS
-     GetMap (C), using the Web-Mercator tile math of FR-GEO-02b);
+     GetMap (C), using the Web-Mercator tile math of FR-GEO-02b) (done);
   9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md`.
 - **LAS/LAZ without PDAL:** PDAL is not packaged in Debian 13. LAS and LAZ are read through
   LASzip (`liblaszip-dev`), and the DTM rasterization (TIN, IDW, hole filling) is project
@@ -1778,8 +1778,9 @@ so Markdown pages appear in the generated site.
       editor covers key, name, protocol, URL template, format, datasets, key placement, daily
       limit, concurrency, block size, caching, plain HTTP, attribution, licence and terms. It
       validates like a provider file and keeps the fields it does not show.
-    - Built-in providers are read-only. Only `rest_bbox` and EPSG:4326 are offered; the
-      other protocols are listed as not supported yet.
+    - Built-in providers are read-only. Only `rest_bbox` and EPSG:4326 are offered for
+      elevation; the other protocols are listed as not supported yet. Imagery providers
+      (xyz, tms, wmts, wms in EPSG:3857) came with step 8.
     - Removing a provider also deletes its key and its cached data.
     - The mission loader, the Terrain tab and mission playability follow changes at once.
   - *Usage (FR-NET-09):* calls, failures and bytes over the last 24 h, the remaining budget,
@@ -1919,8 +1920,9 @@ so Markdown pages appear in the generated site.
     - 16-bit imagery (S) is refused as UnsupportedFormat. The scaling min / max is not
       implemented.
     - The per-mission 50 GB limit is not checked; the 200 000 px limit per side is.
-    - Online-elevation *missions* cannot declare orthophotos yet. The schema has them only in
-      `terrainFile`. The Terrain tab can drape files over online elevation.
+    - Online-elevation *missions* cannot declare orthophoto files. The schema has them only in
+      `terrainFile`; online missions take an imagery provider instead (step 8). The Terrain
+      tab can drape files over online elevation.
   - *Tests:*
     - Unit: pixel placement, coverage and NoData fallback, seamless mosaics, band layouts,
       clear errors, PNG + world file, JP2, colour adjustments, the cached COG, and streamer
@@ -1930,6 +1932,86 @@ so Markdown pages appear in the generated site.
     - GL: imagery draped within a GPU budget of 6 tiles.
     - Application: a mission with imagery and a mission with a damaged image, and the
       Terrain tab.
+
+- **Step 8 — Online imagery providers (done, FR-TER-O10, FR-GEO-02b, FR-NET-11):**
+  - *Providers:* a provider of `"kind": "imagery"` uses the protocol `xyz`, `tms`, `wmts`
+    or `wms`, and its `crs` must be EPSG:3857.
+    - Templates of the tile protocols need `{z}`, `{x}` and `{y}`. `tms` counts rows from
+      the south.
+    - WMS templates need `{bbox}`, the tile's EPSG:3857 bounds; `{width}` and `{height}` are
+      `tileSizePx`, a power of two in 64 … 1024 (default 256).
+    - Each layer (dataset) needs `maxZoom`, and may give `minZoom`. Its `resolutionM`
+      defaults to the pixel size at `maxZoom`.
+    - Elevation providers keep `rest_bbox` and refuse the tile placeholders.
+    - Responses must start like a JPEG, PNG or WebP image. A body that does not, such as
+      an HTML error page, is an InvalidPayload error that quotes the start of the body.
+  - *Fetching:* `DataClient::fetch(provider, TileRequest)` shares the key handling, rate
+    limits, quota, ledger and disk cache of bounding-box requests. The cache key is the
+    tile URL without the key.
+    - Imagery is streamed only. `estimateDownload()` and bounding-box requests refuse
+      imagery providers, and launching a mission downloads no imagery.
+  - *Source:* `terrain::OnlineImagerySource` builds the ortho tiles of step 7 from service
+    tiles; it shares the abstract `OrthoImagery` with `OrthophotoSource`.
+    - Each ortho level uses the zoom whose pixels are just finer than its texels, at the
+      origin's latitude, clamped to the layer's range. At 40° N, the 0.25 m level-0 texels
+      use zoom 19.
+    - The 17 × 17 lattice maps texels to service pixels: world → geodetic → Web-Mercator.
+      Samples are bilinear, 2 × 2 per texel when the service pixels are more than 1.25 ×
+      finer.
+    - An ortho tile needing more than 36 service tiles is left empty, so that coarse levels
+      never flood the service.
+    - Service tiles are decoded with GDAL from memory (JPEG, PNG including palettes, WebP;
+      grey, grey + alpha, RGB, RGBA). A tile of the wrong size is refused with its size.
+    - They are looked up in a 96 MB memory LRU, then in the disk cache (stale entries are
+      used rather than waiting), then fetched, with at most 64 requests pending.
+    - 404, 410 and 204 answers, and invalid images, mark the tile as missing. Missing tiles
+      are transparent, so the materials show. Other failures are retried after 60 s, and the
+      last one is shown in the Terrain tab.
+  - *Incomplete tiles:* while service tiles are on their way, a build returns what it has
+    with `complete = false`.
+    - `OrthoStreamer` rebuilds such tiles when the source's revision moves (a service tile
+      arrived) or after 15 s. Meanwhile a coarser tile stands in.
+    - A rebuilt tile carries a new serial, and `OrthoTextures` uploads it into the layer it
+      already has.
+  - *Application:*
+    - The Terrain tab's *Imagery* group (formerly *Orthophotos*) chooses *Orthophoto files*
+      or an imagery provider, and its layer. The information line shows the protocol, zooms,
+      resolution, tile counts and the last problem.
+    - The choice is saved with the scene and presets (`ortho.provider`, `ortho.dataset`).
+    - An unknown provider, a missing API key or a provider with no imagery at the origin
+      disables or cautions the imagery only. The terrain is still built, and the status bar
+      says why.
+    - Attribution is "elevation · provider; layer".
+    - Settings › Data providers edits imagery providers: tile protocols, zoom ranges per
+      layer, tile size. *Test connection* fetches one tile at zoom 15 (within the layer's
+      range) and decodes it.
+  - *Missions:* `imageryProvider` and `imageryDataset` for online terrain (the key was
+    reserved before) and for file terrain, where they are an alternative to
+    `orthophotoFiles`.
+    - An unknown provider makes the mission invalid.
+    - Online imagery is not part of `terrain_data_hash`, like orthophoto files.
+  - *Presets* (`assets/providers/`):
+    - IGN PNOA (WMTS `GoogleMapsCompatible`, zoom ≤ 20, CC BY 4.0);
+    - swisstopo SWISSIMAGE (REST WMTS in EPSG:3857, zoom ≤ 20);
+    - USGS The National Map *Imagery Only* (ArcGIS tile cache, zoom ≤ 16, public domain).
+    - Their request formats were checked against the live services on 2026-11-21. Their
+      licences and fair-use terms come from the providers' published terms and **must be
+      rechecked before release** (§12.4.1). No preset needs a key.
+  - *Deviations:*
+    - Only Web-Mercator grids are supported. WMTS servers with other tile matrix sets
+      (such as national grids) must offer `GoogleMapsCompatible` or an EPSG:3857 WMS.
+      GetCapabilities is not read: the template gives the request.
+    - No bulk download or pinning of imagery for offline use. What was flown stays in the
+      disk cache under the provider's `maxAgeDays`.
+  - *Tests (mock tile server, `tests/support/imagery_fixtures.hpp`):*
+    - Unit: provider validation, URLs for the four protocols, image signatures, tile
+      fetching through the cache, the zoom choice, pixel placement within about 1 px, 404
+      coverage edges, wrong-size tiles, offline use of the cache, and the streamer
+      rebuilding incomplete tiles.
+    - Configuration: mission keys and the scene JSON round trip.
+    - Application: the Terrain tab with an imagery provider, a mission streaming imagery,
+      a missing key disabling only the imagery, an unknown provider making the mission
+      invalid, the provider editor and *Test connection*.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 
@@ -2486,7 +2568,7 @@ decisions):
     - The battery temperature curves of NFR-REAL-11 are still representative, not taken from
       a datasheet.
 - **M7 is complete (steps 1–8).** Step 9, the online orthophoto provider (FR-TER-O10, S), is
-  **moved after M4**. It drapes imagery over georeferenced terrain, which procedural terrain
+  **moved after M4** (done as M4 step 8). It drapes imagery over georeferenced terrain, which procedural terrain
   is not (FR-TER-I03). It also reuses the orthophoto reprojection, mosaic and GPU streaming of
   §4.5.5. Those come from the remaining M4 work, which needs `libgdal-dev` and `libpdal-dev`.
   Also left for later:
@@ -2552,8 +2634,9 @@ decisions):
    provider's data, with AGL height next to it.
 
 **Open questions:**
-- **Online orthophotos (non-blocking, after v1.0):** if you later want imagery from a web
-  service as well as from files, which one (e.g. a national mapping agency's WMTS)?
+- **Online orthophotos:** *answered in M4 step 8.* Imagery providers are configured like
+  elevation providers. The presets are open national services: IGN PNOA, swisstopo
+  SWISSIMAGE and USGS. Their licences must be confirmed before release.
 
 ---
 

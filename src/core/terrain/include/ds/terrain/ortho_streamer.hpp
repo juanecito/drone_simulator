@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -27,6 +28,9 @@ struct OrthoStreamerSettings {
     /// In-memory tile cache (CPU) limit; tiles still wanted by the drawn chunks are kept.
     std::size_t cacheBytes = std::size_t{384} << 20U;
     std::size_t maxInFlight = 0;  ///< Concurrent tile jobs; 0 ⇒ 2 × worker threads.
+    /// An incomplete tile (online data still arriving) is built again when the imagery's
+    /// revision moves, or after this long at the latest (failed downloads are retried).
+    std::chrono::milliseconds retryIncomplete{15'000};
 };
 
 /// @brief Counters for the UI and tests.
@@ -34,6 +38,7 @@ struct OrthoStreamerStats {
     std::size_t cachedTiles = 0;  ///< Tiles with imagery in the cache.
     std::size_t cachedBytes = 0;  ///< Their memory use.
     std::size_t emptyTiles = 0;   ///< Tiles known to hold no imagery.
+    std::size_t waitingTiles = 0;  ///< Tiles waiting for online data (shown as far as it came).
     std::size_t inFlight = 0;     ///< Jobs queued or running.
     std::size_t built = 0;        ///< Tiles built since creation.
 };
@@ -45,7 +50,7 @@ inline constexpr int kOrthoAncestorLevels = 3;
 /// @brief State of a tile in the streamer.
 enum class OrthoTileState {
     Unknown,  ///< Not requested (or evicted).
-    Pending,  ///< Being built.
+    Pending,  ///< Being built, or waiting for online data.
     Empty,    ///< No imagery there: the terrain materials show.
     Ready,    ///< Image available.
 };
@@ -60,7 +65,7 @@ enum class OrthoTileState {
 class OrthoStreamer {
 public:
     /// @brief Streams @p source for chunks of @p layout on @p pool (which must outlive it).
-    OrthoStreamer(std::shared_ptr<const OrthophotoSource> source, const ChunkLayout& layout,
+    OrthoStreamer(std::shared_ptr<const OrthoImagery> source, const ChunkLayout& layout,
                   common::WorkerPool& pool, const OrthoStreamerSettings& settings = {});
     ~OrthoStreamer();
 
@@ -82,7 +87,7 @@ public:
     tilesOf(const ChunkId& id) noexcept;
 
     /// @brief The imagery.
-    [[nodiscard]] const std::shared_ptr<const OrthophotoSource>& source() const noexcept {
+    [[nodiscard]] const std::shared_ptr<const OrthoImagery>& source() const noexcept {
         return source_;
     }
     /// @brief Unique id of this streamer in the process (GPU caches key on it).
@@ -93,15 +98,23 @@ public:
 private:
     struct Shared;
     struct Entry {
-        std::shared_ptr<const OrthoTile> tile;  // nullptr ⇒ empty.
+        std::shared_ptr<const OrthoTile> tile;  // nullptr ⇒ empty (or nothing yet).
         std::uint64_t lastUsed = 0;
+        bool complete = true;        // False ⇒ build again (see retryIncomplete).
+        std::uint64_t revision = 0;  // Imagery revision when it was built.
+        std::chrono::steady_clock::time_point builtAt{};
+    };
+    struct Finished {
+        OrthoTileKey key;
+        OrthoBuild build;
+        std::uint64_t revision = 0;
     };
 
     void collect();
     void evict();
     void want(const OrthoTileKey& key, double priority);
 
-    std::shared_ptr<const OrthophotoSource> source_;
+    std::shared_ptr<const OrthoImagery> source_;
     ChunkLayout layout_;
     common::WorkerPool* pool_;
     OrthoStreamerSettings settings_;

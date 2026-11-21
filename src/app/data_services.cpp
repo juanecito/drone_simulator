@@ -19,11 +19,13 @@
 #include "ds/app/keyring.hpp"
 #include "ds/app/progress_task.hpp"
 #include "ds/common/log.hpp"
+#include "ds/geo/web_mercator.hpp"
 #include "ds/storage/data_location.hpp"
 #include "ds/storage/migrations.hpp"
 #include "ds/storage/provider_store.hpp"
 #include "ds/storage/settings_store.hpp"
 #include "ds/storage/storage_service.hpp"
+#include "ds/terrain/online_imagery.hpp"
 #include "ds/terrain/orthophoto.hpp"
 #include "ds/terrain/raster_source.hpp"
 
@@ -215,6 +217,16 @@ DataServices::~DataServices() {
     // Stop the network first: pending callbacks still use the cache and the ledger.
     client_.reset();
     http_.reset();
+}
+
+std::vector<const net::ProviderConfig*> DataServices::imageryProviders() const {
+    std::vector<const net::ProviderConfig*> out;
+    for (const net::ProviderConfig& p : providers_) {
+        if (p.isImagery() && net::isTileProtocol(p.protocol)) {
+            out.push_back(&p);
+        }
+    }
+    return out;
 }
 
 std::vector<const net::ProviderConfig*> DataServices::elevationProviders() const {
@@ -467,6 +479,39 @@ void DataServices::testConnection(const net::ProviderConfig& provider, const std
     }
     const net::GeoRect area = testArea(*d);
     const auto start = std::chrono::steady_clock::now();
+    if (provider.isImagery()) {
+        const int zoom = std::clamp(15, d->minZoom, d->maxZoom.value_or(net::kMaxImageryZoom));
+        const auto tile =
+            geo::tileAt(0.5 * (area.south + area.north), 0.5 * (area.west + area.east), zoom);
+        if (!tile) {
+            deliver(ConnectionTest{.message = tile.error().message});
+            return;
+        }
+        client_->fetch(
+            provider, net::TileRequest{.dataset = d->id, .tile = *tile, .noCache = true}, -1.0,
+            [deliver = std::move(deliver), start, area, tile = *tile,
+             size = provider.tileSizePx](net::NetResult<net::Payload> r) mutable {
+                ConnectionTest t;
+                t.area = net::tileRect(tile);
+                t.latency = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start);
+                if (!r) {
+                    t.message = r.error().message;
+                    deliver(t);
+                    return;
+                }
+                t.bytes = r->body.size();
+                if (auto ok = terrain::checkImageryTile(r->body, size); !ok) {
+                    t.message = "the answer is not a usable image tile: " + ok.error().message;
+                } else {
+                    t.ok = true;
+                    t.message = std::format("tile {}/{}/{}: {} × {} px {}", tile.z, tile.x, tile.y,
+                                            size, size, r->contentType);
+                }
+                deliver(t);
+            });
+        return;
+    }
     client_->fetch(
         provider, net::BBoxRequest{.dataset = d->id, .area = area, .noCache = true}, -1.0,
         [deliver = std::move(deliver), start, area,

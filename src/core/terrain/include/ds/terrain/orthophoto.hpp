@@ -116,6 +116,9 @@ struct OrthoTile {
     OrthoTileKey key;                ///< Address.
     int sizePx = kOrthoTilePx;       ///< Texels per side of mip level 0.
     std::vector<std::uint8_t> rgba;  ///< Mip levels 0, 1, … down to 1 × 1, packed.
+    /// Unique number of this image in the process (a rebuilt tile gets a new one, so GPU
+    /// caches know to upload it again).
+    std::uint64_t serial = 0;
 
     /// @brief Number of mip levels.
     [[nodiscard]] int mipCount() const noexcept;
@@ -127,13 +130,54 @@ struct OrthoTile {
     [[nodiscard]] std::size_t byteSize() const noexcept { return sizeof(*this) + rgba.size(); }
 };
 
+/// @brief Outcome of building one tile.
+struct OrthoBuild {
+    /// The image, or nullptr if the tile has no imagery (so far).
+    std::shared_ptr<const OrthoTile> tile;
+    /// False while data for the tile is still arriving (online imagery): build it again once
+    /// OrthoImagery::revision() has moved.
+    bool complete = true;
+};
+
+/// @brief Imagery draped over the terrain, cut into tiles on the chunk lattice: orthophoto
+/// files (OrthophotoSource) or an online tile service (OnlineImagerySource).
+class OrthoImagery {
+public:
+    virtual ~OrthoImagery() = default;
+    OrthoImagery(const OrthoImagery&) = delete;
+    OrthoImagery& operator=(const OrthoImagery&) = delete;
+    OrthoImagery(OrthoImagery&&) = delete;
+    OrthoImagery& operator=(OrthoImagery&&) = delete;
+
+    /// @brief Metadata of the imagery.
+    [[nodiscard]] const OrthoMetadata& metadata() const noexcept { return metadata_; }
+    /// @brief The options it was opened with.
+    [[nodiscard]] const OrthoOptions& options() const noexcept { return options_; }
+    /// @brief One line for the log.
+    [[nodiscard]] const std::string& describe() const noexcept { return description_; }
+    /// @brief False if tile @p key certainly holds no imagery (outside the coverage box).
+    [[nodiscard]] bool mayCover(const OrthoTileKey& key) const noexcept;
+    /// @brief Builds tile @p key (any thread). @p priority orders the downloads it starts
+    /// (lower first), if any.
+    [[nodiscard]] virtual OrthoBuild build(const OrthoTileKey& key, double priority) const = 0;
+    /// @brief Raised whenever data arrives that incomplete builds were waiting for.
+    [[nodiscard]] virtual std::uint64_t revision() const noexcept { return 0; }
+
+protected:
+    OrthoImagery() = default;
+
+    OrthoOptions options_;     ///< Tile layout and colour adjustments.
+    OrthoMetadata metadata_;   ///< Filled when opened.
+    std::string description_;  ///< Filled when opened.
+};
+
 /// @brief One or more orthophoto files as a mosaic in the scene's local frame.
 /// @details Files must share one CRS and band layout; several are mosaicked with an in-memory
 /// GDAL VRT. Tiles are reprojected per texel (through a 17 × 17 lattice of exact
 /// transformations, bilinear in between), so they line up with the elevation, which uses the
 /// same frame. Each tile reads only the window it needs, at the overview level nearest its
 /// texel size. Thread-safe; each thread reads through its own GDAL handle.
-class OrthophotoSource {
+class OrthophotoSource final : public OrthoImagery {
 public:
     /// @brief Opens and validates @p files (resolved and checked by prepareFileTerrain()) in
     /// the frame of the scene origin @p origin (latitude, longitude, AMSL altitude of world
@@ -144,22 +188,16 @@ public:
         std::span<const std::filesystem::path> files, const OrthoOptions& options,
         const geo::Geodetic& origin);
 
-    ~OrthophotoSource();
+    ~OrthophotoSource() override;
     OrthophotoSource(const OrthophotoSource&) = delete;
     OrthophotoSource& operator=(const OrthophotoSource&) = delete;
     OrthophotoSource(OrthophotoSource&&) = delete;
     OrthophotoSource& operator=(OrthophotoSource&&) = delete;
 
-    /// @brief Metadata of the imagery.
-    [[nodiscard]] const OrthoMetadata& metadata() const noexcept { return metadata_; }
-    /// @brief The options it was opened with.
-    [[nodiscard]] const OrthoOptions& options() const noexcept { return options_; }
-    /// @brief One line for the log.
-    [[nodiscard]] const std::string& describe() const noexcept { return description_; }
-    /// @brief False if tile @p key certainly holds no imagery (outside the coverage box).
-    [[nodiscard]] bool mayCover(const OrthoTileKey& key) const noexcept;
     /// @brief The image of tile @p key, or nullptr if it holds no imagery (any thread).
     [[nodiscard]] std::shared_ptr<const OrthoTile> tile(const OrthoTileKey& key) const;
+    /// @brief tile(), always complete.
+    [[nodiscard]] OrthoBuild build(const OrthoTileKey& key, double priority) const override;
     /// @brief Reads that failed since opening (damaged areas, shown without imagery).
     [[nodiscard]] std::uint64_t readErrors() const noexcept { return readErrors_.load(); }
 
@@ -172,9 +210,6 @@ private:
     void release(std::unique_ptr<Reader> reader) const;
 
     std::unique_ptr<Layout> layout_;
-    OrthoOptions options_;
-    OrthoMetadata metadata_;
-    std::string description_;
     mutable std::mutex readersMutex_;
     mutable std::vector<std::unique_ptr<Reader>> readers_;
     mutable std::atomic<std::uint64_t> readErrors_{0};

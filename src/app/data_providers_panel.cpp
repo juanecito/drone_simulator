@@ -77,11 +77,13 @@ ProviderDialog::ProviderDialog(net::ProviderConfig start, bool isNew, QWidget* p
     : QDialog(parent), start_(std::move(start)) {
     setWindowTitle(isNew ? tr("Add Data Provider") : tr("Edit Data Provider"));
     auto* form = new QFormLayout;
+    form_ = form;
 
     key_ = new QLineEdit(qs(start_.key));
     key_->setObjectName(QStringLiteral("ProviderKeyEdit"));
     key_->setReadOnly(!isNew);
-    key_->setToolTip(tr("Stable identifier used by missions (\"elevationProvider\")."));
+    key_->setToolTip(
+        tr("Stable identifier used by missions (\"elevationProvider\", \"imageryProvider\")."));
     form->addRow(tr("&Key:"), key_);
     name_ = new QLineEdit(qs(start_.name));
     name_->setObjectName(QStringLiteral("ProviderNameEdit"));
@@ -90,35 +92,29 @@ ProviderDialog::ProviderDialog(net::ProviderConfig start, bool isNew, QWidget* p
     kind_->setObjectName(QStringLiteral("ProviderKindCombo"));
     kind_->addItem(tr("Elevation"), QStringLiteral("elevation"));
     kind_->addItem(tr("Imagery"), QStringLiteral("imagery"));
-    disableItem(kind_, 1, tr("Online imagery arrives in a later step of milestone M4."));
+    kind_->setCurrentIndex(start_.isImagery() ? 1 : 0);
     form->addRow(tr("Kind:"), kind_);
     protocol_ = new QComboBox;
     protocol_->setObjectName(QStringLiteral("ProtocolCombo"));
-    protocol_->addItem(tr("REST bounding box (GeoTIFF)"), QStringLiteral("rest_bbox"));
-    for (const QString& later : {tr("XYZ / TMS tiles"), tr("OGC WCS"), tr("OGC API – Coverages"),
-                                 tr("Cloud-optimised GeoTIFF")}) {
-        protocol_->addItem(later);
-        disableItem(protocol_, protocol_->count() - 1, tr("Not supported yet."));
-    }
     form->addRow(tr("&Protocol:"), protocol_);
     url_ = new QLineEdit(qs(start_.urlTemplate));
     url_->setObjectName(QStringLiteral("UrlTemplateEdit"));
-    url_->setPlaceholderText(
-        QStringLiteral("https://example.org/dem?south={south}&north={north}&west={west}&"
-                       "east={east}&dataset={dataset}"));
-    url_->setToolTip(
-        tr("Placeholders: {dataset} {south} {north} {west} {east} {bbox} {width} {height} "
-           "{crs} {format} {apiKey}. Never put the key itself here."));
     form->addRow(tr("&URL template:"), url_);
     format_ = new QLineEdit(qs(start_.format.empty() ? std::string("GTiff") : start_.format));
     format_->setObjectName(QStringLiteral("FormatEdit"));
     form->addRow(tr("Format:"), format_);
-    form->addRow(tr("CRS:"), new QLabel(QStringLiteral("EPSG:4326")));
+    crs_ = new QLabel;
+    form->addRow(tr("CRS:"), crs_);
+    tileSize_ = new QSpinBox;
+    tileSize_->setObjectName(QStringLiteral("TileSizeSpin"));
+    tileSize_->setRange(256, 512);
+    tileSize_->setSingleStep(256);
+    tileSize_->setSuffix(QStringLiteral(" px"));
+    tileSize_->setValue(start_.tileSizePx);
+    form->addRow(tr("Tile size:"), tileSize_);
 
     datasets_ = new QTableWidget(0, 4);
     datasets_->setObjectName(QStringLiteral("DatasetsTable"));
-    datasets_->setHorizontalHeaderLabels(
-        {tr("Id"), tr("Name"), tr("Resolution (m)"), tr("Vertical datum")});
     datasets_->horizontalHeader()->setStretchLastSection(true);
     datasets_->verticalHeader()->hide();
     datasets_->setMinimumHeight(110);
@@ -202,12 +198,75 @@ ProviderDialog::ProviderDialog(net::ProviderConfig start, bool isNew, QWidget* p
     connect(buttons, &QDialogButtonBox::accepted, this, &ProviderDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(requiresKey_, &QCheckBox::toggled, this, &ProviderDialog::updateEnabled);
+    connect(kind_, &QComboBox::currentIndexChanged, this, &ProviderDialog::kindChanged);
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addWidget(error_);
     layout->addWidget(buttons);
+    kindChanged();
+    if (const int i = protocol_->findData(qs(start_.protocol)); i >= 0) {
+        protocol_->setCurrentIndex(i);
+    }
     updateEnabled();
+}
+
+bool ProviderDialog::imagery() const { return kind_->currentIndex() == 1; }
+
+void ProviderDialog::kindChanged() {
+    const bool tiles = imagery();
+    const QString protocol = protocol_->currentData().toString();
+    protocol_->clear();
+    if (tiles) {
+        protocol_->addItem(tr("XYZ tiles ({z}/{x}/{y})"), QStringLiteral("xyz"));
+        protocol_->addItem(tr("TMS tiles (y from the south)"), QStringLiteral("tms"));
+        protocol_->addItem(tr("WMTS (Web-Mercator tile matrix set)"), QStringLiteral("wmts"));
+        protocol_->addItem(tr("WMS GetMap"), QStringLiteral("wms"));
+        url_->setPlaceholderText(QStringLiteral("https://example.org/tiles/{z}/{x}/{y}.jpg"));
+        url_->setToolTip(
+            tr("Placeholders: {z} {x} {y} (tiles) or {bbox} {width} {height} {crs} (WMS, "
+               "EPSG:3857), and {dataset} {format} {apiKey}. Never put the key itself here."));
+    } else {
+        protocol_->addItem(tr("REST bounding box (GeoTIFF)"), QStringLiteral("rest_bbox"));
+        for (const QString& later : {tr("XYZ / TMS terrain tiles"), tr("OGC WCS"),
+                                     tr("OGC API – Coverages"), tr("Cloud-optimised GeoTIFF")}) {
+            protocol_->addItem(later);
+            disableItem(protocol_, protocol_->count() - 1, tr("Not supported yet."));
+        }
+        url_->setPlaceholderText(
+            QStringLiteral("https://example.org/dem?south={south}&north={north}&west={west}&"
+                           "east={east}&dataset={dataset}"));
+        url_->setToolTip(
+            tr("Placeholders: {dataset} {south} {north} {west} {east} {bbox} {width} {height} "
+               "{crs} {format} {apiKey}. Never put the key itself here."));
+    }
+    if (const int i = protocol_->findData(protocol); i >= 0) {
+        protocol_->setCurrentIndex(i);
+    }
+    if (format_->text() == QLatin1String("GTiff") && tiles) {
+        format_->setText(QStringLiteral("image/jpeg"));
+    } else if (format_->text() == QLatin1String("image/jpeg") && !tiles) {
+        format_->setText(QStringLiteral("GTiff"));
+    }
+    crs_->setText(tiles ? QStringLiteral("EPSG:3857") : QStringLiteral("EPSG:4326"));
+    form_->setRowVisible(tileSize_, tiles);
+    form_->setRowVisible(blockSize_, !tiles);
+    datasets_->setHorizontalHeaderLabels({tr("Id"), tr("Name"),
+                                          tiles ? tr("Zoom levels") : tr("Resolution (m)"),
+                                          tr("Vertical datum")});
+    datasets_->setColumnHidden(3, tiles);
+    for (int row = 0; row < datasets_->rowCount(); ++row) {
+        QTableWidgetItem* item = datasets_->item(row, 2);
+        if (item == nullptr) {
+            continue;
+        }
+        // Zoom levels "min–max" ⇄ a resolution in metres.
+        if (tiles && !item->text().contains(QLatin1Char('-'))) {
+            item->setText(QStringLiteral("0-18"));
+        } else if (!tiles && item->text().contains(QLatin1Char('-'))) {
+            item->setText(QStringLiteral("30"));
+        }
+    }
 }
 
 void ProviderDialog::addDataset(const net::DatasetConfig& d) {
@@ -215,7 +274,10 @@ void ProviderDialog::addDataset(const net::DatasetConfig& d) {
     datasets_->insertRow(row);
     datasets_->setItem(row, 0, new QTableWidgetItem(qs(d.id)));
     datasets_->setItem(row, 1, new QTableWidgetItem(qs(d.name)));
-    datasets_->setItem(row, 2, new QTableWidgetItem(QString::number(d.resolutionM)));
+    datasets_->setItem(row, 2,
+                       new QTableWidgetItem(imagery() ? QStringLiteral("%1-%2").arg(d.minZoom).arg(
+                                                            d.maxZoom.value_or(18))
+                                                      : QString::number(d.resolutionM)));
     datasets_->setItem(row, 3, new QTableWidgetItem(qs(d.verticalDatum)));
 }
 
@@ -232,7 +294,8 @@ net::ProviderConfig ProviderDialog::config() const {
     p.protocol = protocol_->currentData().toString().toStdString();
     p.urlTemplate = url_->text().trimmed().toStdString();
     p.format = format_->text().trimmed().toStdString();
-    p.crs = "EPSG:4326";
+    p.crs = imagery() ? "EPSG:3857" : "EPSG:4326";
+    p.tileSizePx = tileSize_->value();
     const auto text = [this](int row, int col) {
         const QTableWidgetItem* item = datasets_->item(row, col);
         return item != nullptr ? item->text().trimmed() : QString();
@@ -247,10 +310,26 @@ net::ProviderConfig ProviderDialog::config() const {
         }
         d.id = id;
         d.name = text(r, 1).toStdString();
-        bool ok = false;
-        const double res = text(r, 2).toDouble(&ok);
-        d.resolutionM = ok ? res : 0.0;
-        d.verticalDatum = text(r, 3).toStdString();
+        if (imagery()) {
+            // "min-max" or just the finest zoom.
+            const QStringList zooms = text(r, 2).split(QLatin1Char('-'));
+            bool okMin = true;
+            bool okMax = false;
+            d.minZoom = zooms.size() == 2 ? zooms.front().trimmed().toInt(&okMin) : 0;
+            d.maxZoom = zooms.back().trimmed().toInt(&okMax);
+            if (!okMin || !okMax) {
+                d.maxZoom = -1;  // Reported by validate().
+            }
+            d.resolutionM = 156543.03392804097 / std::ldexp(1.0, std::max(*d.maxZoom, 0));
+            d.verticalDatum.clear();
+        } else {
+            bool ok = false;
+            const double res = text(r, 2).toDouble(&ok);
+            d.resolutionM = ok ? res : 0.0;
+            d.verticalDatum = text(r, 3).toStdString();
+            d.maxZoom.reset();
+            d.minZoom = 0;
+        }
         if (d.name.empty()) {
             d.name = d.id;
         }
@@ -569,7 +648,8 @@ void DataProvidersPanel::showSelected() {
                                 : tr("Built-in providers cannot be changed; duplicate it."));
     duplicate_->setEnabled(p != nullptr);
     remove_->setEnabled(user);
-    test_->setEnabled(p != nullptr && !testing_ && p->protocol == "rest_bbox");
+    test_->setEnabled(p != nullptr && !testing_ &&
+                      (p->protocol == "rest_bbox" || net::isTileProtocol(p->protocol)));
     if (p == nullptr) {
         details_->clear();
         usage_->clear();
@@ -584,10 +664,19 @@ void DataProvidersPanel::showSelected() {
     lines << tr("<b>%1</b> (<code>%2</code>) · %3 · %4")
                  .arg(qs(p->name).toHtmlEscaped(), qs(p->key).toHtmlEscaped(),
                       user ? tr("your provider") : tr("built-in"),
-                      p->protocol == "rest_bbox" ? tr("REST bounding box") : qs(p->protocol));
+                      p->protocol == "rest_bbox" ? tr("REST bounding box")
+                                                 : qs(p->protocol).toUpper());
     lines << tr("URL: <code>%1</code>").arg(qs(p->urlTemplate).toHtmlEscaped());
     QStringList datasets;
     for (const net::DatasetConfig& d : p->datasets) {
+        if (p->isImagery()) {
+            datasets << tr("%1 — %2 (zoom %3 … %4)%5")
+                            .arg(qs(d.id).toHtmlEscaped(), qs(d.name).toHtmlEscaped())
+                            .arg(d.minZoom)
+                            .arg(d.maxZoom.value_or(net::kMaxImageryZoom))
+                            .arg(d.verified ? QString() : tr(" · request format not verified"));
+            continue;
+        }
         datasets << tr("%1 — %2 (%3 m%4)%5")
                         .arg(qs(d.id).toHtmlEscaped(), qs(d.name).toHtmlEscaped())
                         .arg(d.resolutionM, 0, 'g', 4)

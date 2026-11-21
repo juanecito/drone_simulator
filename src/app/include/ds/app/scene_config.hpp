@@ -17,6 +17,7 @@
 #include "ds/graphics/exposure.hpp"
 #include "ds/storage/terrain_preset_store.hpp"
 #include "ds/terrain/lidar.hpp"
+#include "ds/terrain/online_imagery.hpp"
 #include "ds/terrain/online_terrain.hpp"
 #include "ds/terrain/orthophoto.hpp"
 #include "ds/terrain/procedural_source.hpp"
@@ -78,13 +79,20 @@ struct FileTerrainConfig {
 /// @brief The rasterization options of the point cloud @p f.
 [[nodiscard]] terrain::LidarOptions lidarOptions(const FileTerrainConfig& f);
 
-/// @brief Orthophotos draped over file or online elevation (FR-TER-I02, I10).
+/// @brief Imagery draped over file or online elevation: orthophoto files (FR-TER-I02, I10)
+/// or an online imagery provider (FR-TER-O10).
 struct OrthoConfig {
+    /// Imagery provider key; when set, the imagery comes from it and @ref files, @ref crs,
+    /// @ref bands and @ref attribution are not used.
+    std::string provider;
+    std::string dataset;                       ///< Provider layer; "" ⇒ its default.
     std::vector<std::filesystem::path> files;  ///< Absolute paths of the images; empty ⇒ none.
     std::string crs;                           ///< CRS for images without one.
     std::vector<int> bands;                    ///< 3 or 4 bands; empty ⇒ automatic.
     std::string attribution;                   ///< Shown in the viewport (FR-TER-I09).
     terrain::OrthoColor color;                 ///< Colour adjustments.
+    /// @brief True if imagery is configured (files or a provider).
+    [[nodiscard]] bool any() const noexcept { return !provider.empty() || !files.empty(); }
     /// @brief Equality.
     bool operator==(const OrthoConfig&) const = default;
 };
@@ -191,8 +199,9 @@ struct BuiltTerrain {
     std::shared_ptr<terrain::OnlineStreamSource> stream;  ///< Online without extent: streaming.
     std::string attribution;                              ///< Data attribution ("" if none).
     std::string dataHash;  ///< Online terrain with extent: hash of the data (FR-TER-O14).
-    /// Orthophotos (FR-TER-I01 … I09); null without imagery or when it could not be opened.
-    std::shared_ptr<const terrain::OrthophotoSource> ortho;
+    /// Orthophotos (FR-TER-I01 … I09) or online imagery (FR-TER-O10); null without imagery
+    /// or when it could not be opened.
+    std::shared_ptr<const terrain::OrthoImagery> ortho;
     std::string orthoAttribution;  ///< Imagery attribution ("" if none).
     /// Why the imagery is disabled (FR-TER-I08: a broken orthophoto only disables it), or a
     /// caution such as "the orthophotos do not cover the terrain"; "" if none.

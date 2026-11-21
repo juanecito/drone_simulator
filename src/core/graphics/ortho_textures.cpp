@@ -180,14 +180,18 @@ int OrthoTextures::upload(const terrain::OrthoTileKey& key, const terrain::Ortho
     if (layer < 0) {
         return -1;
     }
+    write(layer, tile);
+    resident_[key] = Resident{layer, frame_, tile.serial};
+    return layer;
+}
+
+void OrthoTextures::write(int layer, const terrain::OrthoTile& tile) {
     for (int mip = 0; mip < tile.mipCount(); ++mip) {
         const int s = std::max(tile.sizePx >> mip, 1);
         glTextureSubImage3D(texture_.id(), mip, 0, 0, layer, s, s, 1, GL_RGBA, GL_UNSIGNED_BYTE,
                             tile.rgba.data() + tile.mipOffset(mip));
     }
-    resident_[key] = Resident{layer, frame_};
     ++uploads_;
-    return layer;
 }
 
 bool OrthoTextures::slotsFor(const terrain::ChunkId& id, OrthoSlots& slots) {
@@ -212,6 +216,13 @@ bool OrthoTextures::slotsFor(const terrain::ChunkId& id, OrthoSlots& slots) {
             int layer = residentLayer(k);
             if (layer < 0 && state == terrain::OrthoTileState::Ready) {
                 layer = upload(k, *tile);
+            } else if (layer >= 0 && state == terrain::OrthoTileState::Ready &&
+                       uploads_ < kUploadsPerFrame) {
+                // Rebuilt with more data since it was uploaded.
+                if (Resident& r = resident_.at(k); r.serial != tile->serial) {
+                    write(layer, *tile);
+                    r.serial = tile->serial;
+                }
             }
             if (layer < 0) {
                 continue;  // Not on the GPU yet: try the parent.

@@ -161,8 +161,11 @@ TEST(UrlTemplate, AppendQueryAndRedact) {
 TEST(Provider, ShippedOpenTopographyPresetIsValid) {
     auto presets = loadProviderPresets(fs::path(DS_TEST_ASSETS_DIR) / "providers");
     ASSERT_TRUE(presets) << presets.error().message;
-    ASSERT_EQ(presets->size(), 1U);
-    const ProviderConfig& ot = presets->front();
+    // OpenTopography, plus the imagery presets (online_imagery_test.cpp).
+    const auto it = std::ranges::find(*presets, "opentopography", &ProviderConfig::key);
+    ASSERT_NE(it, presets->end());
+    EXPECT_EQ(std::ranges::count(*presets, "elevation", &ProviderConfig::kind), 1);
+    const ProviderConfig& ot = *it;
     EXPECT_EQ(ot.key, "opentopography");
     EXPECT_TRUE(ot.requiresKey);
     EXPECT_EQ(ot.apiKey.name, "API_Key");

@@ -4,6 +4,7 @@
 #include "ds/net/provider.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <set>
@@ -76,8 +77,8 @@ std::optional<GeoRect> readRect(JsonReader& r, std::string_view key) {
     return rect;
 }
 
-void checkTemplate(JsonReader& r, std::string_view key, const std::string& text,
-                   bool insecureHttp) {
+void checkTemplate(JsonReader& r, std::string_view key, const std::string& text, bool insecureHttp,
+                   std::string_view protocol) {
     std::map<std::string, std::string, std::less<>> dummy;
     for (const std::string_view name : urlPlaceholders()) {
         dummy.emplace(std::string(name), "0");
@@ -86,20 +87,46 @@ void checkTemplate(JsonReader& r, std::string_view key, const std::string& text,
         r.fail(key, expanded.error().message);
     } else if (text.starts_with("http://") && !insecureHttp) {
         r.fail(key, "plain http:// requires \"insecureHttp\": true");
+    } else if (protocol == "wms" && text.find("{bbox}") == std::string::npos) {
+        r.fail(key, "a WMS template needs {bbox} (and usually {width} and {height})");
+    } else if (isTileProtocol(protocol) && protocol != "wms" &&
+               (text.find("{z}") == std::string::npos || text.find("{x}") == std::string::npos ||
+                text.find("{y}") == std::string::npos)) {
+        r.fail(key, "a tile template needs {z}, {x} and {y}");
+    } else if (!isTileProtocol(protocol) &&
+               (text.find("{z}") != std::string::npos || text.find("{x}") != std::string::npos ||
+                text.find("{y}") != std::string::npos)) {
+        r.fail(key, "{z}, {x} and {y} are for tile protocols");
     }
 }
 
-DatasetConfig readDataset(JsonReader& d, bool insecureHttp) {
+DatasetConfig readDataset(JsonReader& d, bool insecureHttp, std::string_view protocol,
+                          bool imagery) {
     rejectUnknown(d, {"id", "name", "urlTemplate", "resolutionM", "maxAreaKm2", "verticalDatum",
-                      "ellipsoidal", "coverage", "bytesPerSample", "attribution", "verified"});
+                      "ellipsoidal", "coverage", "bytesPerSample", "attribution", "verified",
+                      "minZoom", "maxZoom"});
     DatasetConfig ds;
     ds.id = d.string("id");
     ds.name = d.string("name", ds.id);
     ds.urlTemplate = d.string("urlTemplate", "");
     if (!ds.urlTemplate.empty()) {
-        checkTemplate(d, "urlTemplate", ds.urlTemplate, insecureHttp);
+        checkTemplate(d, "urlTemplate", ds.urlTemplate, insecureHttp, protocol);
     }
-    ds.resolutionM = d.number("resolutionM", 0.01, 10000.0);
+    if (imagery) {
+        ds.minZoom = d.integer("minZoom", 0, kMaxImageryZoom, 0);
+        ds.maxZoom = d.integer("maxZoom", 0, kMaxImageryZoom);
+        if (d.ok() && *ds.maxZoom < ds.minZoom) {
+            d.fail("maxZoom", "must not be less than minZoom");
+        }
+        // Ground pixel at the equator of the finest zoom (256-px tiles).
+        const double finest = 156543.03392804097 / std::ldexp(1.0, ds.maxZoom.value_or(0));
+        ds.resolutionM = d.number("resolutionM", 0.01, 10000.0, std::max(finest, 0.01));
+    } else {
+        if (d.has("minZoom") || d.has("maxZoom")) {
+            d.fail(d.has("minZoom") ? "minZoom" : "maxZoom", "is for imagery datasets");
+        }
+        ds.resolutionM = d.number("resolutionM", 0.01, 10000.0);
+    }
     ds.maxAreaKm2 = optionalNumber(d, "maxAreaKm2", 0.001, 1.0e9);
     ds.verticalDatum = d.string("verticalDatum", "");
     ds.ellipsoidal = d.boolean("ellipsoidal", false);
@@ -111,6 +138,10 @@ DatasetConfig readDataset(JsonReader& d, bool insecureHttp) {
 }
 
 }  // namespace
+
+bool isTileProtocol(std::string_view protocol) noexcept {
+    return protocol == "xyz" || protocol == "tms" || protocol == "wmts" || protocol == "wms";
+}
 
 const DatasetConfig* ProviderConfig::dataset(std::string_view id) const noexcept {
     const auto it = std::ranges::find(datasets, id, &DatasetConfig::id);
@@ -138,7 +169,8 @@ common::Result<ProviderConfig> parseProvider(const Json& json) {
                       "dailyCallLimit", "maxConcurrent",
                       "insecureHttp",   "maxResponseBytes",
                       "contentTypes",   "quotaErrorPatterns",
-                      "blockSizeKm",    "origin"});
+                      "blockSizeKm",    "origin",
+                      "tileSizePx"});
     const int version = r.integer("schemaVersion", 1, 1000);
     if (r.ok() && version > kProviderSchemaVersion) {
         r.fail("schemaVersion",
@@ -155,22 +187,33 @@ common::Result<ProviderConfig> parseProvider(const Json& json) {
     }
     p.name = r.string("name");
     p.kind = r.choice("kind", {"elevation", "imagery"});
-    p.protocol = r.choice("protocol", {"rest_bbox"});
+    p.protocol = r.choice("protocol", {"rest_bbox", "xyz", "tms", "wmts", "wms"});
+    const bool imagery = p.kind == "imagery";
+    if (r.ok() && imagery != isTileProtocol(p.protocol)) {
+        r.fail("protocol", imagery ? "imagery providers use xyz, tms, wmts or wms"
+                                   : "elevation providers use rest_bbox for now");
+    }
     p.insecureHttp = r.boolean("insecureHttp", false);
     p.urlTemplate = r.string("urlTemplate", "");
     if (!p.urlTemplate.empty()) {
-        checkTemplate(r, "urlTemplate", p.urlTemplate, p.insecureHttp);
+        checkTemplate(r, "urlTemplate", p.urlTemplate, p.insecureHttp, p.protocol);
     }
     p.format = r.string("format", "");
-    p.crs = r.string("crs", "EPSG:4326");
-    if (p.crs != "EPSG:4326") {
+    p.crs = r.string("crs", imagery ? "EPSG:3857" : "EPSG:4326");
+    if (imagery && p.crs != "EPSG:3857") {
+        r.fail("crs", "imagery providers must use Web Mercator (EPSG:3857) tiles for now");
+    } else if (!imagery && p.crs != "EPSG:4326") {
         r.fail("crs", "bounding-box providers must use EPSG:4326 for now");
+    }
+    p.tileSizePx = r.integer("tileSizePx", 64, 1024, 256);
+    if (r.ok() && (p.tileSizePx & (p.tileSizePx - 1)) != 0) {
+        r.fail("tileSizePx", "must be a power of two (256 or 512)");
     }
     const std::size_t n = r.array("datasets");
     std::set<std::string> ids;
     for (std::size_t i = 0; i < n; ++i) {
         JsonReader d = r.element("datasets", i);
-        DatasetConfig ds = readDataset(d, p.insecureHttp);
+        DatasetConfig ds = readDataset(d, p.insecureHttp, p.protocol, imagery);
         if (!ds.id.empty() && !ids.insert(ds.id).second) {
             d.fail("id", std::format("duplicate dataset id \"{}\"", ds.id));
         }
@@ -230,6 +273,9 @@ Json toJson(const ProviderConfig& p) {
         j["format"] = p.format;
     }
     j["crs"] = p.crs;
+    if (p.isImagery()) {
+        j["tileSizePx"] = p.tileSizePx;
+    }
     j["datasets"] = Json::array();
     for (const DatasetConfig& d : p.datasets) {
         Json dj;
@@ -257,6 +303,12 @@ Json toJson(const ProviderConfig& p) {
             dj["attribution"] = d.attribution;
         }
         dj["verified"] = d.verified;
+        if (p.isImagery()) {
+            dj["minZoom"] = d.minZoom;
+            if (d.maxZoom) {
+                dj["maxZoom"] = *d.maxZoom;
+            }
+        }
         j["datasets"].push_back(std::move(dj));
     }
     if (!p.defaultDataset.empty()) {

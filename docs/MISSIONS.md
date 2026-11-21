@@ -149,6 +149,30 @@ path rules as the elevation files (usually in `ortho/`):
   images are not part of `terrain_data_hash`.
 - **Attribution:** shown after the elevation attribution, separated by "·".
 
+### Imagery from a provider
+
+Instead of `orthophotoFiles`, file and online terrain can be covered with imagery from an
+**imagery provider** (Settings › Data providers), streamed while you fly:
+
+```json
+"imageryProvider": "ign-pnoa",
+"imageryDataset": "OI.OrthoimageCoverage"
+```
+
+- **Providers:** the built-in ones are IGN PNOA (Spain), swisstopo SWISSIMAGE
+  (Switzerland) and USGS The National Map (USA); none needs a key. You can add others that
+  serve Web-Mercator tiles (XYZ, TMS, WMTS `GoogleMapsCompatible`) or EPSG:3857 WMS maps.
+  `imageryDataset` picks a layer; without it the provider's default layer is used.
+- **Files or a provider:** a mission gives `orthophotoFiles` or `imageryProvider`, not both.
+- **Unknown providers** make the mission invalid. A provider that needs an API key you have
+  not entered, or that has no imagery at the origin, only disables the imagery, and the
+  status bar says why.
+- **Offline:** imagery is not downloaded before the flight. What you have flown over is kept
+  in the cache, and is used when you are offline; elsewhere the terrain materials show.
+- **Not scored:** imagery is not part of `terrain_data_hash`.
+- **Attribution:** the provider's and the layer's attribution are shown after the elevation
+  attribution.
+
 ### Terrain from lidar point clouds
 
 With `"format": "las"` or `"laz"`, the `elevationFiles` are point clouds. They are turned
@@ -538,7 +562,8 @@ One mission of the Drone Simulator (SPECIFICATION §4.9.1, docs/MISSIONS.md). Un
 | `extent` | object (extent) |  |  | Bounded terrain centred on the origin (FR-TER-04a). |
 | `elevationProvider` | string | yes | min length 1 |  |
 | `dataset` | string |  | min length 1 | Provider dataset, e.g. "COP30". |
-| `imageryProvider` | string \| null |  |  |  |
+| `imageryProvider` | string \| null |  |  | Online imagery provider draped over the terrain (FR-TER-O10); null or absent ⇒ none. |
+| `imageryDataset` | string |  | min length 1 | Layer of the imagery provider; absent ⇒ its default. |
 | `maxResolutionM` | number |  | > 0 |  |
 
 #### terrain — file
@@ -562,6 +587,8 @@ One mission of the Drone Simulator (SPECIFICATION §4.9.1, docs/MISSIONS.md). Un
 | `orthophotoAttribution` | string |  |  |  |
 | `orthophotoBands` | array of integer |  |  | Red, green, blue (and alpha) bands of multi-band images, e.g. [1, 2, 3]. |
 | `orthophotoColor` | object |  |  | Colour adjustments of the orthophotos. |
+| `imageryProvider` | string |  | min length 1 | Online imagery provider instead of orthophotoFiles (FR-TER-O10). |
+| `imageryDataset` | string |  | min length 1 | Layer of the imagery provider; absent ⇒ its default. |
 
 #### terrain.params (procedural overrides)
 

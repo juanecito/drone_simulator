@@ -135,6 +135,9 @@ common::Result<TerrainConfig> fileMissionTerrain(const missions::MissionDefiniti
     config.ortho.bands = spec.orthophotoBands;
     config.ortho.attribution = spec.orthophotoAttribution;
     config.ortho.color = spec.orthophotoColor;
+    // Online imagery instead of files (FR-TER-O10).
+    config.ortho.provider = spec.imageryProvider;
+    config.ortho.dataset = spec.imageryDataset;
     return config;
 }
 
@@ -163,6 +166,8 @@ common::Result<TerrainConfig> missionTerrain(const missions::MissionDefinition& 
         config.online.provider = t.elevationProvider;
         config.online.dataset = t.dataset;
         config.online.edge = terrain::EdgeMode::Cliff;
+        config.ortho.provider = t.imageryProvider;  // FR-TER-O10; streamed, not required.
+        config.ortho.dataset = t.imageryDataset;
         config.origin = {t.origin->latitudeDeg, t.origin->longitudeDeg, 0.0};
         if (t.originAltitudeRef == items::AltitudeRef::Amsl) {
             config.online.originAltitudeM = t.originAltitudeM;

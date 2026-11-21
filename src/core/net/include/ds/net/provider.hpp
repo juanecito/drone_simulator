@@ -24,6 +24,13 @@ namespace ds::net {
 /// @brief Version of the provider JSON format read by parseProvider().
 inline constexpr int kProviderSchemaVersion = 1;
 
+/// @brief Highest zoom level an imagery dataset may declare.
+inline constexpr int kMaxImageryZoom = 24;
+
+/// @brief True for the tile protocols of imagery providers (FR-TER-O10): `xyz`, `tms`, `wmts`
+/// (Web-Mercator "GoogleMapsCompatible" tile matrix set) and `wms` (GetMap per tile).
+[[nodiscard]] bool isTileProtocol(std::string_view protocol) noexcept;
+
 /// @brief One dataset offered by a provider (e.g. COP30 from OpenTopography).
 struct DatasetConfig {
     std::string id;                    ///< Value of the `{dataset}` placeholder (e.g. "COP30").
@@ -37,6 +44,9 @@ struct DatasetConfig {
     int bytesPerSample = 4;            ///< For response-size estimates.
     std::string attribution;           ///< Dataset citation (FR-TER-O13).
     bool verified = true;  ///< False if the request format is not verified against the docs.
+    // Imagery (tile protocols).
+    int minZoom = 0;             ///< Coarsest zoom level served.
+    std::optional<int> maxZoom;  ///< Finest zoom level served (required for imagery).
 };
 
 /// @brief Where the API key goes in a request (FR-NET-07).
@@ -55,10 +65,13 @@ struct ProviderConfig {
     std::string key;                      ///< Stable unique key (e.g. "opentopography").
     std::string name;                     ///< Display name.
     std::string kind = "elevation";       ///< `elevation` or `imagery`.
-    std::string protocol = "rest_bbox";   ///< Only `rest_bbox` is implemented (FR-TER-O01).
+    /// `rest_bbox` for elevation (FR-TER-O01); a tile protocol for imagery (isTileProtocol()).
+    std::string protocol = "rest_bbox";
     std::string urlTemplate;              ///< Default template; never contains the key itself.
     std::string format;                   ///< Value of `{format}` (e.g. "GTiff").
-    std::string crs = "EPSG:4326";        ///< Value of `{crs}` and CRS of the bounding box.
+    /// Value of `{crs}`: EPSG:4326 (bounding boxes) or EPSG:3857 (imagery tiles).
+    std::string crs = "EPSG:4326";
+    int tileSizePx = 256;                 ///< Imagery tile size (256 or 512).
     std::vector<DatasetConfig> datasets;  ///< Offered datasets (at least one).
     std::string defaultDataset;           ///< Id of the default dataset.
     bool requiresKey = false;             ///< True if requests need an API key.
@@ -78,6 +91,8 @@ struct ProviderConfig {
     double blockSizeKm = 20.0;       ///< Block size for streaming without extent (FR-TER-O16).
     std::string origin = "builtin";  ///< `builtin` or `user`.
 
+    /// @brief True for an imagery provider (tile protocol).
+    [[nodiscard]] bool isImagery() const noexcept { return kind == "imagery"; }
     /// @brief The dataset with @p id, or nullptr.
     [[nodiscard]] const DatasetConfig* dataset(std::string_view id) const noexcept;
     /// @brief URL template used for @p dataset.

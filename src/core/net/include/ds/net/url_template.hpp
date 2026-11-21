@@ -18,7 +18,7 @@ namespace ds::net {
 
 /// @brief Placeholders understood in provider URL templates.
 /// @details `{dataset} {south} {north} {west} {east} {bbox} {width} {height} {crs} {format}
-/// {apiKey}`; tile providers will add `{z} {x} {y}`.
+/// {apiKey}`, and `{z} {x} {y}` for tile providers.
 [[nodiscard]] std::span<const std::string_view> urlPlaceholders() noexcept;
 
 /// @brief Percent-encodes @p text for use in a URL query or path (RFC 3986 unreserved

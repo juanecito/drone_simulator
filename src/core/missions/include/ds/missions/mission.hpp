@@ -62,7 +62,8 @@ struct TerrainSpec {
     // Online.
     std::string elevationProvider;                      ///< Provider key.
     std::string dataset;                                ///< Provider dataset ("COP30").
-    std::string imageryProvider;                        ///< Empty if none.
+    std::string imageryProvider;                        ///< Empty if none (FR-TER-O10).
+    std::string imageryDataset;                         ///< Its layer; empty ⇒ default.
     std::optional<double> maxResolutionM;               ///< Finest resolution to fetch.
     // File.
     std::optional<terrain::FileTerrainSpec> file;       ///< Elevation / orthophoto files.

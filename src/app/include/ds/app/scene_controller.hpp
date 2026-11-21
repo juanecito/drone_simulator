@@ -122,9 +122,9 @@ public:
     /// @brief Attribution of the terrain data and imagery, shown in the viewport (FR-TER-O13,
     /// F10, I09).
     [[nodiscard]] const std::string& attribution() const noexcept { return attribution_; }
-    /// @brief Orthophotos over the terrain (FR-TER-I01), null if none.
-    [[nodiscard]] const std::shared_ptr<const terrain::OrthophotoSource>& orthophotos()
-        const noexcept {
+    /// @brief Imagery over the terrain: orthophotos (FR-TER-I01) or an online provider
+    /// (FR-TER-O10), null if none.
+    [[nodiscard]] const std::shared_ptr<const terrain::OrthoImagery>& orthophotos() const noexcept {
         return ortho_;
     }
     /// @brief Streamer of the orthophoto tiles, null without imagery.
@@ -189,7 +189,7 @@ private:
     std::string dataHash_;
     std::string attribution_;
     std::unique_ptr<terrain::TerrainStreamer> streamer_;
-    std::shared_ptr<const terrain::OrthophotoSource> ortho_;
+    std::shared_ptr<const terrain::OrthoImagery> ortho_;
     std::unique_ptr<terrain::OrthoStreamer> orthoStreamer_;
     std::string orthoWarning_;
     std::unique_ptr<terrain::TerrainQuery> query_;

@@ -138,10 +138,26 @@ TerrainResult<FileTerrainSpec> parseFileTerrain(const Json& json, std::string_vi
                             std::format("{}: must be an object", jsonPath));
     }
     JsonReader r(json, std::string(jsonPath));
-    rejectUnknown(r, {"source", "format", "elevationFiles", "crs", "verticalDatum", "attribution",
-                      "origin", "extent", "band", "surface", "resolutionM", "interpolation",
-                      "classifyGround", "orthophotoFiles", "orthophotoCrs", "orthophotoAttribution",
-                      "orthophotoBands", "orthophotoColor"});
+    rejectUnknown(r, {"source",
+                      "format",
+                      "elevationFiles",
+                      "crs",
+                      "verticalDatum",
+                      "attribution",
+                      "origin",
+                      "extent",
+                      "band",
+                      "surface",
+                      "resolutionM",
+                      "interpolation",
+                      "classifyGround",
+                      "orthophotoFiles",
+                      "orthophotoCrs",
+                      "orthophotoAttribution",
+                      "orthophotoBands",
+                      "orthophotoColor",
+                      "imageryProvider",
+                      "imageryDataset"});
     FileTerrainSpec spec;
     if (r.choice("source", {"file"}) != "file") {
         return terrainError(TerrainErrorCode::InvalidSpec, r.errorText());
@@ -225,6 +241,14 @@ TerrainResult<FileTerrainSpec> parseFileTerrain(const Json& json, std::string_vi
         spec.orthophotoColor.brightness = c->number("brightness", -1.0, 1.0, 0.0);
         spec.orthophotoColor.contrast = c->number("contrast", 0.0, 4.0, 1.0);
         spec.orthophotoColor.gamma = c->number("gamma", 0.1, 10.0, 1.0);
+    }
+    spec.imageryProvider = r.string("imageryProvider", "");
+    spec.imageryDataset = r.string("imageryDataset", "");
+    if (!spec.imageryProvider.empty() && !spec.orthophotoFiles.empty()) {
+        r.fail("imageryProvider", "use either orthophotoFiles or an imagery provider");
+    }
+    if (spec.imageryProvider.empty() && !spec.imageryDataset.empty()) {
+        r.fail("imageryDataset", "needs imageryProvider");
     }
     if (!r.ok()) {
         return terrainError(TerrainErrorCode::InvalidSpec, r.errorText());

@@ -31,6 +31,7 @@
 #include "ds/app/data_services.hpp"
 #include "ds/app/scene_controller.hpp"
 #include "ds/common/random.hpp"
+#include "ds/terrain/online_imagery.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/query.hpp"
 #include "ds/terrain/terrain_files.hpp"
@@ -105,7 +106,9 @@ TerrainPanel::TerrainPanel(SceneController& scene, QWidget* parent)
     refresh_ = new QTimer(this);
     refresh_->setInterval(2000);
     connect(refresh_, &QTimer::timeout, this, [this] {
-        if (isVisible() && scene_->onlineStatus()) {
+        if (isVisible() &&
+            (scene_->onlineStatus() ||
+             dynamic_cast<const terrain::OnlineImagerySource*>(scene_->orthophotos().get()))) {
             updateMetadata();
             updateQuota();
         }
@@ -288,6 +291,7 @@ void TerrainPanel::buildUi() {
                 fillDatasets();
                 dataset_->setCurrentIndex(std::max(dataset_->findData(dataset), 0));
             }
+            fillImageryProviders();
             if (!services->elevationProviders().empty()) {
                 if (auto* model = qobject_cast<QStandardItemModel*>(source_->model())) {
                     model->item(1)->setEnabled(true);
@@ -301,9 +305,22 @@ void TerrainPanel::buildUi() {
     }
 
     // Orthophotos over file or online elevation (FR-TER-I10).
-    orthoBox_ = new QGroupBox(tr("Orthophotos"));
+    orthoBox_ = new QGroupBox(tr("Imagery"));
     orthoBox_->setObjectName(QStringLiteral("OrthoBox"));
     auto* iform = new QFormLayout(orthoBox_);
+    orthoForm_ = iform;
+    orthoSource_ = new QComboBox;
+    orthoSource_->setObjectName(QStringLiteral("OrthoSourceCombo"));
+    orthoSource_->setToolTip(
+        tr("Orthophoto files, or an online imagery provider (Settings › Data providers)"));
+    iform->addRow(tr("Source:"), orthoSource_);
+    orthoLayer_ = new QComboBox;
+    orthoLayer_->setObjectName(QStringLiteral("OrthoLayerCombo"));
+    iform->addRow(tr("Layer:"), orthoLayer_);
+    connect(orthoSource_, &QComboBox::currentIndexChanged, this, [this] {
+        fillImageryLayers();
+        updateEnabled();
+    });
     orthoFiles_ = new QListWidget;
     orthoFiles_->setObjectName(QStringLiteral("OrthoList"));
     orthoFiles_->setMaximumHeight(70);
@@ -317,6 +334,7 @@ void TerrainPanel::buildUi() {
     removeOrtho_ = new QPushButton(tr("Remove"));
     removeOrtho_->setObjectName(QStringLiteral("RemoveOrthoButton"));
     auto* orthoButtons = new QHBoxLayout;
+    orthoButtons_ = orthoButtons;
     orthoButtons->addWidget(addOrtho);
     orthoButtons->addWidget(removeOrtho_);
     orthoButtons->addStretch();
@@ -366,6 +384,7 @@ void TerrainPanel::buildUi() {
     orthoInfo_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     iform->addRow(orthoInfo_);
     layout->addWidget(orthoBox_);
+    fillImageryProviders();
 
     metadata_ = new QLabel;
     metadata_->setObjectName(QStringLiteral("MetadataLabel"));
@@ -586,7 +605,13 @@ TerrainConfig TerrainPanel::formConfig() const {
             o.originAltitudeM = altitude_->value();
         }
     }
-    if (c.kind != TerrainKind::Procedural) {
+    if (c.kind != TerrainKind::Procedural && orthoSource_->currentIndex() > 0) {
+        c.ortho.provider = orthoSource_->currentData().toString().toStdString();
+        c.ortho.dataset = orthoLayer_->currentData().toString().toStdString();
+        c.ortho.color = {.brightness = orthoBrightness_->value(),
+                         .contrast = orthoContrast_->value(),
+                         .gamma = orthoGamma_->value()};
+    } else if (c.kind != TerrainKind::Procedural) {
         OrthoConfig& o = c.ortho;
         for (int i = 0; i < orthoFiles_->count(); ++i) {
             o.files.emplace_back(orthoFiles_->item(i)->data(Qt::UserRole).toString().toStdString());
@@ -659,6 +684,22 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     }
     lidarInterpolation_->setCurrentIndex(
         std::max(lidarInterpolation_->findData(static_cast<int>(c.file.interpolation)), 0));
+    fillImageryProviders();
+    if (!c.ortho.provider.empty()) {
+        const QString key = QString::fromStdString(c.ortho.provider);
+        int i = orthoSource_->findData(key);
+        if (i < 0) {  // Not configured here: kept, so the scene is not changed silently.
+            orthoSource_->addItem(tr("%1 (not available)").arg(key), key);
+            i = orthoSource_->count() - 1;
+        }
+        orthoSource_->setCurrentIndex(i);
+        fillImageryLayers();
+        if (const int l = orthoLayer_->findData(QString::fromStdString(c.ortho.dataset)); l >= 0) {
+            orthoLayer_->setCurrentIndex(l);
+        }
+    } else {
+        orthoSource_->setCurrentIndex(0);
+    }
     orthoFiles_->clear();
     for (const auto& file : c.ortho.files) {
         const QString path = QString::fromStdString(file.string());
@@ -705,7 +746,8 @@ bool TerrainPanel::regenerate() {
     // Large orthophotos without overviews: a cached COG first (FR-TER-I06). A problem only
     // disables the imagery (FR-TER-I08).
     QString orthoProblem;
-    if (config.kind != TerrainKind::Procedural && !config.ortho.files.empty()) {
+    if (config.kind != TerrainKind::Procedural && !config.ortho.files.empty() &&
+        config.ortho.provider.empty()) {
         if (DataServices* services = scene_->dataServices()) {
             auto cached = ensureOrthoCache(this, *services, config.ortho.files);
             if (!cached) {
@@ -915,10 +957,63 @@ void TerrainPanel::addOrthoFiles() {
     updateEnabled();
 }
 
+void TerrainPanel::fillImageryProviders() {
+    const QString current = orthoSource_->currentData().toString();
+    const QSignalBlocker blocker(orthoSource_);
+    orthoSource_->clear();
+    orthoSource_->addItem(tr("Orthophoto files"), QString());
+    if (DataServices* services = scene_->dataServices()) {
+        for (const net::ProviderConfig* p : services->imageryProviders()) {
+            orthoSource_->addItem(QString::fromStdString(p->name), QString::fromStdString(p->key));
+        }
+    }
+    orthoSource_->setCurrentIndex(std::max(orthoSource_->findData(current), 0));
+    fillImageryLayers();
+}
+
+void TerrainPanel::fillImageryLayers() {
+    const QString current = orthoLayer_->currentData().toString();
+    orthoLayer_->clear();
+    DataServices* services = scene_->dataServices();
+    const net::ProviderConfig* p =
+        services != nullptr && orthoSource_->currentIndex() > 0
+            ? services->provider(orthoSource_->currentData().toString().toStdString())
+            : nullptr;
+    if (p == nullptr) {
+        return;
+    }
+    for (const net::DatasetConfig& d : p->datasets) {
+        orthoLayer_->addItem(QString::fromStdString(d.name), QString::fromStdString(d.id));
+    }
+    const int i = orthoLayer_->findData(current);
+    orthoLayer_->setCurrentIndex(
+        i >= 0 ? i : std::max(orthoLayer_->findData(QString::fromStdString(p->defaultDataset)), 0));
+}
+
 void TerrainPanel::updateOrthoInfo() {
     // FR-TER-I10: coverage and resolution of the imagery in use.
     QStringList lines;
-    if (const auto& ortho = scene_->orthophotos()) {
+    if (const auto* online =
+            dynamic_cast<const terrain::OnlineImagerySource*>(scene_->orthophotos().get())) {
+        // FR-TER-O12 for imagery: provider, protocol, layer, resolution, what was loaded.
+        const terrain::OrthoMetadata& m = online->metadata();
+        const terrain::OnlineImageryStatus st = online->status();
+        lines << tr("%1 · %2 (%3), zoom %4 … %5, finest %6 m/px")
+                     .arg(QString::fromStdString(online->provider().name))
+                     .arg(QString::fromStdString(online->dataset().name))
+                     .arg(QString::fromStdString(m.format))
+                     .arg(online->dataset().minZoom)
+                     .arg(online->dataset().maxZoom.value_or(net::kMaxImageryZoom))
+                     .arg(m.resolutionM, 0, 'g', 2);
+        lines << tr("Tiles: %1 downloaded, %2 from the cache, %3 loading, %4 not available")
+                     .arg(st.downloaded)
+                     .arg(st.fromCache)
+                     .arg(st.pending)
+                     .arg(st.missing);
+        if (!st.lastError.empty()) {
+            lines << tr("Last problem: %1").arg(QString::fromStdString(st.lastError));
+        }
+    } else if (const auto& ortho = scene_->orthophotos()) {
         const terrain::OrthoMetadata& m = ortho->metadata();
         lines << tr("%1, %2 file(s), %3 × %4 px, %5 m/px, %6, %7")
                      .arg(QString::fromStdString(m.format))
@@ -1039,6 +1134,13 @@ void TerrainPanel::updateEnabled() {
     onlineBox_->setVisible(online);
     orthoBox_->setVisible(file || online);
     removeOrtho_->setEnabled(!orthoFiles_->selectedItems().isEmpty());
+    const bool files = orthoSource_->currentIndex() <= 0;
+    orthoForm_->setRowVisible(orthoLayer_, !files);
+    orthoForm_->setRowVisible(orthoFiles_, files);
+    orthoForm_->setRowVisible(orthoButtons_, files);
+    orthoForm_->setRowVisible(orthoCrs_, files);
+    orthoForm_->setRowVisible(orthoBands_, files);
+    orthoForm_->setRowVisible(orthoAttribution_, files);
     autoOrigin_->setVisible(file || online);
     autoOrigin_->setText(online ? tr("At ground level")
                                 : tr("Centre of the data, at ground level"));

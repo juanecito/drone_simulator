@@ -18,7 +18,7 @@ namespace ds::terrain {
 struct OrthoStreamer::Shared {
     std::atomic<bool> cancelled{false};
     std::mutex mutex;
-    std::vector<std::pair<OrthoTileKey, std::shared_ptr<const OrthoTile>>> finished;
+    std::vector<Finished> finished;
 };
 
 namespace {
@@ -30,9 +30,8 @@ std::atomic<std::uint64_t> nextId{1};
 
 }  // namespace
 
-OrthoStreamer::OrthoStreamer(std::shared_ptr<const OrthophotoSource> source,
-                             const ChunkLayout& layout, common::WorkerPool& pool,
-                             const OrthoStreamerSettings& settings)
+OrthoStreamer::OrthoStreamer(std::shared_ptr<const OrthoImagery> source, const ChunkLayout& layout,
+                             common::WorkerPool& pool, const OrthoStreamerSettings& settings)
     : source_(std::move(source)),
       layout_(layout),
       pool_(&pool),
@@ -64,18 +63,30 @@ std::array<OrthoTileKey, kOrthoTilesPerChunk * kOrthoTilesPerChunk> OrthoStreame
 }
 
 void OrthoStreamer::collect() {
-    std::vector<std::pair<OrthoTileKey, std::shared_ptr<const OrthoTile>>> finished;
+    std::vector<Finished> finished;
     {
         const std::scoped_lock lock(shared_->mutex);
         finished.swap(shared_->finished);
     }
-    for (auto& [key, tile] : finished) {
-        inFlight_.erase(key);
+    const auto now = std::chrono::steady_clock::now();
+    for (Finished& f : finished) {
+        inFlight_.erase(f.key);
         ++built_;
-        if (tile) {
-            cachedBytes_ += tile->byteSize();
+        Entry& entry = cache_[f.key];
+        if (entry.tile) {
+            cachedBytes_ -= entry.tile->byteSize();
         }
-        cache_[key] = Entry{std::move(tile), frame_};
+        // An incomplete rebuild that came back without an image keeps the previous one.
+        if (f.build.tile || f.build.complete) {
+            entry.tile = std::move(f.build.tile);
+        }
+        if (entry.tile) {
+            cachedBytes_ += entry.tile->byteSize();
+        }
+        entry.lastUsed = frame_;
+        entry.complete = f.build.complete;
+        entry.revision = f.revision;
+        entry.builtAt = now;
     }
 }
 
@@ -117,10 +128,21 @@ void OrthoStreamer::update(std::span<const std::shared_ptr<const ChunkMesh>> chu
         }
     }
     std::vector<std::pair<double, OrthoTileKey>> missing;
+    const std::uint64_t revision = source_->revision();
+    const auto now = std::chrono::steady_clock::now();
     for (const auto& [key, priority] : wanted_) {
+        if (inFlight_.contains(key)) {
+            continue;
+        }
         if (const auto it = cache_.find(key); it != cache_.end()) {
-            it->second.lastUsed = frame_;
-        } else if (!inFlight_.contains(key)) {
+            Entry& e = it->second;
+            e.lastUsed = frame_;
+            // Online data arrived (or a failed download may be retried): build it again.
+            if (!e.complete &&
+                (e.revision != revision || now - e.builtAt >= settings_.retryIncomplete)) {
+                missing.emplace_back(priority, key);
+            }
+        } else {
             missing.emplace_back(priority, key);
         }
     }
@@ -130,13 +152,15 @@ void OrthoStreamer::update(std::span<const std::shared_ptr<const ChunkMesh>> chu
             break;
         }
         inFlight_.insert(key);
-        pool_->submit(priority, [source = source_, key, shared = shared_] {
+        pool_->submit(priority, [source = source_, key, priority, shared = shared_] {
             if (shared->cancelled) {
                 return;
             }
-            auto tile = source->tile(key);
+            // The revision before building: data arriving meanwhile triggers another build.
+            const std::uint64_t before = source->revision();
+            OrthoBuild build = source->build(key, priority);
             const std::scoped_lock lock(shared->mutex);
-            shared->finished.emplace_back(key, std::move(tile));
+            shared->finished.push_back(Finished{key, std::move(build), before});
         });
     }
     evict();
@@ -162,6 +186,9 @@ void OrthoStreamer::evict() {
             break;
         }
         const auto it = cache_.find(key);
+        if (it == cache_.end()) {
+            continue;  // Not reached: the keys come from the cache.
+        }
         if (it->second.tile) {
             cachedBytes_ -= it->second.tile->byteSize();
         } else {
@@ -178,7 +205,7 @@ OrthoTileState OrthoStreamer::find(const OrthoTileKey& key,
     }
     if (const auto it = cache_.find(key); it != cache_.end()) {
         if (!it->second.tile) {
-            return OrthoTileState::Empty;
+            return it->second.complete ? OrthoTileState::Empty : OrthoTileState::Pending;
         }
         if (tile != nullptr) {
             *tile = it->second.tile;
@@ -193,8 +220,11 @@ OrthoStreamerStats OrthoStreamer::stats() const {
     for (const auto& [key, entry] : cache_) {
         if (entry.tile) {
             ++s.cachedTiles;
-        } else {
+        } else if (entry.complete) {
             ++s.emptyTiles;
+        }
+        if (!entry.complete) {
+            ++s.waitingTiles;
         }
     }
     s.cachedBytes = cachedBytes_;

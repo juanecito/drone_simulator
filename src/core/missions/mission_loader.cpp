@@ -237,6 +237,7 @@ private:
             t.elevationProvider = text(j, "elevationProvider");
             t.dataset = text(j, "dataset");
             t.imageryProvider = text(j, "imageryProvider");
+            t.imageryDataset = text(j, "imageryDataset");
             t.maxResolutionM = optNumber(j, "maxResolutionM");
             for (const auto& [key, value] : {std::pair{"elevationProvider", t.elevationProvider},
                                              std::pair{"imageryProvider", t.imageryProvider}}) {
@@ -253,6 +254,11 @@ private:
                 return;
             }
             checkTerrainFiles(*spec);
+            if (!spec->imageryProvider.empty() && !ctx_.providers.empty() &&
+                !ctx_.providers.contains(spec->imageryProvider)) {
+                error("terrain.imageryProvider",
+                      std::format("unknown data provider \"{}\"", spec->imageryProvider));
+            }
             t.file = std::move(*spec);
         }
     }

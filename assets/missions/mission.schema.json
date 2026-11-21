@@ -540,7 +540,13 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Online imagery provider draped over the terrain (FR-TER-O10); null or absent ⇒ none."
+        },
+        "imageryDataset": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Layer of the imagery provider; absent ⇒ its default."
         },
         "maxResolutionM": {
           "type": "number",
@@ -662,6 +668,16 @@
             }
           },
           "additionalProperties": false
+        },
+        "imageryProvider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Online imagery provider instead of orthophotoFiles (FR-TER-O10)."
+        },
+        "imageryDataset": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Layer of the imagery provider; absent ⇒ its default."
         }
       },
       "patternProperties": {
