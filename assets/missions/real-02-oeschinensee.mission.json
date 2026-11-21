@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "id": "real-02-oeschinensee",
+  "title": "Oeschinensee",
+  "briefing": "An alpine lake under the Blüemlisalp, from swisstopo's 2 m elevation model. Cross the lake, look at the falls under the eastern cliffs, visit the high pasture on the northern slope and land back at the western shore. The tour reaches 1.7 km from the pilot, so line of sight is not checked (in reality you would need observers along the lake). The terrain data is not shipped with the simulator: fetch it once with fetch_mission_data.py (see the Terrain guide), then the mission becomes available.",
+  "difficulty": 3,
+  "chapter": "real-terrain",
+  "order": 2,
+  "unlock": {
+    "requires": [
+      "basics-01-hover"
+    ],
+    "minStars": 1
+  },
+  "terrain": {
+    "source": "file",
+    "format": "raster",
+    "elevationFiles": [
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2620-1149_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2620-1150_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2621-1149_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2621-1150_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2622-1149_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2622-1150_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2623-1149_2_2056_5728.tif"
+      },
+      {
+        "path": "library:oeschinensee/swissalti3d_2025_2623-1150_2_2056_5728.tif"
+      }
+    ],
+    "attribution": "Elevation: © swisstopo (swissALTI3D)",
+    "verticalDatum": "LN02",
+    "origin": {
+      "geo": [
+        46.500952,
+        7.725233,
+        0
+      ],
+      "altRef": "AGL"
+    },
+    "extent": {
+      "widthM": 3400,
+      "lengthM": 1800
+    },
+    "imageryProvider": "swisstopo-swissimage"
+  },
+  "environment": {
+    "utc": "2026-07-18T07:30:00Z",
+    "timeZone": "Europe/Zurich",
+    "weather": {
+      "seed": 5,
+      "preset": "few-clouds",
+      "temperatureC": 16,
+      "wind": {
+        "level": 2,
+        "fromDeg": 270
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "geo": [
+      46.497649,
+      7.71482,
+      0
+    ],
+    "altRef": "AGL",
+    "headingDeg": 90
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 1080,
+    "vlos": {
+      "enabled": false
+    }
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "home",
+      "name": "Shore pad",
+      "geo": [
+        46.497649,
+        7.71482,
+        0
+      ],
+      "altRef": "AGL",
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "lake",
+      "name": "Middle of the lake",
+      "geo": [
+        46.49825,
+        7.726521,
+        15
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "falls",
+      "name": "Falls",
+      "geo": [
+        46.497775,
+        7.736288,
+        30
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "alp",
+      "name": "High pasture",
+      "geo": [
+        46.50499,
+        7.729162,
+        20
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "lake",
+      "type": "reachWaypoint",
+      "target": "lake"
+    },
+    {
+      "id": "falls",
+      "type": "reachWaypoint",
+      "target": "falls"
+    },
+    {
+      "id": "alp",
+      "type": "reachWaypoint",
+      "target": "alp"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "home",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 600
+      },
+      {
+        "maxTimeS": 450
+      }
+    ]
+  }
+}

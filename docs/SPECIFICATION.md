@@ -1650,7 +1650,7 @@ so Markdown pages appear in the generated site.
   7. orthophoto files with GPU streaming (done);
   8. the online orthophoto provider (moved here from M7 step 9: WMTS and XYZ/TMS (S), WMS
      GetMap (C), using the Web-Mercator tile math of FR-GEO-02b) (done);
-  9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md`.
+  9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md` (done).
 - **LAS/LAZ without PDAL:** PDAL is not packaged in Debian 13. LAS and LAZ are read through
   LASzip (`liblaszip-dev`), and the DTM rasterization (TIN, IDW, hole filling) is project
   code. Automatic ground classification (`classifyGround`, SMRF, S) waits for a
@@ -2012,6 +2012,41 @@ so Markdown pages appear in the generated site.
     - Application: the Terrain tab with an imagery provider, a mission streaming imagery,
       a missing key disabling only the imagery, an unknown provider making the mission
       invalid, the provider editor and *Test connection*.
+- **Step 9 — Built-in file-terrain missions, tests and `docs/TERRAIN.md` (done):**
+  - *Missions:* two more real-terrain missions, each opened by a star on *Hover*:
+    - *Oeschinensee* (`real-02-oeschinensee`): eight swissALTI3D 2 m GeoTIFF tiles (LV95,
+      LN02), imagery from the `swisstopo-swissimage` provider; lake, falls and alp
+      waypoints, then a landing.
+    - *Sau reservoir* (`real-03-sau`): a Copernicus GLO-30 COG (WGS 84, EGM2008) and a PNOA
+      orthophoto (JPEG with a world file, EPSG:25831); a pier and a cliff plateau, then a
+      landing.
+    - Both waive line of sight: the tours go out of sight of the take-off point.
+  - *Data not shipped:* the files (about 33 MB) are fetched into the geodata library by
+    `scripts/data/fetch_mission_data.py` (Python standard library only), installed to
+    `share/scripts/`. Its manifest `mission_data.json` gives every file's URL, size and
+    SHA-256, with the publisher, licence and terms.
+    - Downloads go through `.part` files and are checked for size, SHA-256 and (for WMS)
+      content type and image signature. The script writes the orthophoto's world file and
+      an `ATTRIBUTION.txt`, and asks before downloading.
+    - Until the data is there, the missions are *unavailable* with a message naming the
+      script. Missing library files are summed up in one message.
+  - *No lidar mission:* a swissSURFACE3D lidar tour was dropped: its single tile is
+    262 MB for 1 km², too much to ask for one mission.
+  - *Fix:* mission item positions given as latitude and longitude are now placed in the
+    local frame at the origin's AMSL altitude, like the scene. At height 0 they were
+    about 0.2 m off at 800 m from an origin at 1600 m.
+  - *Tests:*
+    - The manifest and the missions agree on the files, and every file has a licence, an
+      https URL and a hash.
+    - Without the data the missions say how to get it. With stand-in files of the same
+      names, formats and CRSs, they are launched offline, and the spawn and items sit at
+      their latitudes, longitudes and heights above the ground.
+    - With the real data (`DS_MISSION_LIBRARY=<library>`, skipped otherwise): pads are
+      level and beacons clear of the ground, and a terrain-following stick pilot flies each
+      tour to success with no collision and no rule warning.
+    - The fetch script against a local HTTP server: checks, world files, notices, mission
+      selection and refusals.
+  - *Documentation:* `docs/TERRAIN.md`.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

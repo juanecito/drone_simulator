@@ -201,6 +201,32 @@ THE SOFTWARE.
   Debian package `libcurl4t64` (licence text in `/usr/share/doc/libcurl4t64/copyright`). Used only
   by `core/net` for requests to the data providers the user configures (§4.6).
 
+### GDAL 3.10 (elevation rasters, orthophotos, imagery tiles, COG writing)
+
+- © 1998-2024 Frank Warmerdam, Even Rouault and the GDAL contributors — <https://gdal.org/>
+- Used under the **MIT (Expat) licence**; linked dynamically and installed from the Debian
+  package `libgdal36` (licence texts in `/usr/share/doc/libgdal36/copyright`). Used only by
+  `core/terrain`, with every network driver disabled.
+
+### PROJ 9 (coordinate transformations, through GDAL)
+
+- © the PROJ contributors — <https://proj.org/>
+- Used under the **MIT (Expat) licence**; linked dynamically from the Debian package
+  `libproj25` (`/usr/share/doc/libproj25/copyright`).
+
+### LASzip 3.5 (LAS / LAZ point clouds)
+
+- © 2007-2022 rapidlasso GmbH (Martin Isenburg) — <https://laszip.org/>
+- Used under the **Apache License 2.0**; linked dynamically and installed from the Debian
+  package `liblaszip8` (`/usr/share/doc/liblaszip8/copyright`).
+
+### QtKeychain 0.15 (API keys in the system keyring)
+
+- © 2011-2015 Frank Osterfeld and the QtKeychain contributors —
+  <https://github.com/frankosterfeld/qtkeychain>
+- Used under the **BSD 2-Clause licence**; linked dynamically from the Debian package
+  `libqt6keychain1` (`/usr/share/doc/libqt6keychain1/copyright`).
+
 ### Open Asset Import Library (Assimp) 5.4 (glTF 2.0 and OBJ model files)
 
 - © 2006-2024 assimp team — <https://github.com/assimp/assimp>
@@ -217,6 +243,21 @@ Provided by the system graphics driver; no code is included.
 
 Read at run time through the C++ standard library (`std::chrono::tzdb`) for local time and
 daylight saving time. Public domain; installed by the Debian `tzdata` package.
+
+## Data fetched at run time (not shipped)
+
+Elevation data, imagery tiles and the data of the built-in real-terrain missions are not part
+of the source tree or the package. The application (online providers) and
+`share/scripts/fetch_mission_data.py` (mission data) download them from their publishers into
+the user's own folders, under the publishers' terms, which are shown before downloading and
+in Settings › Data providers. The mission data is listed in `scripts/data/mission_data.json`:
+
+- **swissALTI3D** — © swisstopo; free use, including commercial use and redistribution, with
+  the source named (<https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices>).
+- **Copernicus DEM GLO-30** — © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH
+  2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved;
+  free use and redistribution with this attribution.
+- **PNOA orthophotos** — © Instituto Geográfico Nacional de España, CC BY 4.0.
 
 ## Build-time only (not part of the binary package)
 

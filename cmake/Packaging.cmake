@@ -103,5 +103,7 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 #  - CA certificates for HTTPS to data providers (used from milestone M4).
 # tzdata: std::chrono time zones (local time and DST, FR-AST-02).
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6sql6-sqlite, ca-certificates, tzdata")
+# share/scripts/fetch_mission_data.py fetches the data of the real-terrain missions.
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "python3")
 
 include(CPack)

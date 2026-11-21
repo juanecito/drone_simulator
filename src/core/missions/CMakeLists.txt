@@ -24,6 +24,14 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/assets/missions/
     DESTINATION ${DS_INSTALL_DATADIR}/missions
     COMPONENT runtime)
 
+# The fetcher of the built-in real-terrain missions' data (not shipped) and its file list.
+install(PROGRAMS ${PROJECT_SOURCE_DIR}/scripts/data/fetch_mission_data.py
+    DESTINATION ${DS_INSTALL_DATADIR}/scripts
+    COMPONENT runtime)
+install(FILES ${PROJECT_SOURCE_DIR}/scripts/data/mission_data.json
+    DESTINATION ${DS_INSTALL_DATADIR}/scripts
+    COMPONENT runtime)
+
 # Default missions copied into ~/.drone_simulation/missions at start-up (FR-MIS-01b).
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/assets/default-missions/
     DESTINATION ${DS_INSTALL_DATADIR}/default-missions

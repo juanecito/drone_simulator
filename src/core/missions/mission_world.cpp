@@ -31,7 +31,8 @@ double round3(double v) { return std::round(v * 1000.0) / 1000.0; }
 common::Result<items::Vec3> worldPosition(const MissionPosition& position,
                                           const MissionDefinition& mission,
                                           const MissionPlacement& placement) {
-    const auto xz = horizontalPosition(position, originOf(mission, placement));
+    const auto xz =
+        horizontalPosition(position, originOf(mission, placement), placement.originAltitudeM);
     if (!xz) {
         return common::makeError("geographic position without a terrain origin");
     }

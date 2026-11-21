@@ -1,0 +1,107 @@
+{
+  "manifestVersion": 1,
+  "x-note": "Data of the built-in real-terrain missions, fetched into the geodata library by fetch_mission_data.py; never shipped with the simulator. URLs, sizes and hashes checked on 2026-11-21; recheck the licences before a release.",
+  "datasets": [
+    {
+      "id": "oeschinensee",
+      "name": "swissALTI3D 2 m elevation, Oeschinensee (8 tiles of 1 km²)",
+      "missions": [
+        "real-02-oeschinensee"
+      ],
+      "attribution": "© swisstopo (swissALTI3D)",
+      "licence": "swisstopo open government data: free use, including commercial use and redistribution, with the source named.",
+      "termsUrl": "https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices",
+      "files": [
+        {
+          "path": "oeschinensee/swissalti3d_2025_2620-1149_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2620-1149/swissalti3d_2025_2620-1149_2_2056_5728.tif",
+          "bytes": 1108817,
+          "sha256": "38f94370699c3f7e85ebd2a42bb0f8c78c824856bba07cbf3a12298c1aa5d0e4"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2620-1150_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2620-1150/swissalti3d_2025_2620-1150_2_2056_5728.tif",
+          "bytes": 1119509,
+          "sha256": "a0e17e6a1e8a7df1b99d28b461e93685c2daa4999c60e7aed8f4e6aef56e5876"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2621-1149_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2621-1149/swissalti3d_2025_2621-1149_2_2056_5728.tif",
+          "bytes": 729300,
+          "sha256": "5cd69912f9f702ac8e8d2e8b5d373f49a566b8430797a002462dd74c7fc1a548"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2621-1150_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2621-1150/swissalti3d_2025_2621-1150_2_2056_5728.tif",
+          "bytes": 1134967,
+          "sha256": "e9b230158fda7055fefa07ccd90e1d34b7539798a72087981696dc9ddf0ee22e"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2622-1149_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2622-1149/swissalti3d_2025_2622-1149_2_2056_5728.tif",
+          "bytes": 587132,
+          "sha256": "e6908d6a1161868d27a02f63f383f68f500bd48b2291baa8cb6c4fbadf578470"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2622-1150_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2622-1150/swissalti3d_2025_2622-1150_2_2056_5728.tif",
+          "bytes": 1102833,
+          "sha256": "35efa4c5bb17b62fded1ffbc184a194346db741f8916380a072f66869620025c"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2623-1149_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2623-1149/swissalti3d_2025_2623-1149_2_2056_5728.tif",
+          "bytes": 1209342,
+          "sha256": "1bbff018ea8a23a93e31a628070f77bcb03a35567a04baaf71a90521c09c22a3"
+        },
+        {
+          "path": "oeschinensee/swissalti3d_2025_2623-1150_2_2056_5728.tif",
+          "url": "https://data.geo.admin.ch/ch.swisstopo.swissalti3d/swissalti3d_2025_2623-1150/swissalti3d_2025_2623-1150_2_2056_5728.tif",
+          "bytes": 1101396,
+          "sha256": "341baa21519333e96a14c25d860d750afd78f1e7431d60254b83b41d89f6d686"
+        }
+      ]
+    },
+    {
+      "id": "sau-elevation",
+      "name": "Copernicus DEM GLO-30, tile N41 E002",
+      "missions": [
+        "real-03-sau"
+      ],
+      "attribution": "Copernicus DEM GLO-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+      "licence": "Copernicus DEM GLO-30 licence: free use and redistribution, worldwide, with the attribution above.",
+      "termsUrl": "https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM",
+      "files": [
+        {
+          "path": "sau/Copernicus_DSM_COG_10_N41_00_E002_00_DEM.tif",
+          "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N41_00_E002_00_DEM/Copernicus_DSM_COG_10_N41_00_E002_00_DEM.tif",
+          "bytes": 22233652,
+          "sha256": "1e32cf23530c6d820dc1e0dafbb15bdf7ae7058271f7a39f0fe375842a5609c3"
+        }
+      ]
+    },
+    {
+      "id": "sau-orthophoto",
+      "name": "PNOA orthophoto, Sau reservoir (3.4 km square at 1 m, WMS GetMap)",
+      "missions": [
+        "real-03-sau"
+      ],
+      "attribution": "PNOA © Instituto Geográfico Nacional de España",
+      "licence": "CC BY 4.0 (IGN / CNIG open data).",
+      "termsUrl": "https://www.ign.es/web/ign/portal/qsm-cnig",
+      "files": [
+        {
+          "path": "sau/pnoa-sau-25831.jpg",
+          "url": "https://www.ign.es/wms-inspire/pnoa-ma?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=OI.OrthoimageCoverage&STYLES=&CRS=EPSG:25831&BBOX=448000,4645300,451400,4648700&WIDTH=3400&HEIGHT=3400&FORMAT=image/jpeg",
+          "contentType": "image/jpeg",
+          "worldFile": {
+            "path": "sau/pnoa-sau-25831.jgw",
+            "west": 448000,
+            "north": 4648700,
+            "pixelSizeM": 1.0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -28,8 +28,9 @@ struct MissionScene {
 };
 
 /// @brief Why this build cannot fly @p mission, or nullopt if it can.
-/// @details LAS/LAZ elevation files need a later M4 step; elevation rasters are playable once
-/// the mission loader has found every file. Online terrain needs @p data and a known
+/// @details File terrain is playable once the mission loader has found every elevation file;
+/// LAS/LAZ point clouds also need @p data (their DTM is cached there). Online terrain needs
+/// @p data and a known
 /// provider and dataset covering the area, and either an API key (the area is downloaded at
 /// launch) or the area already cached (FR-MIS-02). Both vehicle types are playable.
 [[nodiscard]] std::optional<std::string> unplayableReason(

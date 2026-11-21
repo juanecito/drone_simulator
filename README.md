@@ -173,6 +173,9 @@ uses another database file (for testing). Uninstalling the package never touches
 
 - [Specification](docs/SPECIFICATION.md) — requirements, architecture, milestones, licensing.
 - [Building](docs/BUILDING.md) — toolchain, presets, tests, docs, `.deb` packaging.
+- [Missions](docs/MISSIONS.md) — mission file format, objectives, scoring, the built-in pack.
+- [Terrain](docs/TERRAIN.md) — procedural terrain, elevation files, lidar, orthophotos,
+  imagery and elevation providers, the real-terrain missions' data.
 - [Flight model](docs/FLIGHT_MODEL.md) — frames, physics, flight controller, reference
   profiles and validation.
 - [Ground model](docs/GROUND_MODEL.md) — ground drone: suspension, tyres, drivetrain, drive

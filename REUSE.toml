@@ -22,6 +22,7 @@ path = [
     "assets/providers/**.json",
     "assets/missions/**.json",
     "assets/default-missions/**.json",
+    "scripts/data/mission_data.json",
     "assets/models/**",
 ]
 precedence = "aggregate"

@@ -464,8 +464,12 @@ file and its data) copy a mission into your folder and select it.
 | Operations | Dusk patrol | after sunset, lights on, visual line of sight |
 | Operations | Valley relay | alpine terrain, ridges hiding the drone |
 | Real terrain | Montserrat ridge | online terrain (needs an OpenTopography API key) |
+| Real terrain | Oeschinensee | swissALTI3D tiles with swisstopo imagery; alpine lake, falls, pasture |
+| Real terrain | Sau reservoir | Copernicus 30 m COG with a PNOA orthophoto; pier and cliff plateau |
 
 The first mission of each chapter is open; each further one needs a star on the one before.
+*Oeschinensee* and *Sau reservoir* instead open after a star on *Hover*. Their data is not
+shipped: fetch it once with `fetch_mission_data.py` ([TERRAIN.md](TERRAIN.md#built-in-real-terrain-missions)).
 
 ## Scoring and stars
 

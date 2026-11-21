@@ -67,4 +67,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME docs.mission_reference
         COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/scripts/docs/gen_mission_reference.py --check)
     set_tests_properties(docs.mission_reference PROPERTIES LABELS "unit;docs")
+    # The mission-data fetcher, against a local HTTP server only.
+    add_test(NAME scripts.fetch_mission_data
+        COMMAND Python3::Interpreter ${PROJECT_SOURCE_DIR}/tests/scripts/fetch_mission_data_test.py)
+    set_tests_properties(scripts.fetch_mission_data PROPERTIES LABELS "unit;scripts")
 endif()

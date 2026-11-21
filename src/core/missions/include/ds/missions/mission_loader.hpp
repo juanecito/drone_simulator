@@ -75,7 +75,11 @@ void addBuiltInKeys(ValidationContext& context, const std::filesystem::path& ass
 
 /// @brief World (x, z) of @p position, or nullopt if it is geographic and @p origin is
 /// unknown or the UTM coordinate is invalid.
+/// @details Geographic positions go through the local frame at @p originAltitudeM (AMSL),
+/// like the scene's frame: at height 0 the horizontal scale would be off by 0.16 m/km per
+/// 1000 m of altitude.
 [[nodiscard]] std::optional<items::Vec2> horizontalPosition(
-    const MissionPosition& position, const std::optional<geo::LatLon>& origin);
+    const MissionPosition& position, const std::optional<geo::LatLon>& origin,
+    double originAltitudeM = 0.0);
 
 }  // namespace ds::missions

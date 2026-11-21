@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "real-03-sau",
+  "title": "Sau reservoir",
+  "briefing": "The Sau reservoir in Catalonia, on the Copernicus 30 m surface model with an IGN orthophoto. Fly from the peninsula to the pier, then up the cliffs to the northern plateau, and land back on the peninsula. The plateau is 1.7 km from the pilot, so line of sight is not checked (in reality you would need an observer on the far shore). The terrain data is not shipped with the simulator: fetch it once with fetch_mission_data.py (see the Terrain guide), then the mission becomes available.",
+  "difficulty": 2,
+  "chapter": "real-terrain",
+  "order": 3,
+  "unlock": {
+    "requires": [
+      "basics-01-hover"
+    ],
+    "minStars": 1
+  },
+  "terrain": {
+    "source": "file",
+    "format": "raster",
+    "elevationFiles": [
+      {
+        "path": "library:sau/Copernicus_DSM_COG_10_N41_00_E002_00_DEM.tif"
+      }
+    ],
+    "attribution": "Elevation: Copernicus DEM GLO-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA",
+    "verticalDatum": "EGM2008",
+    "origin": {
+      "geo": [
+        41.97339,
+        2.392895,
+        0
+      ],
+      "altRef": "AGL"
+    },
+    "extent": {
+      "widthM": 3200,
+      "lengthM": 3200
+    },
+    "orthophotoFiles": [
+      {
+        "path": "library:sau/pnoa-sau-25831.jpg"
+      }
+    ],
+    "orthophotoCrs": "EPSG:25831",
+    "orthophotoAttribution": "Imagery: PNOA © Instituto Geográfico Nacional (CC BY 4.0)"
+  },
+  "environment": {
+    "utc": "2026-04-25T08:00:00Z",
+    "timeZone": "Europe/Madrid",
+    "weather": {
+      "seed": 8,
+      "preset": "few-clouds",
+      "temperatureC": 15,
+      "wind": {
+        "level": 2,
+        "fromDeg": 200
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "geo": [
+      41.968198,
+      2.398858,
+      0
+    ],
+    "altRef": "AGL",
+    "headingDeg": 330
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 1080,
+    "vlos": {
+      "enabled": false
+    }
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "home",
+      "name": "Peninsula pad",
+      "geo": [
+        41.968198,
+        2.398858,
+        0
+      ],
+      "altRef": "AGL",
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "pier",
+      "name": "Pier",
+      "geo": [
+        41.972015,
+        2.396771,
+        15
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "plateau",
+      "name": "Northern plateau",
+      "geo": [
+        41.98376,
+        2.395211,
+        30
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "pier",
+      "type": "reachWaypoint",
+      "target": "pier"
+    },
+    {
+      "id": "plateau",
+      "type": "reachWaypoint",
+      "target": "plateau"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "home",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 600
+      },
+      {
+        "maxTimeS": 450
+      }
+    ]
+  }
+}

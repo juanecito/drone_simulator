@@ -48,6 +48,8 @@ target_compile_definitions(ds_mission_flight_tests PRIVATE
     DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 ds_add_integration_test(ds_mission_flow_tests FORCE_OFFSCREEN SOURCES mission_flow_test.cpp
     file_terrain_test.cpp online_terrain_test.cpp data_providers_test.cpp lidar_terrain_test.cpp
-    online_imagery_test.cpp)
+    online_imagery_test.cpp real_terrain_missions_test.cpp)
 # The LAS / LAZ fixtures are written with LASzip.
 target_link_libraries(ds_mission_flow_tests PRIVATE LASzip::LASzip)
+target_compile_definitions(ds_mission_flow_tests PRIVATE
+    DS_TEST_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")

@@ -288,6 +288,7 @@ private:
         }
         const terrain::TerrainFileRoots roots{missionDir_, ctx_.libraryDir};
         std::vector<std::filesystem::path> found;
+        std::vector<std::string> notInLibrary;
         for (const terrain::FileRef& f : spec.elevationFiles) {
             if (f.path.starts_with("library:") && ctx_.libraryDir.empty()) {
                 continue;
@@ -297,12 +298,25 @@ private:
                 found.push_back(*resolved);
                 continue;
             }
-            if (resolved.error().code == terrain::TerrainErrorCode::FileNotFound) {
+            if (resolved.error().code != terrain::TerrainErrorCode::FileNotFound) {
+                error(common::pointerToDotted(f.jsonPath), resolved.error().message);
+            } else if (f.path.starts_with("library:")) {
+                notInLibrary.push_back(f.path);
+            } else {
                 result_.unavailable.push_back(
                     std::format("elevation file \"{}\" not found", f.path));
-            } else {
-                error(common::pointerToDotted(f.jsonPath), resolved.error().message);
             }
+        }
+        // Library data is usually fetched as a whole: one line, with where it goes.
+        if (!notInLibrary.empty()) {
+            result_.unavailable.push_back(std::format(
+                "{} not in the geodata library {} (the built-in missions get their data with "
+                "fetch_mission_data.py)",
+                notInLibrary.size() == 1
+                    ? std::format("elevation file \"{}\" is", notInLibrary.front())
+                    : std::format("{} elevation files, from \"{}\", are", notInLibrary.size(),
+                                  notInLibrary.front()),
+                ctx_.libraryDir.string()));
         }
         if (found.size() == spec.elevationFiles.size()) {
             spec.resolvedElevationFiles = std::move(found);
@@ -959,7 +973,8 @@ std::string MissionLoadResult::report() const {
 }
 
 std::optional<items::Vec2> horizontalPosition(const MissionPosition& p,
-                                              const std::optional<geo::LatLon>& origin) {
+                                              const std::optional<geo::LatLon>& origin,
+                                              double originAltitudeM) {
     switch (p.kind) {
         case MissionPosition::Kind::Local: return items::Vec2(p.x, p.z);
         case MissionPosition::Kind::Geo:
@@ -975,8 +990,10 @@ std::optional<items::Vec2> horizontalPosition(const MissionPosition& p,
                 }
                 ll = *converted;
             }
-            const geo::LocalFrame frame(geo::Geodetic{origin->latitudeDeg, origin->longitudeDeg, 0.0});
-            const geo::Enu enu = frame.toEnu(geo::Geodetic{ll.latitudeDeg, ll.longitudeDeg, 0.0});
+            const geo::LocalFrame frame(
+                geo::Geodetic{origin->latitudeDeg, origin->longitudeDeg, originAltitudeM});
+            const geo::Enu enu =
+                frame.toEnu(geo::Geodetic{ll.latitudeDeg, ll.longitudeDeg, originAltitudeM});
             return items::Vec2(enu.east, -enu.north);
         }
     }

@@ -169,10 +169,12 @@ cmake --build --preset release --target package
 The package:
 
 - installs the program in `/opt/drone_simulator` (`bin/`, `share/shaders/` GLSL shaders,
-  `share/sky/` star catalogue and moon texture, `share/doc/`),
+  `share/sky/` star catalogue and moon texture, `share/scripts/fetch_mission_data.py` for the
+  data of the real-terrain missions, `share/doc/`),
 - adds `/usr/bin/drone-simulator`, a desktop entry and an icon,
 - depends on the Debian Qt 6 and system libraries (computed by `dpkg-shlibdeps`) plus
-  `libqt6sql6-sqlite`, `ca-certificates` and `tzdata`; nothing is bundled,
+  `libqt6sql6-sqlite`, `ca-certificates` and `tzdata`, and suggests `python3` (for the
+  data fetcher); nothing is bundled,
 - never creates, changes or removes user data in `$HOME/.drone_simulation`.
 
 Install and remove:
