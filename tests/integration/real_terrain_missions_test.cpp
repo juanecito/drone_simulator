@@ -10,7 +10,10 @@
 //   are flown on that data with their items where their coordinates say, and record the data
 //   hash;
 // - with the real data (DS_MISSION_LIBRARY=<library fetched by the script>) the pads are on
-//   level ground and the beacons above it. CI has no such library and skips that test.
+//   level ground and the beacons above it, and each tour can be flown. CI has no such
+//   library and skips those tests;
+// - the "own lidar" mission ships no data at all: it flies over whatever LAS/LAZ files the
+//   user puts into library:my-lidar/, under any names.
 
 #include <QTemporaryDir>
 #include <QTest>
@@ -58,6 +61,7 @@
 #include "ds/terrain/query.hpp"
 #include "ds/terrain/terrain_files.hpp"
 
+#include "lidar_fixtures.hpp"
 #include "ortho_fixtures.hpp"
 #include "raster_fixtures.hpp"
 
@@ -67,6 +71,8 @@ namespace {
 namespace fs = std::filesystem;
 
 const std::vector<std::string> kMissions{"real-02-oeschinensee", "real-03-sau"};
+// Flown over the user's own LAS/LAZ files in library:my-lidar/; nothing is fetched for it.
+constexpr const char* kOwnLidar = "real-04-own-lidar";
 
 fs::path sourceDir() { return fs::path(DS_TEST_ASSETS_DIR).parent_path(); }
 
@@ -87,7 +93,8 @@ std::map<std::string, std::set<std::string>> libraryFilesOfMissions() {
         for (const char* list : {"elevationFiles", "orthophotoFiles"}) {
             for (const auto& ref : m["terrain"].value(list, common::Json::array())) {
                 const std::string path = ref["path"].get<std::string>();
-                if (path.starts_with("library:")) {
+                // Folder references are the user's own data, which nothing fetches.
+                if (path.starts_with("library:") && !terrain::isFolderReference(path)) {
                     out[m["id"].get<std::string>()].insert(path.substr(8));
                 }
             }
@@ -395,7 +402,7 @@ TEST_F(RealTerrainMissionsTest, OnTheRealDataPadsAreLevelAndBeaconsClearOfTheGro
 // A pilot on the sticks in altitude-hold mode that follows the terrain: 25 m over the highest
 // ground of the next 120 m, under 80 % of the height limit over the lowest ground of the next
 // 100 m, creeping forward while it has to climb or descend; over the target it goes to the
-// target's height.
+// target's height, or 3 m over a landing target before it descends.
 class TerrainPilot {
 public:
     TerrainPilot(sim::World& world, std::function<double(double, double)> ground,
@@ -420,7 +427,10 @@ public:
             ahead = std::max(ahead, g);
             lowest = d <= 100.0 ? std::min(lowest, g) : lowest;
         }
-        double want = distance < 40.0 ? target.y : std::max(target.y, ahead + 25.0);
+        // A landing target is approached 3 m over what is there (the launch platform, on a
+        // slope), not at its ground height.
+        const double over = land ? ground_(target.x, target.z) + 3.0 : target.y;
+        double want = distance < 40.0 ? over : std::max(over, ahead + 25.0);
         want = std::min(want, lowest + 0.8 * limit_);  // Below the HUD's height warning.
         const bool creep = std::abs(want - b.position.y) > 8.0 || ahead + 10.0 > b.position.y;
         double climb = std::clamp(0.8 * (want - b.position.y), -3.0, 4.0);
@@ -457,6 +467,98 @@ private:
     mutable bool primed_ = false;
 };
 
+// Flies @p m to the end with TerrainPilot in calm air, on its terrain built with @p data
+// (point clouds rasterized first), into @p out.
+void flyTour(const missions::MissionDefinition& m, DataServices& data,
+             const physics::AerialProfile& profile, sim::MissionStatus& out) {
+    auto config = missionTerrain(m);
+    ASSERT_TRUE(config.has_value()) << config.error().message;
+    if (isPointCloud(config->file)) {
+        auto made = ensureLidarDem(nullptr, data, config->file.files, lidarOptions(config->file));
+        ASSERT_TRUE(made.has_value() && *made) << (made ? "cancelled" : made.error().message);
+    }
+    auto built = buildTerrain(*config, &data);
+    ASSERT_TRUE(built.has_value()) << built.error().message;
+    auto query = std::make_shared<const terrain::TerrainQuery>(
+        built->source, terrain::ChunkLayout{}, built->origin.heightM);
+    const auto height = [query](double x, double z) { return query->height(x, z); };
+
+    missions::MissionPlacement placement;
+    placement.origin = geo::LatLon{built->origin.latitudeDeg, built->origin.longitudeDeg};
+    placement.ground = height;
+    placement.originAltitudeM = built->origin.heightM;
+    placement.extent = built->source->extent();
+    auto runner = missions::MissionRunner::create(m, placement);
+    ASSERT_TRUE(runner.has_value()) << runner.error().message;
+    sim::WorldConfig c;
+    c.profile = profile;
+    c.seed = 7;
+    c.ground = [query](double x, double z) {
+        physics::GroundSample g;
+        g.heightM = query->height(x, z);
+        const terrain::Normal n = query->normal(x, z);
+        g.normal = physics::Vec3(n.x, n.y, n.z);
+        return g;
+    };
+    c.originAltitudeM = built->origin.heightM;
+    c.startPosition = (*runner)->spawnPosition();
+    c.startHeadingRad = common::degToRad((*runner)->spawnHeadingDeg());
+    c.startUtc = m.environment.utc;
+    c.geoOrigin = built->origin;
+    sim::World world(std::move(c));
+    world.setMission(std::make_unique<sim::MissionSession>(std::move(*runner)));
+    const auto status = [&] {
+        sim::WorldSnapshot snap;
+        world.fillSnapshot(snap);
+        return snap.mission;
+    };
+    // The pilot sees the launch platform's top as ground.
+    const auto surface = [&world, height](double x, double z) {
+        const auto& platform = world.launchPlatform();
+        return platform && platform->covers(x, z) ? std::max(height(x, z), platform->centre.y)
+                                                  : height(x, z);
+    };
+    const TerrainPilot pilot(world, surface, m.rules.maxAltitudeAglM.value_or(500.0));
+    constexpr double kDt = 1.0 / 250.0;
+    const auto fly = [&](const glm::dvec3& target, bool land, const auto& done) {
+        for (double t = 0.0; t < 900.0; t += kDt) {
+            world.tick(pilot.controls(target, land), kDt);
+            if (done() || status().result.has_value()) {
+                return;
+            }
+        }
+    };
+    const glm::dvec3 pad = world.vehicle().bodyState().position;
+    fly(pad, false, [&] { return status().state == missions::MissionState::InProgress; });
+    for (std::size_t i = 0; i < m.objectives.size() && !status().result; ++i) {
+        const auto target = status().objectives.at(i).targetPosition;
+        ASSERT_TRUE(target.has_value());
+        const bool land = m.objectives[i].type == missions::ObjectiveType::Land;
+        fly(*target, land,
+            [&] { return status().objectives.at(i).state == missions::ObjectiveState::Completed; });
+    }
+    out = status();
+}
+
+// Succeeded, with no collision and no rule warning; prints the figures.
+void expectFlown(const missions::MissionDefinition& m, const sim::MissionStatus& s) {
+    ASSERT_TRUE(s.result.has_value()) << "not finished";
+    EXPECT_EQ(s.result->outcome, missions::MissionState::Succeeded) << s.result->failureReason;
+    EXPECT_EQ(s.result->collisions, 0);
+    EXPECT_EQ(s.result->ruleWarnings, 0);
+    std::cout << m.id << ": " << s.result->durationS << " s of " << *m.rules.timeLimitS << " s, "
+              << s.result->stars << " star(s), battery " << s.result->batteryPct << " %\n";
+}
+
+std::optional<physics::AerialProfile> testProfile() {
+    auto profile = physics::loadAerialProfile(findAssetDirectory() / "vehicles" / "aerial" /
+                                              "camera-250g.json");
+    if (!profile) {
+        return std::nullopt;
+    }
+    return *profile;
+}
+
 // Each tour is flown to the end by TerrainPilot in calm air: winnable within its time limit
 // and height limit, without touching the ground (SPECIFICATION §8 "Headless missions").
 TEST_F(RealTerrainMissionsTest, OnTheRealDataEachTourCanBeFlownToTheEnd) {
@@ -466,82 +568,126 @@ TEST_F(RealTerrainMissionsTest, OnTheRealDataEachTourCanBeFlownToTheEnd) {
     }
     auto validation = MissionValidation::create(findAssetDirectory(), real);
     ASSERT_TRUE(validation.has_value());
-    auto profile = physics::loadAerialProfile(findAssetDirectory() / "vehicles" / "aerial" /
-                                              "camera-250g.json");
+    const auto profile = testProfile();
     ASSERT_TRUE(profile.has_value());
     for (const fs::path& file : missions::findMissionFiles(findAssetDirectory() / "missions")) {
         auto result = missions::loadMissionFile(file, (*validation)->context);
         ASSERT_TRUE(result.valid()) << result.report();
         const missions::MissionDefinition& m = *result.definition;
-        if (std::ranges::find(kMissions, m.id) == kMissions.end()) {
+        // The own-lidar mission too, when that library has a my-lidar folder.
+        const bool own = m.id == kOwnLidar && fs::is_directory(fs::path(real) / "my-lidar");
+        if (std::ranges::find(kMissions, m.id) == kMissions.end() && !own) {
             continue;
         }
         SCOPED_TRACE(m.id);
-        auto config = missionTerrain(m);
-        ASSERT_TRUE(config.has_value()) << config.error().message;
-        auto built = buildTerrain(*config, data_.get());
-        ASSERT_TRUE(built.has_value()) << built.error().message;
-        auto query = std::make_shared<const terrain::TerrainQuery>(
-            built->source, terrain::ChunkLayout{}, built->origin.heightM);
-        const auto height = [query](double x, double z) { return query->height(x, z); };
-
-        missions::MissionPlacement placement;
-        placement.origin = geo::LatLon{built->origin.latitudeDeg, built->origin.longitudeDeg};
-        placement.ground = height;
-        placement.originAltitudeM = built->origin.heightM;
-        auto runner = missions::MissionRunner::create(m, placement);
-        ASSERT_TRUE(runner.has_value()) << runner.error().message;
-        sim::WorldConfig c;
-        c.profile = *profile;
-        c.seed = 7;
-        c.ground = [query](double x, double z) {
-            physics::GroundSample g;
-            g.heightM = query->height(x, z);
-            const terrain::Normal n = query->normal(x, z);
-            g.normal = physics::Vec3(n.x, n.y, n.z);
-            return g;
-        };
-        c.originAltitudeM = built->origin.heightM;
-        c.startPosition = (*runner)->spawnPosition();
-        c.startHeadingRad = common::degToRad((*runner)->spawnHeadingDeg());
-        c.startUtc = m.environment.utc;
-        c.geoOrigin = built->origin;
-        sim::World world(std::move(c));
-        world.setMission(std::make_unique<sim::MissionSession>(std::move(*runner)));
-        const auto status = [&] {
-            sim::WorldSnapshot snap;
-            world.fillSnapshot(snap);
-            return snap.mission;
-        };
-        const TerrainPilot pilot(world, height, m.rules.maxAltitudeAglM.value_or(500.0));
-        constexpr double kDt = 1.0 / 250.0;
-        const auto fly = [&](const glm::dvec3& target, bool land, const auto& done) {
-            for (double t = 0.0; t < 900.0; t += kDt) {
-                world.tick(pilot.controls(target, land), kDt);
-                if (done() || status().result.has_value()) {
-                    return;
-                }
-            }
-        };
-        const glm::dvec3 pad = world.vehicle().bodyState().position;
-        fly(pad, false, [&] { return status().state == missions::MissionState::InProgress; });
-        for (std::size_t i = 0; i < m.objectives.size() && !status().result; ++i) {
-            const auto target = status().objectives.at(i).targetPosition;
-            ASSERT_TRUE(target.has_value());
-            const bool land = m.objectives[i].type == missions::ObjectiveType::Land;
-            fly(*target, land, [&] {
-                return status().objectives.at(i).state == missions::ObjectiveState::Completed;
-            });
-        }
-        const sim::MissionStatus s = status();
-        ASSERT_TRUE(s.result.has_value()) << "not finished";
-        EXPECT_EQ(s.result->outcome, missions::MissionState::Succeeded) << s.result->failureReason;
-        EXPECT_EQ(s.result->collisions, 0);
-        EXPECT_EQ(s.result->ruleWarnings, 0);
-        std::cout << m.id << ": " << s.result->durationS << " s of " << *m.rules.timeLimitS
-                  << " s, " << s.result->stars << " star(s), battery " << s.result->batteryPct
-                  << " %\n";
+        ASSERT_TRUE(result.unavailable.empty()) << result.report();
+        sim::MissionStatus s;
+        flyTour(m, *data_, *profile, s);
+        expectFlown(m, s);
     }
+}
+
+// --- Your own lidar ------------------------------------------------------------------------
+
+// A 400 × 400 m cloud in two tiles of different LAS versions, under arbitrary names, plus a
+// file that is not a cloud.
+void writeOwnLidar(const fs::path& folder) {
+    fs::create_directories(folder);
+    test::LidarFileOptions laz;
+    laz.versionMinor = 4;
+    laz.compressed = true;
+    std::string error;
+    ASSERT_TRUE(test::writeLidar(folder / "west part.laz",
+                                 test::lidarPoints(400000.0, 4600000.0, 200.0, 400.0, 2.0), laz,
+                                 &error))
+        << error;
+    ASSERT_TRUE(test::writeLidar(
+        folder / "EAST.LAS", test::lidarPoints(400200.0, 4600000.0, 200.0, 400.0, 2.0), {}, &error))
+        << error;
+    std::ofstream(folder / "notes.txt") << "not a point cloud\n";
+}
+
+TEST_F(RealTerrainMissionsTest, TheOwnLidarMissionSaysWhereToPutTheFiles) {
+    const MissionRow* row = missions_->find(kOwnLidar);
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->status, MissionStatus::Unavailable);
+    EXPECT_NE(row->statusDetail.find((library() / "my-lidar").string()), std::string::npos)
+        << row->statusDetail;
+    EXPECT_NE(row->statusDetail.find(".las or .laz"), std::string::npos) << row->statusDetail;
+    // A folder with no point cloud in it is no better.
+    fs::create_directories(library() / "my-lidar");
+    std::ofstream(library() / "my-lidar" / "notes.txt") << "nothing yet\n";
+    missions_->reload();
+    row = missions_->find(kOwnLidar);
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->status, MissionStatus::Unavailable) << row->statusDetail;
+}
+
+TEST_F(RealTerrainMissionsTest, TheOwnLidarMissionFliesOverAnyPointCloud) {
+    writeOwnLidar(library() / "my-lidar");
+    missions_->reload();
+    const MissionRow* row = missions_->find(kOwnLidar);
+    ASSERT_NE(row, nullptr);
+    ASSERT_EQ(row->status, MissionStatus::Available) << row->statusDetail;
+    const missions::MissionDefinition def = *missions_->entry(*row).load.definition;
+    // The folder stands for its two clouds, by name; the text file is left out.
+    ASSERT_EQ(def.terrain.file->elevationFiles.size(), 2U);
+    EXPECT_EQ(def.terrain.file->elevationFiles[0].path, "library:my-lidar/EAST.LAS");
+    EXPECT_EQ(def.terrain.file->elevationFiles[1].path, "library:my-lidar/west part.laz");
+    ASSERT_EQ(def.terrain.file->resolvedElevationFiles.size(), 2U);
+
+    window_ = std::make_unique<MainWindow>(settings_.get(), missions_.get(), data_.get());
+    window_->show();
+    SimulationController& sim = *window_->simulation();
+    SceneController& scene = *window_->scene();
+    auto launched = window_->launchMission(kOwnLidar);
+    ASSERT_TRUE(launched.has_value()) << launched.error().message;
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().active; }));
+    EXPECT_EQ(scene.terrain().kind, TerrainKind::File);
+    // The origin is the centre of the data: the pad is there, on the ground.
+    const auto extent = scene.source()->extent();
+    ASSERT_TRUE(extent.has_value());
+    EXPECT_NEAR(extent->widthM, 400.0, 10.0);
+    EXPECT_NEAR(extent->lengthM, 400.0, 10.0);
+    const terrain::HeightSource& ground = *scene.source();
+    EXPECT_NEAR(sim.home().x, 0.0, 1e-6);
+    EXPECT_NEAR(sim.home().z, 0.0, 1e-6);
+    EXPECT_NEAR(sim.home().y, ground.height(0.0, 0.0), 0.1);
+    const geo::Geodetic centre = scene.frame().toGeodetic(geo::Enu{0.0, 0.0, 0.0});
+    const geo::Geodetic corner =
+        scene.frame().toGeodetic(geo::Enu{-extent->widthM / 2, -extent->lengthM / 2, 0.0});
+    EXPECT_LT(corner.latitudeDeg, centre.latitudeDeg);
+    // Height above the data: the fixture surface at the centre of the cloud.
+    EXPECT_NEAR(scene.terrain().origin.heightM, test::lidarSurface(400200.0, 4600200.0), 1.0);
+    sim.abortMission();
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().result.has_value(); }));
+    window_->endMission();
+
+    // The tour can be flown over it.
+    const auto profile = testProfile();
+    ASSERT_TRUE(profile.has_value());
+    sim::MissionStatus s;
+    flyTour(def, *data_, *profile, s);
+    expectFlown(def, s);
+}
+
+// A cloud too small for the square: launching says how large it must be.
+TEST_F(RealTerrainMissionsTest, TheOwnLidarMissionRefusesACloudTooSmallForIt) {
+    fs::create_directories(library() / "my-lidar");
+    std::string error;
+    ASSERT_TRUE(test::writeLidar(library() / "my-lidar" / "small.las",
+                                 test::lidarPoints(400000.0, 4600000.0, 300.0, 160.0, 2.0), {},
+                                 &error))
+        << error;
+    missions_->reload();
+    const MissionRow* row = missions_->find(kOwnLidar);
+    ASSERT_NE(row, nullptr);
+    ASSERT_EQ(row->status, MissionStatus::Available) << row->statusDetail;
+    window_ = std::make_unique<MainWindow>(settings_.get(), missions_.get(), data_.get());
+    auto launched = window_->launchMission(kOwnLidar);
+    ASSERT_FALSE(launched.has_value());
+    EXPECT_NE(launched.error().message.find("at least 256 m a side"), std::string::npos)
+        << launched.error().message;
 }
 
 }  // namespace

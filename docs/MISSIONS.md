@@ -111,12 +111,17 @@ clouds** in LAS 1.0–1.4 or LAZ (see *Terrain from lidar point clouds* below).
 - **Where the files are:** put the mission in a folder of its own, with the files next to it
   (usually in `dem/`). Paths are relative to that folder, or `library:<name>` for the geodata
   library `~/.drone_simulation/library/`. A missing file makes the mission *unavailable*.
+- **Folders:** a path ending in `/`, such as `"library:my-lidar/"`, stands for every file of
+  the mission's format directly in that folder, in name order, under any names. Use it for
+  data the user provides. It takes no `sha256`, and an empty folder makes the mission
+  unavailable.
 - **Several tiles** are joined into one surface. They must share one CRS. Files without a
   CRS need `crs`, e.g. `"EPSG:25830"`.
 - **Origin:** without `origin`, the origin is the centre of the data and the ground there is
   at height 0. With an `origin` whose `altRef` is `"AMSL"`, that altitude is height 0.
 - **Extent:** without `extent`, the terrain is the largest rectangle centred on the origin
-  that the data covers. With `extent`, the rectangle must lie inside the data. A HUD caution
+  that the data covers, and a spawn or item outside it stops the launch. With `extent`, the
+  rectangle must lie inside the data. A HUD caution
   appears 300 m from the edge and a warning 100 m from it.
 - **Checks at launch:** the files are hashed, behind a progress dialog for large files.
   A file whose hash differs from its `sha256` stops the mission. The attempt records the hash
@@ -466,10 +471,13 @@ file and its data) copy a mission into your folder and select it.
 | Real terrain | Montserrat ridge | online terrain (needs an OpenTopography API key) |
 | Real terrain | Oeschinensee | swissALTI3D tiles with swisstopo imagery; alpine lake, falls, pasture |
 | Real terrain | Sau reservoir | Copernicus 30 m COG with a PNOA orthophoto; pier and cliff plateau |
+| Real terrain | Your own lidar | your LAS/LAZ files in `library:my-lidar/`; a 200 m square |
 
 The first mission of each chapter is open; each further one needs a star on the one before.
-*Oeschinensee* and *Sau reservoir* instead open after a star on *Hover*. Their data is not
-shipped: fetch it once with `fetch_mission_data.py` ([TERRAIN.md](TERRAIN.md#built-in-real-terrain-missions)).
+*Oeschinensee*, *Sau reservoir* and *Your own lidar* instead open after a star on *Hover*.
+No data is shipped for them: fetch the data of the first two once with
+`fetch_mission_data.py`, and put your own point cloud into the library for the third
+([TERRAIN.md](TERRAIN.md#built-in-real-terrain-missions)).
 
 ## Scoring and stars
 
@@ -636,7 +644,7 @@ Bounded terrain centred on the origin (FR-TER-04a).
 
 | Field | Type | Required | Limits | Description |
 |-------|------|----------|--------|-------------|
-| `path` | string | yes | min length 1, max length 1024 |  |
+| `path` | string | yes | min length 1, max length 1024 | Relative to the mission folder, or prefixed with library: for the geodata library; a path ending in '/' stands for every file of the format directly in that folder (no sha256). |
 | `sha256` | string |  | pattern `^[0-9a-fA-F]{64}$` |  |
 
 #### environment

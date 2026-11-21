@@ -800,6 +800,25 @@ TEST(MissionCatalog, CampaignUnlocks) {
     EXPECT_TRUE(open["a1"]);
 }
 
+// File terrain takes its extent from the data, so the mission cannot check its positions
+// against it: placing them does.
+TEST(MissionWorld, PositionsOutsideTheTerrainDataAreRefused) {
+    const MissionDefinition m = definition(fixture("rover-delivery-01.mission.json"));
+    MissionPlacement placement;
+    placement.extent = ds::terrain::Extent{2000.0, 2000.0};
+    ASSERT_TRUE(buildItems(m, placement));  // The parking zone is 380 m east, 520 m north.
+    placement.extent = ds::terrain::Extent{2000.0, 1000.0};
+    auto items = buildItems(m, placement);
+    ASSERT_FALSE(items);
+    EXPECT_NE(items.error().message.find("380 m east, 520 m north of the terrain origin, "
+                                         "outside the terrain data (2000 × 1000 m)"),
+              std::string::npos)
+        << items.error().message;
+    auto runner = MissionRunner::create(m, placement);
+    ASSERT_FALSE(runner);
+    EXPECT_NE(runner.error().message.find("outside the terrain data"), std::string::npos);
+}
+
 TEST(MissionWorld, ItemsSerialiseBackToJson) {
     const MissionDefinition m = definition(fixture("rover-delivery-01.mission.json"));
     auto items = buildItems(m, MissionPlacement{});

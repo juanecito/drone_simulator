@@ -101,6 +101,20 @@ struct TerrainFileRoots {
 [[nodiscard]] TerrainResult<std::filesystem::path> resolveTerrainPath(
     std::string_view reference, const TerrainFileRoots& roots);
 
+/// @brief True for a folder reference: a path ending in `/` (such as `library:my-lidar/`),
+/// which stands for every file of the right kind directly in that folder.
+[[nodiscard]] bool isFolderReference(std::string_view reference) noexcept;
+
+/// @brief The files a reference stands for: @p ref itself (unchecked) for a file, or, for a
+/// folder reference, the regular files directly in the folder whose names @p accept takes,
+/// sorted by name, each as `<folder reference><name>` with the entry's JSON path.
+/// @details The folder follows the path rules of resolveTerrainPath(); files whose real
+/// location leaves it are skipped. A missing folder, or one without such files, is
+/// FileNotFound.
+[[nodiscard]] TerrainResult<std::vector<FileRef>> expandFileRef(
+    const FileRef& ref, const TerrainFileRoots& roots,
+    const std::function<bool(const std::filesystem::path&)>& accept);
+
 /// @brief Elevation format implied by a file name, or nullopt if unsupported (FR-TER-F01).
 [[nodiscard]] std::optional<ElevationFormat> elevationFormatOf(const std::filesystem::path& file);
 

@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "id": "real-04-own-lidar",
+  "title": "Your own lidar",
+  "briefing": "Survey a square over your own lidar point cloud. Take off from the pad at the centre of your data, fly to the four corner beacons 30 m above the ground, 100 m from the centre, in order, and land back on the pad.\n\nThe simulator ships no data for this mission. Put one or more classified LAS or LAZ files (ground points in class 2), all in the same projected CRS, into the folder my-lidar of the geodata library (~/.drone_simulation/library/my-lidar/), then press Reload. They must cover at least 260 × 260 m around their centre; the terrain model is made once and cached. Files without a CRS cannot be used here: copy this mission into your missions folder and give terrain.crs (see the Terrain guide).\n\nThe clock is set to 14:00 UTC in June: in Asia and Oceania you fly at night, with the vehicle lights on to stay in sight.",
+  "difficulty": 2,
+  "chapter": "real-terrain",
+  "order": 4,
+  "unlock": {
+    "requires": [
+      "basics-01-hover"
+    ],
+    "minStars": 1
+  },
+  "terrain": {
+    "source": "file",
+    "format": "laz",
+    "elevationFiles": [
+      {
+        "path": "library:my-lidar/"
+      }
+    ],
+    "attribution": "Elevation: your own lidar data"
+  },
+  "environment": {
+    "utc": "2026-06-20T14:00:00Z",
+    "weather": {
+      "seed": 11,
+      "preset": "few-clouds",
+      "temperatureC": 18,
+      "wind": {
+        "level": 2,
+        "fromDeg": 250
+      }
+    }
+  },
+  "vehicle": {
+    "type": "aerial",
+    "profile": "camera-250g",
+    "allowProfileChange": true
+  },
+  "spawn": {
+    "local": [
+      0,
+      0,
+      0
+    ],
+    "altRef": "AGL",
+    "headingDeg": 0
+  },
+  "rules": {
+    "allowKeyboard": true,
+    "timeLimitS": 600
+  },
+  "items": [
+    {
+      "type": "landingPad",
+      "id": "home",
+      "name": "Centre pad",
+      "local": [
+        0,
+        0,
+        0
+      ],
+      "radiusM": 1.5
+    },
+    {
+      "type": "waypoint",
+      "id": "ne",
+      "name": "North-east beacon",
+      "local": [
+        100,
+        30,
+        -100
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "nw",
+      "name": "North-west beacon",
+      "local": [
+        -100,
+        30,
+        -100
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "sw",
+      "name": "South-west beacon",
+      "local": [
+        -100,
+        30,
+        100
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    },
+    {
+      "type": "waypoint",
+      "id": "se",
+      "name": "South-east beacon",
+      "local": [
+        100,
+        30,
+        100
+      ],
+      "altRef": "AGL",
+      "radiusM": 8
+    }
+  ],
+  "objectiveOrder": "sequential",
+  "objectives": [
+    {
+      "id": "ne",
+      "type": "reachWaypoint",
+      "target": "ne"
+    },
+    {
+      "id": "nw",
+      "type": "reachWaypoint",
+      "target": "nw"
+    },
+    {
+      "id": "sw",
+      "type": "reachWaypoint",
+      "target": "sw"
+    },
+    {
+      "id": "se",
+      "type": "reachWaypoint",
+      "target": "se"
+    },
+    {
+      "id": "land",
+      "type": "land",
+      "target": "home",
+      "maxErrorM": 1
+    }
+  ],
+  "scoring": {
+    "stars": [
+      {
+        "maxTimeS": 300
+      },
+      {
+        "maxTimeS": 200
+      }
+    ]
+  }
+}

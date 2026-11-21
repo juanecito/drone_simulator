@@ -2030,8 +2030,19 @@ so Markdown pages appear in the generated site.
       an `ATTRIBUTION.txt`, and asks before downloading.
     - Until the data is there, the missions are *unavailable* with a message naming the
       script. Missing library files are summed up in one message.
-  - *No lidar mission:* a swissSURFACE3D lidar tour was dropped: its single tile is
-    262 MB for 1 km², too much to ask for one mission.
+  - *Lidar from the user's own files:* no lidar data is fetched (a swissSURFACE3D tile is
+    262 MB for 1 km²). *Your own lidar* (`real-04-own-lidar`) instead flies over the LAS/LAZ
+    files the user puts into `library:my-lidar/`. The take-off pad is at the centre of the
+    data, and four beacons stand 30 m above the ground, 100 m out in each diagonal
+    direction. The data must cover at least 256 m a side.
+    - *Folder references:* a file `path` ending in `/` stands for every file of the
+      mission's format directly in that folder, sorted by name, under the path rules of
+      FR-TER-F03 (`expandFileRef`). The loader expands them, so the launch hashes the files
+      found. A folder takes no `sha256`; a missing or empty folder makes the mission
+      unavailable and says where to put the files.
+    - *Positions inside the data:* `MissionPlacement::extent` is the extent of the built
+      terrain. A spawn or item outside it stops the launch, because without `extent` the
+      loader cannot know the data's size.
   - *Fix:* mission item positions given as latitude and longitude are now placed in the
     local frame at the origin's AMSL altitude, like the scene. At height 0 they were
     about 0.2 m off at 800 m from an origin at 1600 m.
@@ -2046,6 +2057,11 @@ so Markdown pages appear in the generated site.
       tour to success with no collision and no rule warning.
     - The fetch script against a local HTTP server: checks, world files, notices, mission
       selection and refusals.
+    - *Your own lidar*: without files, or with only other files, it says where to put them.
+      Over a generated cloud in two tiles (LAZ 1.4 and LAS 1.2, arbitrary names) it is
+      launched with the pad at the data centre and flown to success. A cloud too small is
+      refused at launch. With the real-data library it is also flown over the
+      `my-lidar` folder there, if any.
   - *Documentation:* `docs/TERRAIN.md`.
 
 **M5 implementation notes** (done; deliberate scope decisions):

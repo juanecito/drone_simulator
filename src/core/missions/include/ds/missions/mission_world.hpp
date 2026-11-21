@@ -10,6 +10,7 @@
 #include "ds/geo/coordinates.hpp"
 #include "ds/items/registry.hpp"
 #include "ds/missions/mission.hpp"
+#include "ds/terrain/height_source.hpp"
 
 /// @file
 /// @brief Placing a mission in the world (FR-MIS-03, FR-ITM-07, FR-ITM-11): mission positions
@@ -28,10 +29,15 @@ struct MissionPlacement {
     std::optional<geo::LatLon> origin;
     items::HeightFunction ground;  ///< Terrain height at (x, z); empty ⇒ flat at 0.
     double originAltitudeM = 0.0;  ///< AMSL altitude of world height 0.
+    /// Horizontal extent of the terrain data, if bounded: positions outside it are errors
+    /// (file terrain takes its extent from the files, which the mission cannot check).
+    std::optional<terrain::Extent> extent;
 };
 
 /// @brief World position of @p position: horizontal from the origin, vertical from its
 /// altitude reference (AGL: terrain + altitude; AMSL: altitude − originAltitudeM).
+/// @return An error for a geographic position without an origin, or a position outside
+/// `placement.extent`.
 [[nodiscard]] common::Result<items::Vec3> worldPosition(const MissionPosition& position,
                                                         const MissionDefinition& mission,
                                                         const MissionPlacement& placement);

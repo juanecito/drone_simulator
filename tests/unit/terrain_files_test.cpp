@@ -166,6 +166,78 @@ TEST(TerrainPaths, EscapesRejected) {
     EXPECT_EQ(resolveTerrainPath("dem", f.roots).error().code, TerrainErrorCode::FileNotFound);
 }
 
+// A path ending in '/' stands for the files of the right kind in that folder: the user's own
+// data, under any names.
+TEST(TerrainPaths, FolderReferencesListTheirFilesByName) {
+    Folders f;
+    fs::create_directories(f.roots.libraryDir / "my-lidar" / "sub");
+    Folders::write(f.root / "outside.laz", "o");
+    for (const char* name : {"b.laz", "A.LAS", "c.tif", "notes.txt", "sub/d.laz"}) {
+        Folders::write(f.roots.libraryDir / "my-lidar" / name, "x");
+    }
+    fs::create_symlink(f.root / "outside.laz", f.roots.libraryDir / "my-lidar" / "link.laz");
+    const auto clouds = [](const fs::path& p) {
+        return elevationFormatOf(p) == ElevationFormat::PointCloud;
+    };
+    const FileRef folder{"library:my-lidar/", "", "/terrain/elevationFiles/0"};
+    auto listed = expandFileRef(folder, f.roots, clouds);
+    ASSERT_TRUE(listed) << listed.error().message;
+    ASSERT_EQ(listed->size(), 2U);  // Not the raster, the text, the subfolder or the link out.
+    EXPECT_EQ((*listed)[0].path, "library:my-lidar/A.LAS");
+    EXPECT_EQ((*listed)[1].path, "library:my-lidar/b.laz");
+    EXPECT_EQ((*listed)[1].jsonPath, folder.jsonPath);
+    EXPECT_TRUE(resolveTerrainPath((*listed)[1].path, f.roots));
+    // A file reference is itself, unchecked.
+    auto file = expandFileRef({"dem/none.laz", "", ""}, f.roots, clouds);
+    ASSERT_TRUE(file);
+    EXPECT_EQ(file->size(), 1U);
+    // Missing, empty, or escaping folders.
+    EXPECT_EQ(expandFileRef({"library:none/", "", ""}, f.roots, clouds).error().code,
+              TerrainErrorCode::FileNotFound);
+    EXPECT_EQ(expandFileRef({"library:my-lidar/sub/", "", ""}, f.roots,
+                            [](const fs::path&) { return false; })
+                  .error()
+                  .code,
+              TerrainErrorCode::FileNotFound);
+    EXPECT_EQ(expandFileRef({"library:../", "", ""}, f.roots, clouds).error().code,
+              TerrainErrorCode::PathRejected);
+    EXPECT_EQ(resolveTerrainPath("library:my-lidar/", f.roots).error().code,
+              TerrainErrorCode::FileNotFound);
+}
+
+TEST(FileTerrainSpec, FolderReferencesTakeNoHashAndAnyFormat) {
+    Json j = lazTerrain();
+    j["elevationFiles"] = Json::parse(R"([ { "path": "library:my-lidar/" } ])");
+    EXPECT_TRUE(parseFileTerrain(j));
+    j["elevationFiles"][0]["sha256"] = std::string(64, 'a');
+    auto bad = parseFileTerrain(j);
+    ASSERT_FALSE(bad);
+    EXPECT_NE(bad.error().message.find("a folder reference has no sha256"), std::string::npos)
+        << bad.error().message;
+}
+
+TEST(PrepareFileTerrain, ExpandsFolderReferences) {
+    Folders f;
+    fs::create_directories(f.roots.libraryDir / "tiles");
+    Folders::write(f.roots.libraryDir / "tiles" / "b.tif", "two");
+    Folders::write(f.roots.libraryDir / "tiles" / "a.tif", "one");
+    Folders::write(f.roots.libraryDir / "tiles" / "a.tif.aux.xml", "<x/>");
+    Json j = rasterTerrain();
+    j["elevationFiles"] = Json::parse(R"([ { "path": "library:tiles/" } ])");
+    j["orthophotoFiles"] = Json::parse(R"([ { "path": "ortho/" } ])");  // Empty folder.
+    auto spec = parseFileTerrain(j);
+    ASSERT_TRUE(spec) << spec.error().message;
+    auto ok = prepareFileTerrain(*spec, f.roots);
+    ASSERT_TRUE(ok) << ok.error().message;
+    ASSERT_EQ(ok->elevation.size(), 2U);
+    EXPECT_EQ(ok->elevation[0].sha256, ds::common::sha256Hex("one"));
+    EXPECT_EQ(ok->elevation[1].sha256, ds::common::sha256Hex("two"));
+    ASSERT_EQ(ok->warnings.size(), 1U);  // No imagery, not an error.
+    EXPECT_NE(ok->warnings[0].find("imagery disabled"), std::string::npos);
+    fs::remove_all(f.roots.libraryDir / "tiles");
+    EXPECT_EQ(prepareFileTerrain(*spec, f.roots).error().code, TerrainErrorCode::FileNotFound);
+}
+
 // --- Integrity (FR-TER-F09, FR-TER-I08, FR-TER-I09) ---------------------------------------------
 
 TEST(PrepareFileTerrain, HashesVerifiesAndDisablesBrokenOrthophotos) {

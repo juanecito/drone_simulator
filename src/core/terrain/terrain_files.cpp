@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <iterator>
 #include <ranges>
 
 #include "ds/common/sha256.hpp"
@@ -53,7 +54,9 @@ std::vector<FileRef> readFileList(JsonReader& r, std::string_view key, bool requ
         f.path = e.string("path");
         f.sha256 = e.string("sha256", "");
         f.jsonPath = e.path();
-        if (!f.sha256.empty()) {
+        if (!f.sha256.empty() && isFolderReference(f.path)) {
+            e.fail("sha256", "a folder reference has no sha256");
+        } else if (!f.sha256.empty()) {
             if (!common::isSha256Hex(f.sha256)) {
                 e.fail("sha256", "must be 64 hexadecimal characters");
             }
@@ -258,6 +261,9 @@ TerrainResult<FileTerrainSpec> parseFileTerrain(const Json& json, std::string_vi
     }
     // Every file must match the declared format (FR-TER-F04).
     for (const FileRef& f : spec.elevationFiles) {
+        if (isFolderReference(f.path)) {
+            continue;  // Only files of the format are taken from it.
+        }
         const std::string_view name = std::string_view(f.path).starts_with("library:")
                                           ? std::string_view(f.path).substr(8)
                                           : std::string_view(f.path);
@@ -295,10 +301,16 @@ bool isOrthophotoFile(const fs::path& file) {
            ext == ".jpeg";
 }
 
-TerrainResult<fs::path> resolveTerrainPath(std::string_view reference,
-                                           const TerrainFileRoots& roots) {
+namespace {
+
+/// The rules of FR-TER-F03 for a file or (@p folder) a folder.
+TerrainResult<fs::path> resolveInside(std::string_view reference, const TerrainFileRoots& roots,
+                                      bool folder) {
     const bool library = reference.starts_with("library:");
-    const std::string_view rel = library ? reference.substr(8) : reference;
+    std::string_view rel = library ? reference.substr(8) : reference;
+    if (folder && rel.size() > 1 && rel.ends_with('/')) {
+        rel.remove_suffix(1);
+    }
     const fs::path& base = library ? roots.libraryDir : roots.missionDir;
     if (rel.empty()) {
         return terrainError(TerrainErrorCode::PathRejected, "empty path");
@@ -336,19 +348,96 @@ TerrainResult<fs::path> resolveTerrainPath(std::string_view reference,
                             std::format("\"{}\": leads outside the {} folder (symbolic link?)",
                                         reference, library ? "geodata library" : "mission"));
     }
-    if (!fs::is_regular_file(file, ec)) {
-        return terrainError(TerrainErrorCode::FileNotFound,
-                            std::format("\"{}\": not a regular file", reference));
+    if (folder ? !fs::is_directory(file, ec) : !fs::is_regular_file(file, ec)) {
+        return terrainError(
+            TerrainErrorCode::FileNotFound,
+            std::format("\"{}\": not a {}", reference, folder ? "folder" : "regular file"));
     }
     return file;
 }
 
-TerrainResult<PreparedFileTerrain> prepareFileTerrain(const FileTerrainSpec& spec,
+}  // namespace
+
+TerrainResult<fs::path> resolveTerrainPath(std::string_view reference,
+                                           const TerrainFileRoots& roots) {
+    if (isFolderReference(reference)) {
+        return terrainError(TerrainErrorCode::FileNotFound,
+                            std::format("\"{}\": a folder, not a file", reference));
+    }
+    return resolveInside(reference, roots, false);
+}
+
+bool isFolderReference(std::string_view reference) noexcept { return reference.ends_with('/'); }
+
+TerrainResult<std::vector<FileRef>> expandFileRef(
+    const FileRef& ref, const TerrainFileRoots& roots,
+    const std::function<bool(const fs::path&)>& accept) {
+    if (!isFolderReference(ref.path)) {
+        return std::vector<FileRef>{ref};
+    }
+    auto dir = resolveInside(ref.path, roots, true);
+    if (!dir) {
+        return std::unexpected(dir.error());
+    }
+    std::vector<std::string> names;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(*dir, ec)) {
+        std::error_code fileEc;
+        const fs::path real = fs::canonical(entry.path(), fileEc);
+        if (fileEc || !isInside(*dir, real) || !fs::is_regular_file(real, fileEc) ||
+            !accept(entry.path())) {
+            continue;
+        }
+        names.push_back(entry.path().filename().string());
+    }
+    if (ec) {
+        return terrainError(TerrainErrorCode::FileNotFound,
+                            std::format("\"{}\": cannot list the folder", ref.path));
+    }
+    if (names.empty()) {
+        return terrainError(TerrainErrorCode::FileNotFound,
+                            std::format("\"{}\": no suitable files in the folder", ref.path));
+    }
+    std::ranges::sort(names);
+    std::vector<FileRef> out;
+    out.reserve(names.size());
+    for (const std::string& name : names) {
+        out.push_back(FileRef{ref.path + name, {}, ref.jsonPath});
+    }
+    return out;
+}
+
+TerrainResult<PreparedFileTerrain> prepareFileTerrain(const FileTerrainSpec& declared,
                                                       const TerrainFileRoots& roots,
                                                       const TerrainFileLimits& limits,
                                                       std::stop_token stop,
                                                       const PrepareHooks& hooks) {
     PreparedFileTerrain out;
+    // Folder references stand for the files in them (the mission loader usually expanded
+    // them already).
+    FileTerrainSpec spec = declared;
+    spec.elevationFiles.clear();
+    for (const FileRef& ref : declared.elevationFiles) {
+        auto files = expandFileRef(ref, roots, [&](const fs::path& file) {
+            return elevationFormatOf(file) == spec.format;
+        });
+        if (!files) {
+            return terrainError(files.error().code,
+                                std::format("{}: {}", ref.jsonPath, files.error().message));
+        }
+        std::ranges::move(*files, std::back_inserter(spec.elevationFiles));
+    }
+    spec.orthophotoFiles.clear();
+    for (const FileRef& ref : declared.orthophotoFiles) {
+        auto files = expandFileRef(ref, roots, isOrthophotoFile);
+        if (!files) {
+            out.warnings.push_back(
+                std::format("{}: {}; imagery disabled", ref.jsonPath, files.error().message));
+            spec.orthophotoFiles.clear();
+            break;
+        }
+        std::ranges::move(*files, std::back_inserter(spec.orthophotoFiles));
+    }
     Progress progress{.hooks = &hooks};
     for (const auto* list : {&spec.elevationFiles, &spec.orthophotoFiles}) {
         for (const FileRef& ref : *list) {

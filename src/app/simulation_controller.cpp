@@ -752,6 +752,7 @@ common::Result<std::unique_ptr<missions::MissionRunner>> SimulationController::e
         scene_->source(), scene_->layout(), scene_->terrain().origin.heightM);
     placement.ground = [query](double x, double z) { return query->height(x, z); };
     placement.originAltitudeM = scene_->terrain().origin.heightM;
+    placement.extent = scene_->source()->extent();
     auto runner =
         missions::MissionRunner::create(m, placement, sim::terrainLineOfSight(groundFunction()));
     if (!runner) {

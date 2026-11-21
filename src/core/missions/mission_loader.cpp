@@ -9,6 +9,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <utility>
 
@@ -29,6 +30,7 @@ constexpr double kDefaultMaxAglM = 120.0;
 constexpr double kDefaultVlosDistanceM = 500.0;
 constexpr double kDefaultVlosHiddenS = 5.0;
 constexpr double kDefaultGraceS = 3.0;
+constexpr std::size_t kMaxElevationFiles = 1024;  // As the schema's maxItems.
 using weather::kFogMinHumidityPct;
 using weather::kSnowMaxTemperatureC;
 
@@ -287,6 +289,47 @@ private:
             return;
         }
         const terrain::TerrainFileRoots roots{missionDir_, ctx_.libraryDir};
+        // Folder references ("library:my-lidar/") stand for the files of the format in them:
+        // the user's own data, under any names.
+        bool foldersFound = true;
+        std::vector<terrain::FileRef> files;
+        for (const terrain::FileRef& f : spec.elevationFiles) {
+            if (!terrain::isFolderReference(f.path) ||
+                (f.path.starts_with("library:") && ctx_.libraryDir.empty())) {
+                files.push_back(f);
+                continue;
+            }
+            auto listed = terrain::expandFileRef(f, roots, [&](const std::filesystem::path& p) {
+                return terrain::elevationFormatOf(p) == spec.format;
+            });
+            if (listed) {
+                std::ranges::move(*listed, std::back_inserter(files));
+                continue;
+            }
+            foldersFound = false;
+            if (listed.error().code != terrain::TerrainErrorCode::FileNotFound) {
+                error(common::pointerToDotted(f.jsonPath), listed.error().message);
+                continue;
+            }
+            const bool library = f.path.starts_with("library:");
+            const std::filesystem::path folder =
+                (library ? ctx_.libraryDir : missionDir_) /
+                std::filesystem::path(library ? f.path.substr(8) : f.path).parent_path();
+            result_.unavailable.push_back(std::format(
+                "no {} files in {}: put your own data there",
+                spec.format == terrain::ElevationFormat::PointCloud ? ".las or .laz"
+                                                                    : "elevation raster",
+                folder.string()));
+        }
+        if (files.size() > kMaxElevationFiles) {
+            error("terrain.elevationFiles",
+                  std::format("{} files; at most {}", files.size(), kMaxElevationFiles));
+        }
+        if (!foldersFound) {
+            return;
+        }
+        spec.elevationFiles = std::move(files);
+
         std::vector<std::filesystem::path> found;
         std::vector<std::string> notInLibrary;
         for (const terrain::FileRef& f : spec.elevationFiles) {
@@ -323,6 +366,20 @@ private:
         }
         // Orthophotos: a missing one only disables the imagery (FR-TER-I08); a path that
         // breaks the folder rules is an error like any other.
+        std::vector<terrain::FileRef> imageRefs;
+        for (const terrain::FileRef& f : spec.orthophotoFiles) {
+            if (!terrain::isFolderReference(f.path) ||
+                (f.path.starts_with("library:") && ctx_.libraryDir.empty())) {
+                imageRefs.push_back(f);
+            } else if (auto listed = terrain::expandFileRef(f, roots, terrain::isOrthophotoFile)) {
+                std::ranges::move(*listed, std::back_inserter(imageRefs));
+            } else if (listed.error().code != terrain::TerrainErrorCode::FileNotFound) {
+                error(common::pointerToDotted(f.jsonPath), listed.error().message);
+            } else {
+                return;  // No imagery (FR-TER-I08): nothing resolved.
+            }
+        }
+        spec.orthophotoFiles = std::move(imageRefs);
         std::vector<std::filesystem::path> images;
         for (const terrain::FileRef& f : spec.orthophotoFiles) {
             if (f.path.starts_with("library:") && ctx_.libraryDir.empty()) {

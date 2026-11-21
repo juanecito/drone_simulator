@@ -36,6 +36,12 @@ common::Result<items::Vec3> worldPosition(const MissionPosition& position,
     if (!xz) {
         return common::makeError("geographic position without a terrain origin");
     }
+    if (placement.extent && !placement.extent->contains(xz->x, xz->y)) {
+        return common::makeError(std::format(
+            "{:.0f} m east, {:.0f} m north of the terrain origin, outside the terrain data "
+            "({:.0f} × {:.0f} m)",
+            xz->x + 0.0, 0.0 - xz->y, placement.extent->widthM, placement.extent->lengthM));
+    }
     const double y = position.altitudeRef == items::AltitudeRef::Agl
                          ? (placement.ground ? placement.ground(xz->x, xz->y) : 0.0) +
                                position.altitudeM

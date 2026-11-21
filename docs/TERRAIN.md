@@ -160,8 +160,14 @@ my-valley/
   shared by several missions.
 - A `sha256` per file is optional. When it is given, a different elevation file stops the
   mission, and a different image only disables the imagery.
-- A missing elevation file makes the mission *unavailable*, with the reason in the Missions
-  tab.
+- A path ending in `/` (for example `library:my-lidar/`) stands for every file of the
+  mission's format directly in that folder, sorted by name, so the files may have any names.
+  It takes no `sha256`. Subfolders, other file types and symbolic links leading out of the
+  folder are ignored.
+- A missing elevation file, or a folder without such files, makes the mission
+  *unavailable*, with the reason in the Missions tab.
+- Without an `extent`, the terrain covers what the data covers; a spawn or item outside it
+  stops the launch with its distance from the origin.
 
 ## Built-in real-terrain missions
 
@@ -191,8 +197,24 @@ published file against its size and SHA-256, writes through temporary `.part` fi
 leaves an `ATTRIBUTION.txt` beside the data. Run it again to resume. The missions become
 available after *Reload* in the Missions tab, or at the next start.
 
-The missions waive the line-of-sight rule, because the tours go beyond what a pilot at the
+The two tours waive the line-of-sight rule, because they go beyond what a pilot at the
 take-off point could see. In reality you would need observers.
+
+### Your own lidar
+
+*Your own lidar* (`real-04-own-lidar`) ships and downloads nothing: it flies over the point
+cloud you provide. Put one or more LAS or LAZ files into `~/.drone_simulation/library/my-lidar/`
+(any names), then press *Reload* in the Missions tab.
+
+- The files must be **classified**, with ground in class 2, and share one projected CRS.
+- Together they must cover at least **260 × 260 m** around their centre. The take-off pad
+  is at the centre of the data; four beacons stand 30 m above the ground, 100 m east or west
+  and 100 m north or south of it.
+- Files without a CRS cannot be used as they are: copy the mission into
+  `~/.drone_simulation/missions/` and add `"crs"` to its `terrain`.
+- The terrain model is made at the first launch and cached, so later launches are quick.
+- The clock is 14:00 UTC in June. In Asia and Oceania the flight is at night: switch the
+  vehicle lights on to stay in sight.
 
 ## Online elevation providers
 

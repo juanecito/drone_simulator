@@ -285,7 +285,8 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 1024
+          "maxLength": 1024,
+          "description": "Relative to the mission folder, or prefixed with library: for the geodata library; a path ending in '/' stands for every file of the format directly in that folder (no sha256)."
         },
         "sha256": {
           "type": "string",
