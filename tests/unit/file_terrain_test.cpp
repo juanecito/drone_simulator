@@ -12,6 +12,7 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "ds/terrain/raster_source.hpp"
 #include "ds/terrain/terrain_files.hpp"
 
+#include "ortho_fixtures.hpp"
 #include "raster_fixtures.hpp"
 
 namespace {
@@ -106,6 +108,84 @@ TEST(FileTerrain, BuildTerrainOpensTheFilesAndTakesTheOriginFromTheData) {
 
     app::TerrainConfig missing = fileConfig(dir / "missing.tif");
     EXPECT_FALSE(app::buildTerrain(missing).has_value());
+}
+
+TEST(FileTerrain, OrthophotosInTheConfigAndTheBuiltTerrain) {
+    TempDir dir("file_terrain_ortho");
+    test::writeRaster(dir / "dem.tif", test::planarUtmSpec());
+    // 1 m imagery over the middle 800 m of the 2 km DEM.
+    test::ImageSpec image;
+    image.width = 800;
+    image.height = 800;
+    image.geoTransform = {test::kE0 + 600.0, 1.0, 0.0, test::kN0 - 600.0, 0.0, -1.0};
+    test::writeImage(dir / "ortho.tif", image);
+
+    app::TerrainConfig c = fileConfig(dir / "dem.tif");
+    c.ortho.files = {dir / "ortho.tif"};
+    c.ortho.crs = "EPSG:32630";
+    c.ortho.bands = {1, 2, 3};
+    c.ortho.attribution = "Test imagery, CC0";
+    c.ortho.color = {.brightness = 0.1, .contrast = 1.2, .gamma = 0.9};
+    const auto back = app::terrainFromJson(app::terrainToJson(c));
+    ASSERT_TRUE(back.has_value()) << back.error().message;
+    EXPECT_EQ(*back, c);
+    const auto preset = app::fromPresetRecord(app::toPresetRecord(c, "user.o", "O"));
+    ASSERT_TRUE(preset.has_value()) << preset.error().message;
+    EXPECT_EQ(preset->ortho, c.ortho);
+    // Procedural terrain has no imagery (FR-TER-I03).
+    app::TerrainConfig procedural;
+    procedural.ortho = c.ortho;
+    EXPECT_FALSE(app::terrainToJson(procedural).contains(QStringLiteral("ortho")));
+    QJsonObject bad = app::terrainToJson(c);
+    QJsonObject badOrtho = bad.value(QStringLiteral("ortho")).toObject();
+    badOrtho.insert(QStringLiteral("gamma"), 0.0);
+    bad.insert(QStringLiteral("ortho"), badOrtho);
+    EXPECT_FALSE(app::terrainFromJson(bad).has_value());
+
+    auto built = app::buildTerrain(c);
+    ASSERT_TRUE(built.has_value()) << built.error().message;
+    ASSERT_NE(built->ortho, nullptr);
+    EXPECT_TRUE(built->orthoWarning.empty()) << built->orthoWarning;
+    EXPECT_EQ(built->orthoAttribution, "Test imagery, CC0");
+    // The imagery is placed in the terrain's frame: the data centre is the origin. (The box
+    // is a little larger: UTM north is turned ≈ 0.6° from true north here.)
+    const terrain::OrthoMetadata& m = built->ortho->metadata();
+    EXPECT_NEAR(m.minX, -404.0, 4.0);
+    EXPECT_NEAR(m.maxZ, 404.0, 4.0);
+
+    // A broken orthophoto only disables the imagery (FR-TER-I08).
+    std::ofstream(dir / "broken.tif") << "not an image";
+    c.ortho.files = {dir / "broken.tif"};
+    built = app::buildTerrain(c);
+    ASSERT_TRUE(built.has_value());
+    EXPECT_EQ(built->ortho, nullptr);
+    EXPECT_NE(built->orthoWarning.find("imagery disabled"), std::string::npos)
+        << built->orthoWarning;
+    // Imagery elsewhere: kept, with a caution.
+    image.geoTransform[0] += 50'000.0;
+    test::writeImage(dir / "far.tif", image);
+    c.ortho.files = {dir / "far.tif"};
+    built = app::buildTerrain(c);
+    ASSERT_TRUE(built.has_value());
+    EXPECT_NE(built->ortho, nullptr);
+    EXPECT_NE(built->orthoWarning.find("do not cover"), std::string::npos);
+}
+
+TEST(FileTerrain, MissionOrthophotoColourIsParsed) {
+    common::Json j = {{"source", "file"},
+                      {"format", "raster"},
+                      {"elevationFiles", common::Json::array({{{"path", "dem/a.tif"}}})},
+                      {"orthophotoFiles", common::Json::array({{{"path", "ortho/a.tif"}}})},
+                      {"orthophotoColor", {{"brightness", 0.1}, {"gamma", 1.5}}}};
+    auto spec = terrain::parseFileTerrain(j);
+    ASSERT_TRUE(spec.has_value()) << spec.error().message;
+    EXPECT_DOUBLE_EQ(spec->orthophotoColor.brightness, 0.1);
+    EXPECT_DOUBLE_EQ(spec->orthophotoColor.contrast, 1.0);
+    EXPECT_DOUBLE_EQ(spec->orthophotoColor.gamma, 1.5);
+    j["orthophotoColor"] = {{"gamma", 0.0}};
+    EXPECT_FALSE(terrain::parseFileTerrain(j).has_value());
+    j["orthophotoColor"] = {{"saturation", 1.0}};
+    EXPECT_FALSE(terrain::parseFileTerrain(j).has_value());
 }
 
 TEST(FileTerrain, FadeEdgeBlendsToTheLowestHeight) {

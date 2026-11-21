@@ -16,6 +16,7 @@
 
 #include "ds/common/json.hpp"
 #include "ds/terrain/height_source.hpp"
+#include "ds/terrain/orthophoto.hpp"
 #include "ds/terrain/terrain_error.hpp"
 
 /// @file
@@ -64,9 +65,14 @@ struct FileTerrainSpec {
     std::string orthophotoCrs;             ///< If the images carry no CRS.
     std::string orthophotoAttribution;     ///< Imagery attribution.
     std::vector<int> orthophotoBands;      ///< e.g. {1, 2, 3}; empty ⇒ automatic.
+    OrthoColor orthophotoColor;            ///< `orthophotoColor` adjustments (S).
     /// Canonical paths of the elevation files, in order: filled by the mission loader when
     /// every file was found (not part of the JSON).
     std::vector<std::filesystem::path> resolvedElevationFiles;
+    /// Canonical paths of the orthophotos, in order: filled by the mission loader when every
+    /// one was found; empty otherwise, which disables the imagery (FR-TER-I08). At launch only
+    /// files that pass their sha256 check are kept.
+    std::vector<std::filesystem::path> resolvedOrthophotoFiles;
 };
 
 /// @brief Parses a mission `terrain` object with `"source": "file"`.

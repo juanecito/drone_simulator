@@ -19,6 +19,7 @@
 #include "ds/graphics/shadow_cascades.hpp"
 
 #include "gl_objects.hpp"
+#include "ortho_textures.hpp"
 #include "shader_library.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -448,6 +449,7 @@ struct Renderer::Impl {
 
     std::unordered_map<const terrain::ChunkMesh*, GpuChunk> chunks;
     std::uint64_t frame = 0;
+    detail::OrthoTextures ortho;  // Orthophoto tiles (FR-TER-I06).
 
     // Objects.
     gl::VertexArray objectVao;
@@ -1006,7 +1008,14 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
         glBindVertexArray(r.terrainVao.id());
         glProgramUniform4fv(program, 2, 1, &extentRel[0]);
         glProgramUniform3fv(program, 3, 1, &camF[0]);
+        r.ortho.setBudget(settings_.orthoBudgetBytes);
+        r.ortho.beginFrame(ter.ortho, r.frame);
+        detail::OrthoSlots slots{};
         const double side = static_cast<double>(ter.gridSize - 1);
+        // Visible chunks first, so the orthophoto tiles can be planned for the whole view.
+        std::vector<const terrain::ChunkMesh*> visible;
+        std::vector<terrain::ChunkId> visibleIds;
+        visible.reserve(ter.chunks.size());
         for (const auto& mesh : ter.chunks) {
             if (mesh == nullptr || mesh->vertices.empty()) {
                 continue;
@@ -1028,12 +1037,29 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
                 ++stats_.chunksCulled;
                 continue;
             }
-            const GpuChunk& gpu = r.chunkFor(mesh);
+            r.chunkFor(mesh);  // Uploaded (or kept) while its shared_ptr is at hand.
+            visible.push_back(mesh.get());
+            visibleIds.push_back(mesh->id);
+        }
+        if (ter.ortho != nullptr) {
+            r.ortho.prepare(visibleIds);
+        }
+        for (const terrain::ChunkMesh* mesh : visible) {
+            const double size = mesh->spacingM * side;
+            const GpuChunk& gpu = r.chunks.at(mesh);
             const glm::vec3 origin(static_cast<float>(mesh->originX - cam.x),
                                    static_cast<float>(-cam.y),
                                    static_cast<float>(mesh->originZ - cam.z));
             glProgramUniform3fv(program, 0, 1, &origin[0]);
             glProgramUniform1f(program, 1, static_cast<float>(mesh->spacingM));
+            glProgramUniform1f(program, 4, static_cast<float>(size));
+            // Orthophoto tiles of the chunk (or coarser stand-ins), else the materials.
+            const bool imagery = ter.ortho != nullptr && r.ortho.slotsFor(mesh->id, slots);
+            glProgramUniform1i(program, 5, imagery ? 1 : 0);
+            if (imagery) {
+                glProgramUniform4fv(program, 6, static_cast<GLsizei>(slots.size()), &slots[0][0]);
+                glBindTextureUnit(6, r.ortho.texture());
+            }
             glVertexArrayVertexBuffer(r.terrainVao.id(), 0, gpu.vertices.id(), 0,
                                       sizeof(terrain::TerrainVertex));
             glDrawElements(GL_TRIANGLES, r.chunkIndexCount, GL_UNSIGNED_SHORT, nullptr);
@@ -1194,6 +1220,10 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
         r.evictChunks();
     }
     stats_.gpuChunks = r.chunks.size();
+    const detail::OrthoTextureStats ortho = r.ortho.stats();
+    stats_.orthoTiles = ortho.residentTiles;
+    stats_.orthoBytes = ortho.bytes;
+    stats_.orthoUploads += ortho.uploads;
 }
 
 }  // namespace ds::graphics

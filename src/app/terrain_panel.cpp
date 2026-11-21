@@ -300,6 +300,73 @@ void TerrainPanel::buildUi() {
         connect(services, &DataServices::networkSettingsChanged, this, &TerrainPanel::updateQuota);
     }
 
+    // Orthophotos over file or online elevation (FR-TER-I10).
+    orthoBox_ = new QGroupBox(tr("Orthophotos"));
+    orthoBox_->setObjectName(QStringLiteral("OrthoBox"));
+    auto* iform = new QFormLayout(orthoBox_);
+    orthoFiles_ = new QListWidget;
+    orthoFiles_->setObjectName(QStringLiteral("OrthoList"));
+    orthoFiles_->setMaximumHeight(70);
+    orthoFiles_->setToolTip(
+        tr("Aerial images draped over the terrain: 8-bit RGB or RGBA COG / GeoTIFF, JPEG 2000, "
+           "or PNG / JPEG with a world file, in one CRS. Large files without overviews are "
+           "converted once to a cached COG."));
+    iform->addRow(orthoFiles_);
+    auto* addOrtho = new QPushButton(tr("Add…"));
+    addOrtho->setObjectName(QStringLiteral("AddOrthoButton"));
+    removeOrtho_ = new QPushButton(tr("Remove"));
+    removeOrtho_->setObjectName(QStringLiteral("RemoveOrthoButton"));
+    auto* orthoButtons = new QHBoxLayout;
+    orthoButtons->addWidget(addOrtho);
+    orthoButtons->addWidget(removeOrtho_);
+    orthoButtons->addStretch();
+    iform->addRow(orthoButtons);
+    connect(addOrtho, &QPushButton::clicked, this, &TerrainPanel::addOrthoFiles);
+    connect(removeOrtho_, &QPushButton::clicked, this, [this] {
+        qDeleteAll(orthoFiles_->selectedItems());
+        updateEnabled();
+    });
+    connect(orthoFiles_, &QListWidget::itemSelectionChanged, this, &TerrainPanel::updateEnabled);
+    orthoCrs_ = new QLineEdit;
+    orthoCrs_->setObjectName(QStringLiteral("OrthoCrsEdit"));
+    orthoCrs_->setPlaceholderText(tr("from the files, e.g. EPSG:25830"));
+    iform->addRow(tr("CRS:"), orthoCrs_);
+    orthoBands_ = new QLineEdit;
+    orthoBands_->setObjectName(QStringLiteral("OrthoBandsEdit"));
+    orthoBands_->setPlaceholderText(tr("automatic, or e.g. 1, 2, 3"));
+    orthoBands_->setToolTip(tr("Red, green, blue (and alpha) bands of multi-band images"));
+    iform->addRow(tr("Bands:"), orthoBands_);
+    orthoAttribution_ = new QLineEdit;
+    orthoAttribution_->setObjectName(QStringLiteral("OrthoAttributionEdit"));
+    orthoAttribution_->setPlaceholderText(tr("imagery licence / citation, shown in the view"));
+    iform->addRow(tr("Attribution:"), orthoAttribution_);
+    auto colourSpin = [](const char* name, double lo, double hi, double value) {
+        auto* spin = new QDoubleSpinBox;
+        spin->setObjectName(QString::fromLatin1(name));
+        spin->setRange(lo, hi);
+        spin->setSingleStep(0.05);
+        spin->setDecimals(2);
+        spin->setValue(value);
+        return spin;
+    };
+    orthoBrightness_ = colourSpin("OrthoBrightnessSpin", -1.0, 1.0, 0.0);
+    orthoContrast_ = colourSpin("OrthoContrastSpin", 0.0, 4.0, 1.0);
+    orthoGamma_ = colourSpin("OrthoGammaSpin", 0.1, 10.0, 1.0);
+    orthoBrightness_->setToolTip(tr("Brightness (0 = unchanged)"));
+    orthoContrast_->setToolTip(tr("Contrast (1 = unchanged)"));
+    orthoGamma_->setToolTip(tr("Gamma (1 = unchanged)"));
+    auto* colour = new QHBoxLayout;
+    colour->addWidget(orthoBrightness_);
+    colour->addWidget(orthoContrast_);
+    colour->addWidget(orthoGamma_);
+    iform->addRow(tr("Brightness, contrast, gamma:"), colour);
+    orthoInfo_ = new QLabel;
+    orthoInfo_->setObjectName(QStringLiteral("OrthoInfoLabel"));
+    orthoInfo_->setWordWrap(true);
+    orthoInfo_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    iform->addRow(orthoInfo_);
+    layout->addWidget(orthoBox_);
+
     metadata_ = new QLabel;
     metadata_->setObjectName(QStringLiteral("MetadataLabel"));
     metadata_->setWordWrap(true);
@@ -519,6 +586,21 @@ TerrainConfig TerrainPanel::formConfig() const {
             o.originAltitudeM = altitude_->value();
         }
     }
+    if (c.kind != TerrainKind::Procedural) {
+        OrthoConfig& o = c.ortho;
+        for (int i = 0; i < orthoFiles_->count(); ++i) {
+            o.files.emplace_back(orthoFiles_->item(i)->data(Qt::UserRole).toString().toStdString());
+        }
+        o.crs = orthoCrs_->text().trimmed().toStdString();
+        for (const QString& part : orthoBands_->text().split(
+                 QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts)) {
+            o.bands.push_back(part.toInt());  // Checked when the imagery is opened.
+        }
+        o.attribution = orthoAttribution_->text().trimmed().toStdString();
+        o.color = {.brightness = orthoBrightness_->value(),
+                   .contrast = orthoContrast_->value(),
+                   .gamma = orthoGamma_->value()};
+    }
     return c;
 }
 
@@ -577,6 +659,24 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     }
     lidarInterpolation_->setCurrentIndex(
         std::max(lidarInterpolation_->findData(static_cast<int>(c.file.interpolation)), 0));
+    orthoFiles_->clear();
+    for (const auto& file : c.ortho.files) {
+        const QString path = QString::fromStdString(file.string());
+        auto* item = new QListWidgetItem(QString::fromStdString(file.filename().string()));
+        item->setData(Qt::UserRole, path);
+        item->setToolTip(path);
+        orthoFiles_->addItem(item);
+    }
+    orthoCrs_->setText(QString::fromStdString(c.ortho.crs));
+    QStringList bands;
+    for (const int b : c.ortho.bands) {
+        bands << QString::number(b);
+    }
+    orthoBands_->setText(bands.join(QStringLiteral(", ")));
+    orthoAttribution_->setText(QString::fromStdString(c.ortho.attribution));
+    orthoBrightness_->setValue(c.ortho.color.brightness);
+    orthoContrast_->setValue(c.ortho.color.contrast);
+    orthoGamma_->setValue(c.ortho.color.gamma);
     autoOrigin_->setChecked((c.kind == TerrainKind::File && !c.file.origin) ||
                             (c.kind == TerrainKind::Online && !c.online.originAltitudeM));
     const int index = presets_->findData(QString::fromStdString(c.presetKey));
@@ -602,14 +702,32 @@ bool TerrainPanel::regenerate() {
     if (config.kind == TerrainKind::File && isPointCloud(config.file) && !ensureLidarDem(config)) {
         return false;
     }
+    // Large orthophotos without overviews: a cached COG first (FR-TER-I06). A problem only
+    // disables the imagery (FR-TER-I08).
+    QString orthoProblem;
+    if (config.kind != TerrainKind::Procedural && !config.ortho.files.empty()) {
+        if (DataServices* services = scene_->dataServices()) {
+            auto cached = ensureOrthoCache(this, *services, config.ortho.files);
+            if (!cached) {
+                orthoProblem = QString::fromStdString(cached.error().message);
+            } else if (!*cached) {
+                showStatus(tr("Cancelled."), true);
+                return false;
+            }
+        }
+    }
     if (auto applied = scene_->setTerrain(config); !applied) {
         showStatus(QString::fromStdString(applied.error().message), true);
         return false;
     }
-    showStatus(config.kind == TerrainKind::File     ? tr("Elevation files loaded.")
-               : config.kind == TerrainKind::Online ? tr("Online elevation loaded.")
-                                                    : tr("Terrain generated."),
-               false);
+    if (orthoProblem.isEmpty()) {
+        orthoProblem = QString::fromStdString(scene_->orthoWarning());
+    }
+    const QString loaded = config.kind == TerrainKind::File     ? tr("Elevation files loaded.")
+                           : config.kind == TerrainKind::Online ? tr("Online elevation loaded.")
+                                                                : tr("Terrain generated.");
+    showStatus(orthoProblem.isEmpty() ? loaded : tr("%1 Orthophotos: %2").arg(loaded, orthoProblem),
+               !orthoProblem.isEmpty());
     if (config.kind != TerrainKind::Procedural) {
         // The origin found in the data.
         const geo::Geodetic& o = scene_->terrain().origin;
@@ -776,7 +894,59 @@ void TerrainPanel::addFiles() {
     updateEnabled();
 }
 
+void TerrainPanel::addOrthoFiles() {
+    const QStringList chosen = QFileDialog::getOpenFileNames(
+        this, tr("Add Orthophotos"), QString(),
+        tr("Orthophotos (*.tif *.tiff *.jp2 *.png *.jpg *.jpeg);;All files (*)"));
+    for (const QString& path : chosen) {
+        const std::filesystem::path file(path.toStdString());
+        if (!terrain::isOrthophotoFile(file)) {
+            showStatus(tr("“%1” is not a supported orthophoto (COG / GeoTIFF, JPEG 2000, PNG or "
+                          "JPEG).")
+                           .arg(QString::fromStdString(file.filename().string())),
+                       true);
+            continue;
+        }
+        auto* item = new QListWidgetItem(QString::fromStdString(file.filename().string()));
+        item->setData(Qt::UserRole, path);
+        item->setToolTip(path);
+        orthoFiles_->addItem(item);
+    }
+    updateEnabled();
+}
+
+void TerrainPanel::updateOrthoInfo() {
+    // FR-TER-I10: coverage and resolution of the imagery in use.
+    QStringList lines;
+    if (const auto& ortho = scene_->orthophotos()) {
+        const terrain::OrthoMetadata& m = ortho->metadata();
+        lines << tr("%1, %2 file(s), %3 × %4 px, %5 m/px, %6, %7")
+                     .arg(QString::fromStdString(m.format))
+                     .arg(m.fileCount)
+                     .arg(m.widthPx)
+                     .arg(m.heightPx)
+                     .arg(m.resolutionM, 0, 'g', 3)
+                     .arg(QString::fromStdString(m.bands))
+                     .arg(QString::fromStdString(m.crsCode.empty() ? m.crs : m.crsCode));
+        lines << tr("Covers %1 × %2 km (x %3 … %4 km, z %5 … %6 km from the origin)")
+                     .arg((m.maxX - m.minX) / 1000.0, 0, 'f', 2)
+                     .arg((m.maxZ - m.minZ) / 1000.0, 0, 'f', 2)
+                     .arg(m.minX / 1000.0, 0, 'f', 2)
+                     .arg(m.maxX / 1000.0, 0, 'f', 2)
+                     .arg(m.minZ / 1000.0, 0, 'f', 2)
+                     .arg(m.maxZ / 1000.0, 0, 'f', 2);
+        for (const std::string& note : m.notes) {
+            lines << QString::fromStdString(note);
+        }
+    }
+    if (!scene_->orthoWarning().empty()) {
+        lines << QString::fromStdString(scene_->orthoWarning());
+    }
+    orthoInfo_->setText(lines.join(QLatin1Char('\n')));
+}
+
 void TerrainPanel::updateMetadata() {
+    updateOrthoInfo();
     const auto& meta = scene_->terrainMetadata();
     if (!meta) {
         metadata_->clear();
@@ -867,6 +1037,8 @@ void TerrainPanel::updateEnabled() {
     procedural_->setVisible(!file && !online);
     fileBox_->setVisible(file);
     onlineBox_->setVisible(online);
+    orthoBox_->setVisible(file || online);
+    removeOrtho_->setEnabled(!orthoFiles_->selectedItems().isEmpty());
     autoOrigin_->setVisible(file || online);
     autoOrigin_->setText(online ? tr("At ground level")
                                 : tr("Centre of the data, at ground level"));

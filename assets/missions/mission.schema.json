@@ -635,7 +635,33 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 1000
-          }
+          },
+          "description": "Red, green, blue (and alpha) bands of multi-band images, e.g. [1, 2, 3]."
+        },
+        "orthophotoColor": {
+          "type": "object",
+          "description": "Colour adjustments of the orthophotos.",
+          "properties": {
+            "brightness": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Added to every channel (0 = unchanged)."
+            },
+            "contrast": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 4,
+              "description": "Scale around mid-grey (1 = unchanged)."
+            },
+            "gamma": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 10,
+              "description": "Output = input^(1/gamma) (1 = unchanged)."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "patternProperties": {

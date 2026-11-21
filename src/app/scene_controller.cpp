@@ -116,10 +116,19 @@ common::Result<void> SceneController::applyTerrain(const TerrainConfig& config) 
     stream_ = std::move(built->stream);
     dataHash_ = std::move(built->dataHash);
     attribution_ = std::move(built->attribution);
+    if (!built->orthoAttribution.empty() && built->orthoAttribution != attribution_) {
+        attribution_ += (attribution_.empty() ? "" : " · ") + built->orthoAttribution;
+    }
+    orthoStreamer_.reset();
     streamer_.reset();
     terrain::StreamerSettings settings;
     settings.selection.viewRadiusM = kViewRadiusM;
     streamer_ = std::make_unique<terrain::TerrainStreamer>(source_, layout_, pool_, settings);
+    ortho_ = std::move(built->ortho);
+    orthoWarning_ = std::move(built->orthoWarning);
+    if (ortho_) {
+        orthoStreamer_ = std::make_unique<terrain::OrthoStreamer>(ortho_, layout_, pool_);
+    }
     query_ = std::make_unique<terrain::TerrainQuery>(source_, layout_, terrain_.origin.heightM);
     frame_ = geo::LocalFrame(terrain_.origin);
     freeFly_.setGround([query = query_.get()](double x, double z) -> std::optional<double> {

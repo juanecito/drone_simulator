@@ -224,6 +224,10 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
     frame.terrain.waterLevelM = scene_->source()->waterLevel();
     frame.terrain.waterBeyondExtent = terrainConfig.kind == TerrainKind::Procedural &&
                                       terrainConfig.params.edge == terrain::EdgeMode::Water;
+    if (terrain::OrthoStreamer* ortho = scene_->orthoStreamer()) {
+        ortho->update(chunks, camera.position.x, camera.position.z);  // Imagery (FR-TER-I06).
+        frame.terrain.ortho = ortho;
+    }
     frame.exposure = env.exposure;
     if (sim != nullptr) {
         frame.weather = sim->weatherView();

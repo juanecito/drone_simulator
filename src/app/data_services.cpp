@@ -24,6 +24,7 @@
 #include "ds/storage/provider_store.hpp"
 #include "ds/storage/settings_store.hpp"
 #include "ds/storage/storage_service.hpp"
+#include "ds/terrain/orthophoto.hpp"
 #include "ds/terrain/raster_source.hpp"
 
 namespace ds::app {
@@ -154,6 +155,7 @@ common::Result<std::unique_ptr<DataServices>> DataServices::create(
     d->cache_ =
         std::make_unique<net::DiskCache>(options.dataDirectory / "cache", *d->cacheIndex_, limit);
     d->demDir_ = d->cache_->root() / "dem";  // FR-TER-L05; DiskCache only touches its index.
+    d->orthoDir_ = d->cache_->root() / "ortho";  // FR-TER-I06.
     net::HttpClientOptions http = options.http;
     d->proxy_ = saved.proxy;
     if (http.proxy.empty()) {
@@ -542,28 +544,33 @@ std::vector<net::CacheUsage> DataServices::cacheUsage() {
         log::warn("Cache: {}", u.error().message);
         return {};
     }
-    net::CacheUsage dem{.provider = std::string(kLidarDemCache)};
-    std::error_code ec;
-    for (std::filesystem::directory_iterator it(demDir_, ec), end; !ec && it != end;
-         it.increment(ec)) {
-        if (it->path().extension() == ".tif" && it->is_regular_file(ec)) {
-            ++dem.entries;
-            dem.bytes += it->file_size(ec);
+    for (const auto& [dir, name] :
+         {std::pair{&demDir_, kLidarDemCache}, std::pair{&orthoDir_, kOrthoCache}}) {
+        net::CacheUsage files{.provider = std::string(name)};
+        std::error_code ec;
+        for (std::filesystem::directory_iterator it(*dir, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            if (it->path().extension() == ".tif" && it->is_regular_file(ec)) {
+                ++files.entries;
+                files.bytes += it->file_size(ec);
+            }
         }
-    }
-    if (dem.entries > 0) {
-        u->push_back(std::move(dem));
+        if (files.entries > 0) {
+            u->push_back(std::move(files));
+        }
     }
     return std::move(*u);
 }
 
 common::Result<void> DataServices::clearCache(bool includePinned) {
-    std::error_code ec;
-    for (std::filesystem::directory_iterator it(demDir_, ec), end; !ec && it != end;
-         it.increment(ec)) {
-        if (it->path().extension() == ".tif") {
-            std::error_code removed;
-            std::filesystem::remove(it->path(), removed);
+    for (const auto* dir : {&demDir_, &orthoDir_}) {
+        std::error_code ec;
+        for (std::filesystem::directory_iterator it(*dir, ec), end; !ec && it != end;
+             it.increment(ec)) {
+            if (it->path().extension() == ".tif") {
+                std::error_code removed;
+                std::filesystem::remove(it->path(), removed);
+            }
         }
     }
     auto ok = cache_->clear({}, includePinned);
@@ -608,6 +615,26 @@ common::Result<std::filesystem::path> DataServices::lidarDem(
         return common::makeError("the elevation model of the point cloud is not made yet");
     }
     return path;
+}
+
+common::Result<std::filesystem::path> DataServices::orthoCogPath(
+    const std::filesystem::path& file) const {
+    auto key = terrain::orthoCacheKey(file);
+    if (!key) {
+        return common::makeError(key.error().message);
+    }
+    return orthoDir_ / (*key + ".tif");
+}
+
+std::vector<std::filesystem::path> DataServices::orthoFiles(
+    std::span<const std::filesystem::path> files) const {
+    std::vector<std::filesystem::path> out;
+    for (const std::filesystem::path& file : files) {
+        auto cog = orthoCogPath(file);
+        std::error_code ec;
+        out.push_back(cog && std::filesystem::is_regular_file(*cog, ec) ? *cog : file);
+    }
+    return out;
 }
 
 void DataServices::setProxy(const std::string& proxy) {
@@ -737,6 +764,48 @@ common::Result<bool> ensureLidarDem(QWidget* parent, DataServices& data,
         QCoreApplication::translate("ds::app", "Making the elevation model of the point cloud…"),
         [&](std::stop_token stop, const ProgressReport& report) {
             return terrain::rasterizeLidar(files, options, *path, stop, report);
+        });
+    if (!outcome) {
+        return false;  // Cancelled.
+    }
+    if (!*outcome) {
+        if (outcome->error().code == terrain::TerrainErrorCode::Cancelled) {
+            return false;
+        }
+        return common::makeError(outcome->error().message);
+    }
+    emit data.networkSettingsChanged();  // Cache usage changed.
+    return true;
+}
+
+common::Result<bool> ensureOrthoCache(QWidget* parent, DataServices& data,
+                                      std::span<const std::filesystem::path> files) {
+    // Large files without overviews, not converted yet (FR-TER-I06).
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> todo;
+    for (const std::filesystem::path& file : files) {
+        auto cog = data.orthoCogPath(file);
+        std::error_code ec;
+        if (cog && !std::filesystem::is_regular_file(*cog, ec) && terrain::orthoNeedsCache(file)) {
+            todo.emplace_back(file, *cog);
+        }
+    }
+    if (todo.empty()) {
+        return true;
+    }
+    using Outcome = terrain::TerrainResult<void>;
+    auto outcome = runWithProgress<Outcome>(
+        parent, QCoreApplication::translate("ds::app", "Preparing the orthophotos for streaming…"),
+        [&](std::stop_token stop, const ProgressReport& report) -> Outcome {
+            for (std::size_t i = 0; i < todo.size(); ++i) {
+                const double n = static_cast<double>(todo.size());
+                auto made = terrain::buildOrthoCog(
+                    todo[i].first, todo[i].second, stop,
+                    [&](double done) { report((static_cast<double>(i) + done) / n); });
+                if (!made) {
+                    return made;
+                }
+            }
+            return {};
         });
     if (!outcome) {
         return false;  // Cancelled.

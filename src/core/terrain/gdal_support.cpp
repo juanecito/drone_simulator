@@ -8,6 +8,7 @@
 #include <format>
 #include <mutex>
 #include <string_view>
+#include <vector>
 
 #include "ds/common/log.hpp"
 
@@ -71,6 +72,11 @@ void DatasetCloser::operator()(void* dataset) const noexcept {
 }
 
 DatasetPtr openRaster(const std::string& path, std::span<const char* const> drivers) {
+    return openRaster(path, drivers, {});
+}
+
+DatasetPtr openRaster(const std::string& path, std::span<const char* const> drivers,
+                      std::span<const std::string> siblings) {
     ensureInitialised();
     if (path.starts_with("/vsicurl") || path.starts_with("/vsis3") || path.starts_with("/vsigs") ||
         path.starts_with("/vsiaz") || path.starts_with("/vsihttp")) {
@@ -78,8 +84,13 @@ DatasetPtr openRaster(const std::string& path, std::span<const char* const> driv
         return DatasetPtr{};
     }
     clearError();
+    std::vector<const char*> names;
+    for (const std::string& s : siblings) {
+        names.push_back(s.c_str());
+    }
+    names.push_back(nullptr);
     return DatasetPtr{GDALOpenEx(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, drivers.data(),
-                                 nullptr, nullptr)};
+                                 nullptr, siblings.empty() ? nullptr : names.data())};
 }
 
 std::string lastError() {

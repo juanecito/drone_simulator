@@ -128,6 +128,13 @@ common::Result<TerrainConfig> fileMissionTerrain(const missions::MissionDefiniti
         f.originAltitudeM = t.originAltitudeM;
     }
     config.extent = t.extent ? t.extent : spec.extent;
+    // Orthophotos (FR-TER-I02): only when every file was found; at launch, only the files
+    // that pass their sha256 check.
+    config.ortho.files = spec.resolvedOrthophotoFiles;
+    config.ortho.crs = spec.orthophotoCrs;
+    config.ortho.bands = spec.orthophotoBands;
+    config.ortho.attribution = spec.orthophotoAttribution;
+    config.ortho.color = spec.orthophotoColor;
     return config;
 }
 

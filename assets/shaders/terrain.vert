@@ -15,10 +15,12 @@ layout(location = 3) in vec4 a_material;  // Grass, rock, sand, snow.
 layout(location = 0) uniform vec3 u_chunkOrigin;  // Grid vertex (0, 0) minus camera; y = −camera y.
 layout(location = 1) uniform float u_spacing;
 layout(location = 2) uniform vec4 u_extentRel;     // minX, minZ, maxX, maxZ minus camera.
+layout(location = 4) uniform float u_chunkSize;    // Side of the chunk, metres.
 
 layout(location = 0) out vec3 v_rel;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec4 v_material;
+layout(location = 3) out vec2 v_chunkUv;  // Position in the chunk, 0 … 1 (orthophoto lookup).
 
 vec3 decodeNormal(vec2 e) {
     vec3 n = vec3(e.x, 1.0 - abs(e.x) - abs(e.y), e.y);
@@ -34,5 +36,6 @@ void main() {
     v_rel = vec3(xz.x, a_height + u_chunkOrigin.y, xz.y);
     v_normal = decodeNormal(a_normal);
     v_material = a_material;
+    v_chunkUv = (xz - u_chunkOrigin.xz) / u_chunkSize;
     gl_Position = u_viewProj * vec4(v_rel, 1.0);
 }

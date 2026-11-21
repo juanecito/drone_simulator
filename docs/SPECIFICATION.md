@@ -1647,7 +1647,7 @@ so Markdown pages appear in the generated site.
   4. online DEM source (OpenTopography) with block streaming and area download;
   5. Settings → Data providers with the OS keyring;
   6. LAS/LAZ → DTM with LASzip and the COG cache;
-  7. orthophoto files with GPU streaming;
+  7. orthophoto files with GPU streaming (done);
   8. the online orthophoto provider (moved here from M7 step 9: WMTS and XYZ/TMS (S), WMS
      GetMap (C), using the Web-Mercator tile math of FR-GEO-02b);
   9. built-in file-terrain missions, integration tests and `docs/TERRAIN.md`.
@@ -1855,6 +1855,81 @@ so Markdown pages appear in the generated site.
       metadata, cache usage and clearing) and a LAZ mission flown and recorded with its hash.
       They also cover an unclassified mission refused with its message, and unavailability
       without the data cache.
+- **Step 7 — Orthophoto files with GPU streaming (done, FR-TER-I01 … I10, FR-GFX-07):**
+  - *Reading (FR-TER-I01, I04):* `ds/terrain/orthophoto.hpp` opens COG / GeoTIFF, JPEG 2000,
+    and PNG / JPEG / WEBP with a world file, 8-bit only.
+    - Bands: gray, gray + alpha, RGB or RGBA, or `orthophotoBands` (3 or 4 band numbers).
+      A NoData value makes pixels with that value in every band transparent.
+    - Several files become one in-memory VRT mosaic (`GDALBuildVRT`, `-addalpha`), so
+      seams are continuous and gaps are transparent.
+    - `orthophotoCrs` overrides the CRS of the files (`-a_srs`).
+  - *Tiles and reprojection (FR-TER-I05):* the imagery is cut into tiles on the chunk
+    lattice: 256 px for 64 m at level 0 (0.25 m texels), doubling per level, 4 × 4 tiles per
+    chunk.
+    - Each tile is reprojected on the fly: world → geodetic (the terrain's local frame) → the
+      file's CRS, exact on a 17 × 17 lattice and bilinear between. The read uses the
+      overview that matches the tile (`GRIORA_Average`).
+    - Tests place pixels within 1 px of their world positions.
+    - Alpha is feathered 2 texels inward, so the edge blends softly into the materials.
+    - The tile is sRGB with premultiplied alpha and a CPU-built mip chain. A tile without
+      imagery is not stored.
+  - *Streaming (FR-TER-I06, NFR-PERF-04a):* `OrthoStreamer` builds the tiles of the drawn
+    chunks on the shared worker pool.
+    - It also requests their ancestors up to 3 levels, so coarser imagery stands in at once.
+    - Nearer tiles (relative to their size) and coarser tiles are built first.
+    - An LRU CPU cache of 384 MB keeps the built tiles.
+    - On the GPU, `OrthoTextures` keeps tiles in one `GL_SRGB8_ALPHA8` texture array. The
+      array grows by doubling up to the budget (`RenderSettings::orthoBudgetBytes`, 1 GB)
+      and the driver's layer limit.
+    - At most 16 tiles are uploaded per frame. Least recently used layers not needed this
+      frame are reused.
+    - When the visible tiles do not fit in ¾ of the layers, every chunk uses coarser tiles
+      (a level bias), so the imagery stays complete.
+    - The shader reads the tile with continuous gradients (`textureGrad`), so there are no
+      seams between tiles, and with 8× anisotropy when available.
+    - Release build, 0.25 m JPEG COG: about 4 ms per tile.
+  - *Cache (FR-TER-I06):* files over 4096 px without overviews (and PNG / JPEG / WEBP over
+    that size) are converted once to a COG with overviews (DEFLATE). The COG is written to
+    `cache/ortho/<sha256 of path, size, mtime>.tif`, through a partial file and a rename.
+    - `ensureOrthoCache()` shows progress with cancel, at mission launch and when the
+      Terrain tab applies imagery.
+    - The COGs are listed in the cache usage as `ortho-cog` and removed by *Clear Cache*.
+  - *Lighting (FR-TER-I07):* the image replaces the material albedo
+    (`albedo · (1 − a) + rgb`) and is lit like the rest of the terrain.
+  - *Missions (FR-TER-I02, I08, I09):*
+    - The loader resolves `orthophotoFiles` with the elevation path rules. A missing image
+      does not make the mission unavailable.
+    - `orthophotoColor` (`brightness`, `contrast`, `gamma`) is new in the schema.
+    - At launch the images are hashed. An image whose `sha256` differs, or that cannot be
+      opened, only disables the imagery, and the status bar says why.
+    - The attribution is shown as "elevation · imagery". Orthophotos are not part of
+      `terrain_data_hash`.
+  - *Terrain tab (FR-TER-I10):* an *Orthophotos* group for file and online elevation:
+    - a file list with *Add…* and *Remove*;
+    - CRS, bands, attribution, and brightness / contrast / gamma;
+    - a summary of format, size, resolution, bands, CRS and coverage in kilometres from the
+      origin.
+    - The imagery is saved with the scene and presets (key `ortho`), and ignored for
+      procedural terrain.
+    - Imagery that does not reach the terrain is kept, with the caution "the orthophotos do
+      not cover the terrain".
+  - *Deviations:*
+    - Reprojection is done per tile at run time. A different CRS therefore never needs a
+      converted copy; only size without overviews does.
+    - 16-bit imagery (S) is refused as UnsupportedFormat. The scaling min / max is not
+      implemented.
+    - The per-mission 50 GB limit is not checked; the 200 000 px limit per side is.
+    - Online-elevation *missions* cannot declare orthophotos yet. The schema has them only in
+      `terrainFile`. The Terrain tab can drape files over online elevation.
+  - *Tests:*
+    - Unit: pixel placement, coverage and NoData fallback, seamless mosaics, band layouts,
+      clear errors, PNG + world file, JP2, colour adjustments, the cached COG, and streamer
+      priorities and eviction.
+    - Configuration: JSON / preset round trip, a broken image disabling only the imagery,
+      and `orthophotoColor` parsing.
+    - GL: imagery draped within a GPU budget of 6 tiles.
+    - Application: a mission with imagery and a mission with a damaged image, and the
+      Terrain tab.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

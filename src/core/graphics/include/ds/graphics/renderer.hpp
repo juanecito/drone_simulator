@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "ds/graphics/weather_view.hpp"
 #include "ds/terrain/chunk.hpp"
 #include "ds/terrain/height_source.hpp"
+#include "ds/terrain/ortho_streamer.hpp"
 
 /// @file
 /// @brief OpenGL 4.5 core renderer (SPECIFICATION §4.4): terrain, water, atmosphere, sun, moon,
@@ -86,6 +88,9 @@ struct RenderSettings {
     double waterRadiusM = 40'000.0;
     bool shadows = true;       ///< Cascaded shadow maps (FR-GFX-10).
     int shadowMapSize = 2048;  ///< Texels per cascade side (512–4096).
+    /// GPU memory for orthophoto tiles (FR-TER-I06, default 1 GB); the driver's texture-array
+    /// layer limit may lower it.
+    std::size_t orthoBudgetBytes = std::size_t{1} << 30U;
     /// @brief Equality.
     bool operator==(const RenderSettings&) const = default;
 };
@@ -98,6 +103,9 @@ struct TerrainView {
     std::optional<terrain::Extent> extent;  ///< Bounded terrain, or unbounded.
     std::optional<double> waterLevelM;      ///< World height of the water surface, if any.
     bool waterBeyondExtent = false;         ///< Water continues outside a bounded extent.
+    /// Orthophoto tiles of the chunks (FR-TER-I06); null ⇒ the materials only. Call its
+    /// update() with the same chunks first.
+    const terrain::OrthoStreamer* ortho = nullptr;
 };
 
 /// @brief Everything needed to draw one frame.
@@ -141,6 +149,9 @@ struct FrameStats {
     int precipitation = 0;        ///< Rain drops or snowflakes drawn in the main view.
     std::uint64_t triangles = 0;  ///< Triangles submitted.
     std::size_t gpuChunks = 0;    ///< Chunk meshes resident on the GPU.
+    std::size_t orthoTiles = 0;   ///< Orthophoto tiles resident on the GPU.
+    std::size_t orthoBytes = 0;   ///< GPU memory of the orthophoto texture array.
+    std::size_t orthoUploads = 0;  ///< Orthophoto tiles uploaded this frame.
 };
 
 /// @brief State of the automatic exposure (read back from the GPU).

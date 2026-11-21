@@ -301,6 +301,23 @@ private:
         if (found.size() == spec.elevationFiles.size()) {
             spec.resolvedElevationFiles = std::move(found);
         }
+        // Orthophotos: a missing one only disables the imagery (FR-TER-I08); a path that
+        // breaks the folder rules is an error like any other.
+        std::vector<std::filesystem::path> images;
+        for (const terrain::FileRef& f : spec.orthophotoFiles) {
+            if (f.path.starts_with("library:") && ctx_.libraryDir.empty()) {
+                continue;
+            }
+            const auto resolved = terrain::resolveTerrainPath(f.path, roots);
+            if (resolved) {
+                images.push_back(*resolved);
+            } else if (resolved.error().code != terrain::TerrainErrorCode::FileNotFound) {
+                error(common::pointerToDotted(f.jsonPath), resolved.error().message);
+            }
+        }
+        if (images.size() == spec.orthophotoFiles.size()) {
+            spec.resolvedOrthophotoFiles = std::move(images);
+        }
     }
 
     void parseEnvironment(const Json& j, MissionDefinition& m) {

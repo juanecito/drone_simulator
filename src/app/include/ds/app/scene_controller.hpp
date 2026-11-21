@@ -20,6 +20,7 @@
 #include "ds/graphics/camera.hpp"
 #include "ds/graphics/sky_model.hpp"
 #include "ds/terrain/chunk.hpp"
+#include "ds/terrain/ortho_streamer.hpp"
 #include "ds/terrain/query.hpp"
 #include "ds/terrain/streamer.hpp"
 
@@ -118,8 +119,18 @@ public:
     [[nodiscard]] const std::optional<terrain::SourceMetadata>& terrainMetadata() const noexcept {
         return metadata_;
     }
-    /// @brief Attribution of the terrain data, shown in the viewport (FR-TER-O13, F10).
+    /// @brief Attribution of the terrain data and imagery, shown in the viewport (FR-TER-O13,
+    /// F10, I09).
     [[nodiscard]] const std::string& attribution() const noexcept { return attribution_; }
+    /// @brief Orthophotos over the terrain (FR-TER-I01), null if none.
+    [[nodiscard]] const std::shared_ptr<const terrain::OrthophotoSource>& orthophotos()
+        const noexcept {
+        return ortho_;
+    }
+    /// @brief Streamer of the orthophoto tiles, null without imagery.
+    [[nodiscard]] terrain::OrthoStreamer* orthoStreamer() noexcept { return orthoStreamer_.get(); }
+    /// @brief Why the imagery is disabled or a caution about it (FR-TER-I08), "" if none.
+    [[nodiscard]] const std::string& orthoWarning() const noexcept { return orthoWarning_; }
     /// @brief Height source of the current terrain.
     [[nodiscard]] const std::shared_ptr<const terrain::HeightSource>& source() const noexcept {
         return source_;
@@ -178,6 +189,9 @@ private:
     std::string dataHash_;
     std::string attribution_;
     std::unique_ptr<terrain::TerrainStreamer> streamer_;
+    std::shared_ptr<const terrain::OrthophotoSource> ortho_;
+    std::unique_ptr<terrain::OrthoStreamer> orthoStreamer_;
+    std::string orthoWarning_;
     std::unique_ptr<terrain::TerrainQuery> query_;
     geo::LocalFrame frame_{geo::Geodetic{}};
     graphics::SkyModel sky_;

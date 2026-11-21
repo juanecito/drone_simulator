@@ -24,6 +24,9 @@ namespace ds::terrain::gdal {
 /// @brief Drivers allowed for elevation rasters (FR-TER-F01).
 inline constexpr std::array<const char*, 5> kElevationDrivers{"GTiff", "SRTMHGT", "AAIGrid", "HFA",
                                                               nullptr};
+/// @brief Drivers allowed for orthophotos (FR-TER-I01).
+inline constexpr std::array<const char*, 6> kOrthoDrivers{"GTiff", "JP2OpenJPEG", "PNG",
+                                                          "JPEG",  "WEBP",        nullptr};
 
 /// @brief Registers the allowed GDAL drivers once and configures GDAL (thread-safe).
 /// @details Every other driver is deregistered, so GDAL's network drivers (WMS, HTTP…) are
@@ -42,6 +45,12 @@ using DatasetPtr = std::unique_ptr<void, DatasetCloser>;
 /// @brief Opens @p path read-only as a raster with one of @p drivers (null-terminated list).
 /// @return The dataset, or nullptr (lastError() says why).
 [[nodiscard]] DatasetPtr openRaster(const std::string& path, std::span<const char* const> drivers);
+
+/// @brief Like openRaster(), with the side-car files GDAL may read next to @p path (names
+/// only, e.g. a world file `.pgw`): directories are never listed (GDAL_DISABLE_READDIR_ON_OPEN),
+/// so GDAL only sees the side-cars named here.
+[[nodiscard]] DatasetPtr openRaster(const std::string& path, std::span<const char* const> drivers,
+                                    std::span<const std::string> siblings);
 
 /// @brief The calling thread's last GDAL error message ("" if none).
 [[nodiscard]] std::string lastError();

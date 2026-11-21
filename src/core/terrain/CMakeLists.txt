@@ -11,6 +11,8 @@ ds_add_core_module(terrain
         module.cpp
         noise.cpp
         online_terrain.cpp
+        ortho_streamer.cpp
+        orthophoto.cpp
         procedural_source.cpp
         query.cpp
         raster_source.cpp

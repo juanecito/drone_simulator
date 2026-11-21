@@ -565,6 +565,10 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
     // Elevation files: check their sha256 and compute the terrain data hash recorded with the
     // attempt (FR-TER-F09), on a worker thread with progress (large files take a while).
     std::string terrainHash;
+    // Orthophotos only disable the imagery when something is wrong with them (FR-TER-I08):
+    // the mission flown uses the verified files, and the pilot is told.
+    missions::MissionDefinition flown = mission;
+    QStringList orthoWarnings;
     if (mission.terrain.source == missions::TerrainSource::File && mission.terrain.file) {
         const terrain::TerrainFileRoots roots{missionDir, missions_->folders().libraryDir};
         const terrain::FileTerrainSpec& spec = *mission.terrain.file;
@@ -587,8 +591,29 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
         }
         for (const std::string& warning : (*prepared)->warnings) {
             log::warn("Mission {}: {}", key, warning);
+            orthoWarnings << QString::fromStdString(warning);
         }
         terrainHash = (*prepared)->terrainDataHash;
+        terrain::FileTerrainSpec& flownSpec = *flown.terrain.file;
+        if (spec.orthophotoFiles.empty()) {
+            flownSpec.resolvedOrthophotoFiles.clear();
+        } else if (flownSpec.resolvedOrthophotoFiles.empty()) {
+            orthoWarnings << tr("orthophotos not found; imagery disabled");
+        } else {
+            flownSpec.resolvedOrthophotoFiles.clear();
+            for (const terrain::ResolvedFile& f : (*prepared)->orthophotos) {
+                flownSpec.resolvedOrthophotoFiles.push_back(f.path);
+            }
+        }
+        // Large orthophotos without overviews are streamed from a cached COG (FR-TER-I06).
+        if (!flownSpec.resolvedOrthophotoFiles.empty() && data_ != nullptr) {
+            auto cached = ensureOrthoCache(this, *data_, flownSpec.resolvedOrthophotoFiles);
+            if (!cached) {
+                orthoWarnings << QString::fromStdString(cached.error().message);
+            } else if (!*cached) {
+                return common::makeError("cancelled");
+            }
+        }
         // LAS / LAZ: the DTM is made once and cached (FR-TER-L05).
         if (spec.format == terrain::ElevationFormat::PointCloud) {
             if (data_ == nullptr) {
@@ -630,8 +655,11 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
             return common::makeError("cancelled");
         }
     }
-    if (auto started = simulation_->startMission(mission, *profile, missionDir); !started) {
+    if (auto started = simulation_->startMission(flown, *profile, missionDir); !started) {
         return started;
+    }
+    if (!scene_->orthoWarning().empty()) {
+        orthoWarnings << QString::fromStdString(scene_->orthoWarning());
     }
     // FR-TER-O14: online terrain records the hash of the downloaded data it was flown on.
     missionTerrainHash_ = terrainHash.empty() ? scene_->terrainDataHash() : terrainHash;
@@ -641,10 +669,15 @@ common::Result<void> MainWindow::launchMission(const std::string& key, const QSt
     panelWasVisible_ = panelDock_->isVisible();
     panelDock_->hide();
     viewport_->setFocus();
-    statusBar()->showMessage(mission.vehicle.type == physics::VehicleType::Ground
-                                 ? tr("Arm the rover (Enter) to start the mission")
-                                 : tr("Arm the drone to start the mission"),
-                             8000);
+    if (!orthoWarnings.isEmpty()) {
+        statusBar()->showMessage(
+            tr("Orthophotos: %1").arg(orthoWarnings.join(QStringLiteral("; "))), 15000);
+    } else {
+        statusBar()->showMessage(mission.vehicle.type == physics::VehicleType::Ground
+                                     ? tr("Arm the rover (Enter) to start the mission")
+                                     : tr("Arm the drone to start the mission"),
+                                 8000);
+    }
     return {};
 }
 

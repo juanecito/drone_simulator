@@ -18,6 +18,7 @@
 #include "ds/storage/terrain_preset_store.hpp"
 #include "ds/terrain/lidar.hpp"
 #include "ds/terrain/online_terrain.hpp"
+#include "ds/terrain/orthophoto.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/raster_source.hpp"
 #include "ds/weather/weather.hpp"
@@ -77,6 +78,20 @@ struct FileTerrainConfig {
 /// @brief The rasterization options of the point cloud @p f.
 [[nodiscard]] terrain::LidarOptions lidarOptions(const FileTerrainConfig& f);
 
+/// @brief Orthophotos draped over file or online elevation (FR-TER-I02, I10).
+struct OrthoConfig {
+    std::vector<std::filesystem::path> files;  ///< Absolute paths of the images; empty ⇒ none.
+    std::string crs;                           ///< CRS for images without one.
+    std::vector<int> bands;                    ///< 3 or 4 bands; empty ⇒ automatic.
+    std::string attribution;                   ///< Shown in the viewport (FR-TER-I09).
+    terrain::OrthoColor color;                 ///< Colour adjustments.
+    /// @brief Equality.
+    bool operator==(const OrthoConfig&) const = default;
+};
+
+/// @brief The OrthophotoSource options of @p o.
+[[nodiscard]] terrain::OrthoOptions orthoOptions(const OrthoConfig& o);
+
 /// @brief Terrain of the scene: its source and placement.
 struct TerrainConfig {
     TerrainKind kind = TerrainKind::Procedural;  ///< Source type.
@@ -84,6 +99,7 @@ struct TerrainConfig {
     terrain::ProceduralParams params;       ///< Procedural source parameters.
     FileTerrainConfig file;                 ///< Elevation files (kind File).
     OnlineTerrainConfig online;             ///< Online provider (kind Online).
+    OrthoConfig ortho;                      ///< Imagery (kinds File and Online).
     std::optional<terrain::Extent> extent;  ///< Dimensions; empty = unlimited (FR-TER-04a).
     /// Geographic origin; heightM is AMSL (FR-TER-09). For file and online terrain heightM
     /// (and for file terrain the position) is the origin in use, filled in when the terrain
@@ -175,6 +191,12 @@ struct BuiltTerrain {
     std::shared_ptr<terrain::OnlineStreamSource> stream;  ///< Online without extent: streaming.
     std::string attribution;                              ///< Data attribution ("" if none).
     std::string dataHash;  ///< Online terrain with extent: hash of the data (FR-TER-O14).
+    /// Orthophotos (FR-TER-I01 … I09); null without imagery or when it could not be opened.
+    std::shared_ptr<const terrain::OrthophotoSource> ortho;
+    std::string orthoAttribution;  ///< Imagery attribution ("" if none).
+    /// Why the imagery is disabled (FR-TER-I08: a broken orthophoto only disables it), or a
+    /// caution such as "the orthophotos do not cover the terrain"; "" if none.
+    std::string orthoWarning;
 };
 
 class DataServices;
@@ -186,7 +208,9 @@ class DataServices;
 /// @brief Builds the height source of @p config: procedural, the elevation files, or online
 /// data from the cache of @p data (never from the network: download it first,
 /// ensureOnlineData()). Online terrain and point clouds need @p data; a point cloud is read
-/// from its cached DTM (made first with ensureLidarDem()).
+/// from its cached DTM (made first with ensureLidarDem()). Orthophotos are opened in the
+/// terrain's frame, from their cached COGs where made (ensureOrthoCache()); if they cannot be
+/// used, the terrain is still built and BuiltTerrain::orthoWarning says why.
 [[nodiscard]] common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config,
                                                         DataServices* data = nullptr);
 

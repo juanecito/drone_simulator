@@ -31,14 +31,18 @@
 #include "ds/astro/stars.hpp"
 #include "ds/astro/time.hpp"
 #include "ds/common/worker_pool.hpp"
+#include "ds/geo/utm.hpp"
 #include "ds/graphics/camera.hpp"
 #include "ds/graphics/camera_rig.hpp"
 #include "ds/graphics/drone_model.hpp"
 #include "ds/graphics/renderer.hpp"
 #include "ds/graphics/sky_model.hpp"
+#include "ds/terrain/ortho_streamer.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/streamer.hpp"
 #include "ds/weather/weather.hpp"
+
+#include "ortho_fixtures.hpp"
 
 namespace {
 
@@ -163,12 +167,17 @@ protected:
         std::vector<std::shared_ptr<const terrain::ChunkMesh>> chunks;
         for (int i = 0; i < 200; ++i) {
             chunks = streamer_->update(camera.position.x, camera.position.y, camera.position.z);
-            if (streamer_->stats().inFlight == 0 && i > 0) {
+            if (ortho_) {
+                ortho_->update(chunks, camera.position.x, camera.position.z);
+            }
+            if (streamer_->stats().inFlight == 0 && (!ortho_ || ortho_->stats().inFlight == 0) &&
+                i > 0) {
                 break;
             }
             pool_.waitIdle();
         }
         input.terrain.chunks = chunks;
+        input.terrain.ortho = ortho_.get();
         for (int frame = 0; frame < 12; ++frame) {
             input.resetExposure = frame == 0;
             input.dtSeconds = 1.0;
@@ -209,6 +218,7 @@ protected:
     common::WorkerPool pool_{4};
     std::shared_ptr<const terrain::ProceduralSource> source_;
     std::unique_ptr<terrain::TerrainStreamer> streamer_;
+    std::unique_ptr<terrain::OrthoStreamer> ortho_;
 };
 
 TEST_F(SceneRenderTest, NoonHasBlueSkyAndLitTerrain) {
@@ -615,6 +625,57 @@ TEST_F(SceneRenderTest, SnowCoverWhitensAndRainDarkensTheGround) {
     const double snow = average(snowy, 0, 0, 1, 1).mean;
     EXPECT_LT(wet, dry) << "wet ground is darker";
     EXPECT_GT(snow, dry + 40.0) << "snow is white";
+}
+
+TEST_F(SceneRenderTest, OrthophotoIsDrapedOverTheTerrainWithinTheGpuBudget) {
+    // FR-TER-I04 … I07: an image, red west of the origin and blue east of it, replaces the
+    // green materials; tiles stay within the GPU budget (FR-TER-I06).
+    exposure_ = {.mode = graphics::ExposureMode::Manual, .manualEv100 = 12.0};
+    const geo::Geodetic origin{40.4, -3.7, 650.0};
+    const auto utm = geo::toUtm(origin.latitudeDeg, origin.longitudeDeg);
+    ASSERT_TRUE(utm);
+    test::TempDir dir("ortho_render");
+    test::ImageSpec spec;
+    spec.width = 400;
+    spec.height = 400;
+    spec.geoTransform = {utm->easting - 200.0, 1.0, 0.0, utm->northing + 200.0, 0.0, -1.0};
+    spec.epsg = 32630;
+    spec.value = [](int i, int /*j*/, int b) {
+        const bool west = i < 200;
+        return b == 0 ? (west ? 200 : 10) : b == 1 ? 10 : (west ? 10 : 200);
+    };
+    test::writeImage(dir / "ortho.tif", spec);
+    const std::filesystem::path file = dir / "ortho.tif";
+    auto source = terrain::OrthophotoSource::open(std::span(&file, 1), {}, origin);
+    ASSERT_TRUE(source) << source.error().message;
+
+    const double ground = source_->height(0.0, 0.0);
+    const graphics::Camera camera = graphics::cameraFromAxes(
+        {0.0, ground + 120.0, 0.0}, {0.0, -1.0, 0.0}, {0.0, 0.0, -1.0}, 0.9);
+    const QImage plain = renderScene("2026-06-21T12:00:00Z", camera, {});
+    ortho_ = std::make_unique<terrain::OrthoStreamer>(*source, layout_, pool_);
+    const QImage draped = renderScene("2026-06-21T12:00:00Z", camera, {});
+    save(plain, "ortho_off.png");
+    save(draped, "ortho_on.png");
+    const Luma west = average(draped, 0.1, 0.3, 0.4, 0.7);
+    const Luma east = average(draped, 0.6, 0.3, 0.9, 0.7);
+    const Luma before = average(plain, 0.1, 0.3, 0.4, 0.7);
+    EXPECT_GT(west.r, west.b + 20) << "west is red";
+    EXPECT_GT(east.b, east.r + 20) << "east is blue";
+    EXPECT_GT(before.g, before.r) << "materials without imagery";
+    const graphics::FrameStats stats = renderer_->lastStats();
+    EXPECT_GT(stats.orthoTiles, 0U);
+    EXPECT_GT(stats.orthoBytes, 0U);
+
+    // A budget of a few tiles: the cache stays within it, coarser tiles stand in.
+    graphics::RenderSettings settings;
+    settings.orthoBudgetBytes = 6 * terrain::OrthoTile::bytesFor(terrain::kOrthoTilePx);
+    renderer_->setSettings(settings);
+    const QImage small = renderScene("2026-06-21T12:00:00Z", camera, {});
+    EXPECT_LE(renderer_->lastStats().orthoBytes, settings.orthoBudgetBytes);
+    EXPECT_GT(renderer_->lastStats().orthoTiles, 0U);
+    EXPECT_GT(average(small, 0.1, 0.3, 0.4, 0.7).r, average(small, 0.1, 0.3, 0.4, 0.7).g)
+        << "imagery still shown";
 }
 
 TEST_F(SceneRenderTest, RaindropsOnTheLens) {

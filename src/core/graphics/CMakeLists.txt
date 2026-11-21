@@ -18,6 +18,7 @@ ds_add_core_module(graphics
         exposure.cpp
         image.cpp
         module.cpp
+        ortho_textures.cpp
         renderer.cpp
         weather_view.cpp
         shader_source.cpp

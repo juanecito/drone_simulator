@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -33,6 +34,7 @@
 #include "ds/storage/mission_store.hpp"
 #include "ds/terrain/terrain_files.hpp"
 
+#include "ortho_fixtures.hpp"
 #include "raster_fixtures.hpp"
 
 namespace ds::app {
@@ -79,8 +81,17 @@ protected:
             timeoutMs);
     }
 
+    // 1 m imagery over the middle 800 m of the 2 km DEM tile.
+    static test::ImageSpec orthoSpec() {
+        test::ImageSpec image;
+        image.width = 800;
+        image.height = 800;
+        image.geoTransform = {test::kE0 + 600.0, 1.0, 0.0, test::kN0 - 600.0, 0.0, -1.0};
+        return image;
+    }
+
     // A copy of "first-flight" flown on the planar UTM tile in its mission folder.
-    void writeDemMission(const std::string& sha256 = {}) {
+    void writeDemMission(const std::string& sha256 = {}, const std::string& orthoSha256 = {}) {
         const fs::path dir = homeDir() / "missions" / "dem-hop";
         fs::create_directories(dir / "dem");
         test::writeRaster(dir / "dem" / "valley.tif", test::planarUtmSpec());
@@ -98,6 +109,16 @@ protected:
                         {"verticalDatum", "EGM2008"},
                         {"attribution", "Test DEM, CC BY 4.0"},
                         {"extent", {{"widthM", 1500}, {"lengthM", 1500}}}};
+        if (!orthoSha256.empty()) {
+            fs::create_directories(dir / "ortho");
+            test::writeImage(dir / "ortho" / "a.tif", orthoSpec());
+            common::Json image = {{"path", "ortho/a.tif"}};
+            if (orthoSha256 != "-") {
+                image["sha256"] = orthoSha256;
+            }
+            m["terrain"]["orthophotoFiles"] = common::Json::array({image});
+            m["terrain"]["orthophotoAttribution"] = "Test imagery, CC0";
+        }
         std::ofstream(dir / "dem-hop.mission.json") << m.dump(2);
         missions_->reload();
     }
@@ -200,6 +221,70 @@ TEST_F(FileTerrainTest, MissionOnElevationFilesIsFlownAndRecordsItsDataHash) {
     window_->endMission();
     EXPECT_EQ(scene.terrain().kind, TerrainKind::Procedural);  // Free mode again.
     EXPECT_TRUE(scene.attribution().empty());
+}
+
+TEST_F(FileTerrainTest, MissionOrthophotosAreDrapedAndABrokenOneOnlyDisablesThem) {
+    // FR-TER-I02, I08, I09: the imagery comes with the mission; a damaged file only disables
+    // it, and the terrain data hash ignores it.
+    writeDemMission({}, "-");
+    openWindow();
+    SceneController& scene = *window_->scene();
+    SimulationController& sim = *window_->simulation();
+    auto launched = window_->launchMission("dem-hop");
+    ASSERT_TRUE(launched.has_value()) << launched.error().message;
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().active; }));
+    ASSERT_NE(scene.orthophotos(), nullptr) << scene.orthoWarning();
+    EXPECT_NE(scene.orthoStreamer(), nullptr);
+    EXPECT_EQ(scene.attribution(), "Test DEM, CC BY 4.0 · Test imagery, CC0");
+    EXPECT_NEAR(scene.orthophotos()->metadata().minX, -404.0, 4.0);
+    sim.abortMission();
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().result.has_value(); }));
+    window_->endMission();
+    EXPECT_EQ(scene.orthophotos(), nullptr);  // Free mode: procedural terrain.
+
+    writeDemMission({}, std::string(64, 'b'));  // Not the image's sha256.
+    launched = window_->launchMission("dem-hop");
+    ASSERT_TRUE(launched.has_value()) << launched.error().message;
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().active; }));
+    EXPECT_EQ(scene.terrain().kind, TerrainKind::File);
+    EXPECT_EQ(scene.orthophotos(), nullptr);
+    EXPECT_TRUE(window_->statusBar()->currentMessage().contains(QStringLiteral("Orthophotos")))
+        << window_->statusBar()->currentMessage().toStdString();
+    sim.abortMission();
+    ASSERT_TRUE(waitFor([&] { return sim.missionStatus().result.has_value(); }));
+    window_->endMission();
+}
+
+TEST_F(FileTerrainTest, TerrainTabDrapesOrthophotos) {
+    const fs::path dem = homeDir() / "dem.tif";
+    const fs::path image = homeDir() / "ortho.tif";
+    test::writeRaster(dem, test::planarUtmSpec());
+    test::writeImage(image, orthoSpec());
+    SceneController scene(settings_.get(), findAssetDirectory());
+    TerrainPanel panel(scene);
+    TerrainConfig config;
+    config.kind = TerrainKind::File;
+    config.file.files = {dem};
+    config.ortho.files = {image};
+    config.ortho.attribution = "Test imagery";
+    config.ortho.color.gamma = 1.2;
+    panel.setFormConfig(config);
+    auto* box = panel.findChild<QWidget*>(QStringLiteral("OrthoBox"));
+    ASSERT_NE(box, nullptr);
+    EXPECT_FALSE(box->isHidden());
+    EXPECT_EQ(panel.findChild<QListWidget*>(QStringLiteral("OrthoList"))->count(), 1);
+    EXPECT_EQ(panel.formConfig().ortho, config.ortho);
+    ASSERT_TRUE(panel.regenerate());
+    ASSERT_NE(scene.orthophotos(), nullptr);
+    EXPECT_EQ(scene.attribution(), "Test imagery");
+    const QString info = panel.findChild<QLabel*>(QStringLiteral("OrthoInfoLabel"))->text();
+    EXPECT_TRUE(info.contains(QStringLiteral("Covers 0.8"))) << info.toStdString();
+    EXPECT_TRUE(info.contains(QStringLiteral("RGB"))) << info.toStdString();
+    // Procedural terrain: the group is hidden and the imagery is not used.
+    auto* source = panel.findChild<QComboBox*>(QStringLiteral("SourceCombo"));
+    source->setCurrentIndex(0);
+    EXPECT_TRUE(box->isHidden());
+    EXPECT_TRUE(panel.formConfig().ortho.files.empty());
 }
 
 TEST_F(FileTerrainTest, ADamagedElevationFileStopsTheMission) {

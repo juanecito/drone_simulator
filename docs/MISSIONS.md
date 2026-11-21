@@ -124,6 +124,31 @@ clouds** in LAS 1.0–1.4 or LAZ (see *Terrain from lidar point clouds* below).
   best of the debrief only counts attempts flown on the same data.
 - **Attribution:** `attribution` is shown at the bottom right of the view.
 
+### Orthophotos
+
+File terrain can be covered with aerial imagery, listed in `orthophotoFiles` with the same
+path rules as the elevation files (usually in `ortho/`):
+
+```json
+"orthophotoFiles": [{ "path": "ortho/area.tif", "sha256": "…" }],
+"orthophotoAttribution": "PNOA © IGN, CC BY 4.0",
+"orthophotoColor": { "brightness": 0.05, "contrast": 1.1, "gamma": 1.0 }
+```
+
+- **Formats:** 8-bit COG / GeoTIFF, JPEG 2000 (`.jp2`), or PNG / JPEG with a world file
+  (`.pgw`, `.jgw`) plus `orthophotoCrs`. Several files are joined into one mosaic, and they
+  must share one CRS. `orthophotoBands` picks the red, green, blue (and alpha) bands of
+  multi-band images, e.g. `[1, 2, 3]`.
+- **Coverage:** areas outside the images, transparent areas and NoData show the usual
+  terrain materials, blended softly at the edge.
+- **Large files:** images over 4096 px without overviews are converted once to a cached COG
+  in `~/.drone_simulation/cache/ortho/`, behind a progress dialog. Add overviews to your
+  files (`gdaladdo`) to skip this.
+- **Problems only disable the imagery:** a missing or damaged image, or a `sha256` that does
+  not match, still lets the mission fly without imagery, and the status bar says why. The
+  images are not part of `terrain_data_hash`.
+- **Attribution:** shown after the elevation attribution, separated by "·".
+
 ### Terrain from lidar point clouds
 
 With `"format": "las"` or `"laz"`, the `elevationFiles` are point clouds. They are turned
@@ -535,7 +560,8 @@ One mission of the Drone Simulator (SPECIFICATION §4.9.1, docs/MISSIONS.md). Un
 | `orthophotoFiles` | array of object (fileRef) |  | max items 4096 |  |
 | `orthophotoCrs` | string |  |  |  |
 | `orthophotoAttribution` | string |  |  |  |
-| `orthophotoBands` | array of integer |  |  |  |
+| `orthophotoBands` | array of integer |  |  | Red, green, blue (and alpha) bands of multi-band images, e.g. [1, 2, 3]. |
+| `orthophotoColor` | object |  |  | Colour adjustments of the orthophotos. |
 
 #### terrain.params (procedural overrides)
 

@@ -21,7 +21,7 @@ class QTimer;
 
 /// @file
 /// @brief Terrain tab (SPECIFICATION §4.11): presets, source (procedural parameters,
-/// elevation files, or an online provider with area download and quota), metadata,
+/// elevation files, or an online provider with area download and quota), orthophotos, metadata,
 /// dimensions, geographic origin, *Regenerate* and a 2D height preview.
 /// @ingroup app
 
@@ -61,7 +61,9 @@ private:
     void updateEnabled();
     void showStatus(const QString& text, bool error);
     void addFiles();
+    void addOrthoFiles();
     void updateMetadata();
+    void updateOrthoInfo();
     void fillProviders();
     void fillDatasets();
     void updateQuota();
@@ -119,6 +121,16 @@ private:
     QPushButton* download_ = nullptr;
     QLabel* quota_ = nullptr;
     QTimer* refresh_ = nullptr;
+    QGroupBox* orthoBox_ = nullptr;  // Orthophotos over file or online elevation (FR-TER-I10).
+    QListWidget* orthoFiles_ = nullptr;
+    QPushButton* removeOrtho_ = nullptr;
+    QLineEdit* orthoCrs_ = nullptr;
+    QLineEdit* orthoBands_ = nullptr;
+    QLineEdit* orthoAttribution_ = nullptr;
+    QDoubleSpinBox* orthoBrightness_ = nullptr;
+    QDoubleSpinBox* orthoContrast_ = nullptr;
+    QDoubleSpinBox* orthoGamma_ = nullptr;
+    QLabel* orthoInfo_ = nullptr;
     QLabel* metadata_ = nullptr;
     QLabel* status_ = nullptr;
     QLabel* preview_ = nullptr;

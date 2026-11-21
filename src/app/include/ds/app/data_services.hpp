@@ -191,12 +191,12 @@ public:
     common::Result<void> setCacheLimit(std::uint64_t bytes);
     /// @brief Cache size limit.
     [[nodiscard]] std::uint64_t cacheLimit() const;
-    /// @brief Cache usage per provider (empty if it cannot be read), and the point-cloud
-    /// DTMs as provider @ref kLidarDemCache.
+    /// @brief Cache usage per provider (empty if it cannot be read), the point-cloud
+    /// DTMs as provider @ref kLidarDemCache and the orthophoto copies as @ref kOrthoCache.
     [[nodiscard]] std::vector<net::CacheUsage> cacheUsage();
-    /// @brief Removes the cached data of every provider and the point-cloud DTMs (made again
-    /// from the files when needed); pinned areas only if @p includePinned. Emits
-    /// networkSettingsChanged().
+    /// @brief Removes the cached data of every provider, the point-cloud DTMs and the
+    /// orthophoto copies (made again from the files when needed); pinned areas only if @p
+    /// includePinned. Emits networkSettingsChanged().
     common::Result<void> clearCache(bool includePinned);
     /// @brief Unpins every downloaded area so the limit may evict it; returns how many pieces
     /// were pinned. Emits networkSettingsChanged().
@@ -221,6 +221,20 @@ public:
     /// @brief The cached DTM of @p files with @p options; an error if it is not made yet.
     [[nodiscard]] common::Result<std::filesystem::path> lidarDem(
         std::span<const std::filesystem::path> files, const terrain::LidarOptions& options) const;
+
+    // --- Orthophoto COGs (FR-TER-I06) -----------------------------------------------------
+
+    /// @brief "Provider" of the orthophoto copies in cacheUsage().
+    static constexpr std::string_view kOrthoCache = "ortho-cog";
+    /// @brief Folder of the orthophoto copies (`<cache>/ortho`).
+    [[nodiscard]] const std::filesystem::path& orthoDirectory() const noexcept { return orthoDir_; }
+    /// @brief Where the cached COG of orthophoto @p file is (or will be) stored.
+    [[nodiscard]] common::Result<std::filesystem::path> orthoCogPath(
+        const std::filesystem::path& file) const;
+    /// @brief The files to read for orthophotos @p files: each one's cached COG if it was made
+    /// (ensureOrthoCache()), else the file itself.
+    [[nodiscard]] std::vector<std::filesystem::path> orthoFiles(
+        std::span<const std::filesystem::path> files) const;
 
     // --- Downloads -------------------------------------------------------------------------
 
@@ -259,6 +273,7 @@ private:
     std::unique_ptr<net::DataClient> client_;
     std::vector<net::ProviderConfig> providers_;
     std::filesystem::path demDir_;
+    std::filesystem::path orthoDir_;
     ConfirmDownload confirm_;
 };
 
@@ -278,6 +293,13 @@ private:
 [[nodiscard]] common::Result<bool> ensureLidarDem(QWidget* parent, DataServices& data,
                                                   std::span<const std::filesystem::path> files,
                                                   const terrain::LidarOptions& options);
+
+/// @brief Converts the large orthophotos without overviews among @p files to cached COGs
+/// (FR-TER-I06), behind a progress dialog that can be cancelled; returns at once when there
+/// is nothing to convert.
+/// @return true when done, false if the user cancelled; an error if a file cannot be read.
+[[nodiscard]] common::Result<bool> ensureOrthoCache(QWidget* parent, DataServices& data,
+                                                    std::span<const std::filesystem::path> files);
 
 /// @brief Text of the confirmation question for @p request.
 [[nodiscard]] std::string downloadQuestion(const DownloadRequest& request);

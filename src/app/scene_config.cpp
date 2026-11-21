@@ -14,6 +14,7 @@
 
 #include "ds/app/data_services.hpp"
 #include "ds/common/json.hpp"
+#include "ds/common/log.hpp"
 
 namespace ds::app {
 namespace {
@@ -157,6 +158,59 @@ common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
     return f;
 }
 
+QJsonObject orthoToJson(const OrthoConfig& o) {
+    QJsonArray files;
+    for (const auto& file : o.files) {
+        files.append(QString::fromStdString(file.string()));
+    }
+    QJsonArray bands;
+    for (const int b : o.bands) {
+        bands.append(b);
+    }
+    return QJsonObject{
+        {QStringLiteral("files"), files},
+        {QStringLiteral("crs"), QString::fromStdString(o.crs)},
+        {QStringLiteral("bands"), bands},
+        {QStringLiteral("attribution"), QString::fromStdString(o.attribution)},
+        {QStringLiteral("brightness"), o.color.brightness},
+        {QStringLiteral("contrast"), o.color.contrast},
+        {QStringLiteral("gamma"), o.color.gamma},
+    };
+}
+
+common::Result<OrthoConfig> orthoFromJson(const QJsonObject& json) {
+    OrthoConfig o;
+    for (const QJsonValue& v : json.value(QStringLiteral("files")).toArray()) {
+        if (!v.isString() || v.toString().isEmpty()) {
+            return common::makeError("'ortho.files' must list file paths");
+        }
+        o.files.emplace_back(v.toString().toStdString());
+    }
+    o.crs = json.value(QStringLiteral("crs")).toString().toStdString();
+    for (const QJsonValue& v : json.value(QStringLiteral("bands")).toArray()) {
+        const int b = v.toInt(0);
+        if (b < 1 || b > 1000) {
+            return common::makeError("'ortho.bands' must list band numbers");
+        }
+        o.bands.push_back(b);
+    }
+    if (!o.bands.empty() && o.bands.size() != 3 && o.bands.size() != 4) {
+        return common::makeError("'ortho.bands' must list 3 (RGB) or 4 (RGBA) bands");
+    }
+    o.attribution = json.value(QStringLiteral("attribution")).toString().toStdString();
+    for (const auto& [key, out] :
+         {std::pair{"brightness", &o.color.brightness}, std::pair{"contrast", &o.color.contrast},
+          std::pair{"gamma", &o.color.gamma}}) {
+        if (auto r = readNumber(json, key, *out); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    if (const std::string bad = terrain::validateOrthoColor(o.color); !bad.empty()) {
+        return common::makeError("orthophoto " + bad);
+    }
+    return o;
+}
+
 QJsonObject onlineToJson(const OnlineTerrainConfig& o) {
     QJsonObject json{
         {QStringLiteral("provider"), QString::fromStdString(o.provider)},
@@ -199,8 +253,9 @@ QString sourceName(TerrainKind kind) {
 }  // namespace
 
 bool TerrainConfig::operator==(const TerrainConfig& o) const noexcept {
-    return kind == o.kind && file == o.file && online == o.online && presetKey == o.presetKey &&
-           params == o.params && extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
+    return kind == o.kind && file == o.file && online == o.online && ortho == o.ortho &&
+           presetKey == o.presetKey && params == o.params && extent == o.extent &&
+           origin.latitudeDeg == o.origin.latitudeDeg &&
            origin.longitudeDeg == o.origin.longitudeDeg && origin.heightM == o.origin.heightM;
 }
 
@@ -319,6 +374,9 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
     if (c.kind == TerrainKind::Online) {
         json.insert(QStringLiteral("online"), onlineToJson(c.online));
     }
+    if (c.kind != TerrainKind::Procedural && !c.ortho.files.empty()) {
+        json.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
+    }
     return json;
 }
 
@@ -344,6 +402,14 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
     } else if (source != QLatin1String("procedural")) {
         return common::makeError(
             std::format("terrain source '{}' is not available yet", source.toStdString()));
+    }
+    if (const QJsonValue ortho = json.value(QStringLiteral("ortho"));
+        ortho.isObject() && c.kind != TerrainKind::Procedural) {
+        auto o = orthoFromJson(ortho.toObject());
+        if (!o) {
+            return std::unexpected(o.error());
+        }
+        c.ortho = std::move(*o);
     }
     auto params = paramsFromJson(json.value(QStringLiteral("params")).toObject());
     if (!params) {
@@ -516,6 +582,9 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     if (c.kind == TerrainKind::Online) {
         params.insert(QStringLiteral("online"), onlineToJson(c.online));
     }
+    if (c.kind != TerrainKind::Procedural && !c.ortho.files.empty()) {
+        params.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
+    }
     r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
     return r;
 }
@@ -552,6 +621,14 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         c.kind = TerrainKind::Online;
         c.online = std::move(*online);
     }
+    if (const QJsonValue ortho = doc.object().value(QStringLiteral("ortho"));
+        ortho.isObject() && c.kind != TerrainKind::Procedural) {
+        auto o = orthoFromJson(ortho.toObject());
+        if (!o) {
+            return common::makeError(std::format("preset '{}': {}", r.name, o.error().message));
+        }
+        c.ortho = std::move(*o);
+    }
     c.presetKey = r.key;
     c.params = std::move(*params);
     if (r.seed) {
@@ -581,7 +658,60 @@ common::Result<terrain::OnlineTerrainRequest> onlineRequest(const TerrainConfig&
     return r;
 }
 
+namespace {
+
+// Opens the imagery of @p config over the built terrain (FR-TER-I08: problems only disable
+// it, with a warning).
+void openOrtho(const TerrainConfig& config, DataServices* data, BuiltTerrain& built) {
+    const OrthoConfig& o = config.ortho;
+    if (o.files.empty()) {
+        return;
+    }
+    if (config.kind == TerrainKind::Procedural) {
+        built.orthoWarning = "orthophotos need file or online elevation; imagery disabled";
+        return;
+    }
+    const std::vector<std::filesystem::path> files =
+        data != nullptr ? data->orthoFiles(o.files) : o.files;
+    auto opened = terrain::OrthophotoSource::open(files, orthoOptions(o), built.origin);
+    if (!opened) {
+        built.orthoWarning = opened.error().message + "; imagery disabled";
+        log::warn("Orthophotos: {}", built.orthoWarning);
+        return;
+    }
+    const terrain::OrthoMetadata& m = (*opened)->metadata();
+    if (const auto extent = built.source->extent();
+        extent && !m.overlaps(-0.5 * extent->widthM, -0.5 * extent->lengthM, 0.5 * extent->widthM,
+                              0.5 * extent->lengthM)) {
+        built.orthoWarning = "the orthophotos do not cover the terrain";
+    }
+    built.ortho = std::move(*opened);
+    built.orthoAttribution = o.attribution;
+}
+
+common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServices* data);
+
+}  // namespace
+
 common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config, DataServices* data) {
+    auto built = buildHeights(config, data);
+    if (built) {
+        openOrtho(config, data, *built);
+    }
+    return built;
+}
+
+terrain::OrthoOptions orthoOptions(const OrthoConfig& o) {
+    terrain::OrthoOptions options;
+    options.crs = o.crs;
+    options.bands = o.bands;
+    options.color = o.color;
+    return options;
+}
+
+namespace {
+
+common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServices* data) {
     BuiltTerrain built;
     if (config.kind == TerrainKind::Online) {
         if (data == nullptr) {
@@ -667,6 +797,8 @@ common::Result<BuiltTerrain> buildTerrain(const TerrainConfig& config, DataServi
     built.source = std::move(*source);
     return built;
 }
+
+}  // namespace
 
 bool isPointCloud(const FileTerrainConfig& f) {
     return !f.files.empty() &&
