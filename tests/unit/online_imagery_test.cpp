@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -94,7 +95,51 @@ TEST(ImageryProvider, ShippedPresetsAreValid) {
         ASSERT_TRUE(again) << again.error().message;
         EXPECT_EQ(net::toJson(*again), net::toJson(p));
     }
-    EXPECT_EQ(imagery, 3);  // PNOA, SWISSIMAGE, USGS.
+    EXPECT_EQ(imagery, 5);  // PNOA, SWISSIMAGE, USGS, OpenStreetMap, Géoplateforme.
+}
+
+TEST(ImageryProvider, OpenStreetMapPresetFollowsTheTileUsagePolicy) {
+    auto presets = net::loadProviderPresets(fs::path(DS_TEST_ASSETS_DIR) / "providers");
+    ASSERT_TRUE(presets) << presets.error().message;
+    const auto it = std::ranges::find(*presets, "osm-standard", &net::ProviderConfig::key);
+    ASSERT_NE(it, presets->end());
+    const net::ProviderConfig& osm = *it;
+    // operations.osmfoundation.org/policies/tiles: HTTPS on tile.openstreetmap.org only, cache
+    // for at least 7 days without cache headers, no offline use, modest request rates.
+    EXPECT_EQ(osm.urlTemplate, "https://tile.openstreetmap.org/{z}/{x}/{y}.png");
+    EXPECT_FALSE(osm.insecureHttp);
+    EXPECT_TRUE(osm.allowCache);
+    EXPECT_GE(osm.maxAgeDays.value_or(0), 7);
+    EXPECT_FALSE(osm.serveStale);
+    EXPECT_LE(osm.maxConcurrent, 2);
+    EXPECT_NE(osm.attribution.find("© OpenStreetMap contributors"), std::string::npos);
+    auto url = net::DataClient::cacheKey(osm, osm.datasets.at(0),
+                                         geo::TileId{.x = 2128, .y = 1459, .z = 12});
+    ASSERT_TRUE(url) << url.error().message;
+    EXPECT_EQ(*url, "https://tile.openstreetmap.org/12/2128/1459.png");
+}
+
+TEST(ImageryProvider, GeoplateformePresetAsksForWebMercatorTiles) {
+    auto presets = net::loadProviderPresets(fs::path(DS_TEST_ASSETS_DIR) / "providers");
+    ASSERT_TRUE(presets) << presets.error().message;
+    const auto it = std::ranges::find(*presets, "geoplateforme-imagery", &net::ProviderConfig::key);
+    ASSERT_NE(it, presets->end());
+    const net::ProviderConfig& gp = *it;
+    const geo::TileId tile{.x = 17009, .y = 11693, .z = 15};  // Chamonix.
+    auto photo = net::DataClient::cacheKey(gp, *gp.dataset("ORTHOIMAGERY.ORTHOPHOTOS"), tile);
+    ASSERT_TRUE(photo) << photo.error().message;
+    EXPECT_EQ(*photo,
+              "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&"
+              "LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&"
+              "TILEMATRIXSET=PM_0_19&TILEMATRIX=15&TILEROW=11693&TILECOL=17009");
+    const net::DatasetConfig* plan = gp.dataset("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2");
+    ASSERT_NE(plan, nullptr);
+    auto map = net::DataClient::cacheKey(gp, *plan, tile);
+    ASSERT_TRUE(map) << map.error().message;
+    EXPECT_NE(map->find("&FORMAT=image/png&"), std::string::npos) << *map;
+    for (const net::DatasetConfig& d : gp.datasets) {
+        EXPECT_EQ(d.maxZoom, 19);  // PM_0_19.
+    }
 }
 
 TEST(ImageryProvider, ValidationNamesTheProblem) {
@@ -118,6 +163,7 @@ TEST(ImageryProvider, ValidationNamesTheProblem) {
         },
         "{bbox}");
     fails([](common::Json& j) { j["tileSizePx"] = 300; }, "power of two");
+    fails([](common::Json& j) { j["maxSizePx"] = 512; }, "is for bounding-box providers");
     fails([](common::Json& j) { j["datasets"][0].erase("maxZoom"); }, "maxZoom");
     fails(
         [](common::Json& j) { j["datasets"][0]["minZoom"] = 12, j["datasets"][0]["maxZoom"] = 10; },

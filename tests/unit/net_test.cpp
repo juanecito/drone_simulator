@@ -161,10 +161,10 @@ TEST(UrlTemplate, AppendQueryAndRedact) {
 TEST(Provider, ShippedOpenTopographyPresetIsValid) {
     auto presets = loadProviderPresets(fs::path(DS_TEST_ASSETS_DIR) / "providers");
     ASSERT_TRUE(presets) << presets.error().message;
-    // OpenTopography, plus the imagery presets (online_imagery_test.cpp).
+    // OpenTopography and the Géoplateforme, plus the imagery presets (online_imagery_test.cpp).
     const auto it = std::ranges::find(*presets, "opentopography", &ProviderConfig::key);
     ASSERT_NE(it, presets->end());
-    EXPECT_EQ(std::ranges::count(*presets, "elevation", &ProviderConfig::kind), 1);
+    EXPECT_EQ(std::ranges::count(*presets, "elevation", &ProviderConfig::kind), 2);
     const ProviderConfig& ot = *it;
     EXPECT_EQ(ot.key, "opentopography");
     EXPECT_TRUE(ot.requiresKey);
@@ -188,6 +188,71 @@ TEST(Provider, ShippedOpenTopographyPresetIsValid) {
     auto again = parseProvider(toJson(ot));
     ASSERT_TRUE(again) << again.error().message;
     EXPECT_EQ(toJson(*again), toJson(ot));
+}
+
+TEST(Provider, ShippedGeoplateformePresetAsksTheWmsForGeoTiffs) {
+    auto presets = loadProviderPresets(fs::path(DS_TEST_ASSETS_DIR) / "providers");
+    ASSERT_TRUE(presets) << presets.error().message;
+    const auto it = std::ranges::find(*presets, "geoplateforme-elevation", &ProviderConfig::key);
+    ASSERT_NE(it, presets->end());
+    const ProviderConfig& gp = *it;
+    EXPECT_FALSE(gp.requiresKey);   // A public endpoint (cartes.gouv.fr/cgu).
+    EXPECT_EQ(gp.maxSizePx, 5000);  // The server's MaxWidth / MaxHeight are 5010.
+    EXPECT_LE(gp.rateLimitRps.value_or(1000.0), 40.0);  // 40 requests/s per IP.
+    EXPECT_EQ(gp.defaultDataset, "ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES");
+    ASSERT_EQ(gp.datasets.size(), 3U);
+    for (const DatasetConfig& d : gp.datasets) {
+        SCOPED_TRACE(d.id);
+        EXPECT_EQ(d.verticalDatum, "NGF-IGN69");
+        ASSERT_TRUE(d.coverage.has_value());
+        EXPECT_TRUE(d.coverage->contains(GeoRect::around(45.92, 6.87, 10, 10)));  // Chamonix.
+        EXPECT_FALSE(d.coverage->contains(GeoRect::around(40.4, -3.7, 10, 10)));  // Madrid.
+        EXPECT_FALSE(d.attribution.empty());
+        // A streamed block fits in one image.
+        const ResponseSize block =
+            responseSizePx(blockRect(blockAt(45.92, 6.87, gp.blockSizeKm), gp.blockSizeKm), d);
+        EXPECT_LE(std::max(block.width, block.height), *gp.maxSizePx);
+    }
+    // WMS 1.3.0 boxes in EPSG:4326 are latitude first; the size follows the resolution.
+    const GeoRect area{6.85, 45.90, 6.88, 45.92};
+    auto url = DataClient::cacheKey(gp, *gp.dataset(gp.defaultDataset), area);
+    ASSERT_TRUE(url) << url.error().message;
+    EXPECT_TRUE(
+        url->starts_with("https://data.geopf.fr/wms-r?SERVICE=WMS&VERSION=1.3.0&"
+                         "REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&"))
+        << *url;
+    EXPECT_NE(url->find("&CRS=EPSG:4326&BBOX=45.9000000,6.8500000,45.9200000,6.8800000&"),
+              std::string::npos)
+        << *url;
+    const ResponseSize size = responseSizePx(area, *gp.dataset(gp.defaultDataset));
+    EXPECT_NE(url->find(std::format("&WIDTH={}&HEIGHT={}&", size.width, size.height)),
+              std::string::npos)
+        << *url;
+    EXPECT_NEAR(static_cast<double>(size.width), area.widthKm() * 200.0, 1.0);  // 5 m.
+    EXPECT_TRUE(url->ends_with("&FORMAT=image%2Fgeotiff")) << *url;             // Accepted encoded.
+    auto again = parseProvider(toJson(gp));
+    ASSERT_TRUE(again) << again.error().message;
+    EXPECT_EQ(toJson(*again), toJson(gp));
+}
+
+TEST(Provider, ResponseSizeLimitMustHoldAStreamedBlock) {
+    auto json = toJson(ProviderConfig{.key = "x",
+                                      .name = "X",
+                                      .urlTemplate = "https://h/{dataset}",
+                                      .datasets = {DatasetConfig{.id = "A", .resolutionM = 1}},
+                                      .attribution = "a"});
+    json["maxSizePx"] = 5000;
+    json["blockSizeKm"] = 4;  // 4000 px and the margin.
+    auto ok = parseProvider(json);
+    ASSERT_TRUE(ok) << ok.error().message;
+    EXPECT_EQ(ok->maxSizePx, 5000);
+    EXPECT_TRUE(ok->serveStale);
+    json["blockSizeKm"] = 5;
+    auto r = parseProvider(json);
+    ASSERT_FALSE(r);
+    EXPECT_NE(r.error().message.find("blockSizeKm"), std::string::npos) << r.error().message;
+    EXPECT_NE(r.error().message.find("more than maxSizePx (5000)"), std::string::npos)
+        << r.error().message;
 }
 
 TEST(Provider, ErrorsCarryJsonPaths) {
@@ -284,6 +349,24 @@ TEST(BlockPlanner, RespectsAreaLimitAndCoverage) {
     auto outside = planExtentRequests(GeoRect::around(40, -3, 10, 10), p, d);
     ASSERT_FALSE(outside);
     EXPECT_NE(outside.error().message.find("outside the coverage"), std::string::npos);
+}
+
+TEST(BlockPlanner, SplitsToTheLargestImageTheServerMakes) {
+    ProviderConfig p;
+    p.name = "P";
+    p.maxResponseBytes = 1ULL << 40U;
+    p.maxSizePx = 5000;
+    const DatasetConfig d{.id = "L", .name = "LiDAR 1 m", .resolutionM = 1};
+    // 12 × 2 km at 1 m: one piece by area and bytes, but 12 000 px wide; three are 4000 px.
+    const GeoRect area = GeoRect::around(45.9, 6.87, 12, 2);
+    auto plan = planExtentRequests(area, p, d);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_EQ(plan->size(), 3U);
+    for (const GeoRect& r : *plan) {
+        const ResponseSize size = responseSizePx(r, d);
+        EXPECT_LE(size.width, 5000);
+        EXPECT_LE(size.height, 5000);
+    }
 }
 
 TEST(BlockPlanner, BlocksAroundAreStableAndNearestFirst) {
@@ -775,6 +858,40 @@ TEST_F(DataClientFixture, StaleEntriesAreRevalidated) {
     EXPECT_EQ(reqs.back().headers.at("if-none-match"), etag);
     EXPECT_TRUE(fetch({"COP30", area})->fromCache);  // Fresh again.
     EXPECT_EQ(served.load(), 2);
+}
+
+TEST_F(DataClientFixture, ProvidersWithoutOfflineUseNeverServeExpiredEntries) {
+    provider.maxAgeDays = 1;
+    provider.serveStale = false;  // e.g. the OpenStreetMap tile servers.
+    client.setApiKey("mock", "good");
+    ASSERT_TRUE(fetch({"COP30", area}));
+    http.setOffline(true);
+    auto fresh = fetch({"COP30", area});  // Within the cache lifetime.
+    ASSERT_TRUE(fresh) << fresh.error().message;
+    EXPECT_TRUE(fresh->fromCache);
+    now += 2 * 86400;
+    auto expired = fetch({"COP30", area});
+    ASSERT_FALSE(expired);
+    EXPECT_EQ(expired.error().code, NetErrorCode::Offline);
+    EXPECT_FALSE(client.cached(provider, {"COP30", area}).value().has_value());
+    http.setOffline(false);
+    // Online, the expired entry is revalidated as usual.
+    auto again = fetch({"COP30", area});
+    ASSERT_TRUE(again) << again.error().message;
+    EXPECT_TRUE(again->fromCache);
+    EXPECT_EQ(served.load(), 2);
+}
+
+TEST_F(DataClientFixture, RequestsLargerThanTheServerMakesAreRefused) {
+    provider.maxSizePx = 100;  // 4 km at 30 m is 134 px.
+    client.setApiKey("mock", "good");
+    auto r = fetch({"COP30", area});
+    ASSERT_FALSE(r);
+    EXPECT_EQ(r.error().code, NetErrorCode::InvalidRequest);
+    EXPECT_NE(r.error().message.find("more than Mock DEM serves at once (100 px)"),
+              std::string::npos)
+        << r.error().message;
+    EXPECT_EQ(served.load(), 0);
 }
 
 TEST_F(DataClientFixture, DownloadAreaPlansPinsAndChecksBudget) {

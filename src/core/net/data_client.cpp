@@ -99,9 +99,9 @@ NetResult<std::string> buildUrl(const ProviderConfig& p, const DatasetConfig& d,
         {"crs", p.crs},
         {"format", p.format},
     };
-    const double resKm = d.resolutionM / 1000.0;
-    values["width"] = std::format("{}", static_cast<long>(std::ceil(area.widthKm() / resKm)));
-    values["height"] = std::format("{}", static_cast<long>(std::ceil(area.heightKm() / resKm)));
+    const ResponseSize size = responseSizePx(area, d);
+    values["width"] = std::format("{}", size.width);
+    values["height"] = std::format("{}", size.height);
     return finishUrl(p, tmpl, std::move(values), key);
 }
 
@@ -210,6 +210,14 @@ RequestId DataClient::fetch(const ProviderConfig& provider, const BBoxRequest& r
         callback(netError(NetErrorCode::InvalidRequest, "invalid area"));
         return 0;
     }
+    if (const ResponseSize size = responseSizePx(request.area, *dataset);
+        provider.maxSizePx && std::max(size.width, size.height) > *provider.maxSizePx) {
+        callback(
+            netError(NetErrorCode::InvalidRequest,
+                     std::format("{} × {} px is more than {} serves at once ({} px)", size.width,
+                                 size.height, provider.name, *provider.maxSizePx)));
+        return 0;
+    }
     const Target target{dataset, request.area, request.noCache,
                         [&provider, dataset, area = request.area](std::string_view key) {
                             return buildUrl(provider, *dataset, area, key);
@@ -261,11 +269,12 @@ RequestId DataClient::fetchTarget(const ProviderConfig& provider, const Target& 
                 callback(fromCached(std::move(**got)));
                 return 0;
             }
-            cached = std::move(**got);
+            cached = std::move(**got);  // For a conditional request, and maybe a stand-in.
         }
     }
+    const bool standIn = provider.serveStale;
     auto fallback = [&](NetError error) {
-        if (cached) {
+        if (cached && standIn) {
             count(provider.key, Outcome::Hit);
             callback(fromCached(std::move(*cached)));
         } else {
@@ -365,7 +374,8 @@ RequestId DataClient::fetchTarget(const ProviderConfig& provider, const Target& 
         }
         if (!r) {
             const NetErrorCode c = r.error().code;
-            if (stale && c != NetErrorCode::Cancelled && c != NetErrorCode::InvalidRequest) {
+            if (stale && provider.serveStale && c != NetErrorCode::Cancelled &&
+                c != NetErrorCode::InvalidRequest) {
                 log::info("net: {}; using cached data", r.error().message);
                 callback(fromCached(std::move(*stale)));
             } else {
@@ -460,7 +470,7 @@ NetResult<std::optional<Payload>> DataClient::cachedTarget(const ProviderConfig&
     if (!got) {
         return std::unexpected(got.error());
     }
-    if (!*got) {
+    if (!*got || ((*got)->stale && !provider.serveStale)) {
         return std::optional<Payload>{};
     }
     count(provider.key, Outcome::Hit);

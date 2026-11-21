@@ -18,12 +18,22 @@
 
 namespace ds::net {
 
+/// @brief Width and height in pixels of the response for @p area at the dataset's native
+/// resolution (the `{width}` and `{height}` of a bounding-box request).
+struct ResponseSize {
+    long width = 0;   ///< Pixels west to east.
+    long height = 0;  ///< Pixels south to north.
+};
+/// @brief The ResponseSize of @p area.
+[[nodiscard]] ResponseSize responseSizePx(const GeoRect& area,
+                                          const DatasetConfig& dataset) noexcept;
+
 /// @brief Estimated size of the response for @p area at the dataset's native resolution.
 [[nodiscard]] std::uint64_t estimateResponseBytes(const GeoRect& area,
                                                   const DatasetConfig& dataset) noexcept;
 
 /// @brief Splits @p area into the fewest equal pieces that each respect the dataset's area limit
-/// and the provider's response-size limit.
+/// and the provider's response-size limits (bytes, and maxSizePx a side).
 /// @details Pieces form a grid of columns × rows; among the grids with the fewest pieces the one
 /// whose pieces are closest to square (in km) is chosen. Returns InvalidRequest for an invalid
 /// rectangle and for an area outside the dataset's coverage (FR-TER-O08).

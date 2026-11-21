@@ -129,7 +129,9 @@ rate.
   of gamepad triggers — and the steering) and set expo and deadzones, then *Fly With This* or
   *Drive With This*. Mappings are
   saved per device and per vehicle type, and the panel edits those of the type in use.
-- **Settings › Data providers:** the online elevation providers (OpenTopography built in, and
+- **Settings › Data providers:** the online elevation and imagery providers (built in:
+  OpenTopography, the French Géoplateforme of cartes.gouv.fr, IGN PNOA, SWISSIMAGE, USGS and
+  the OpenStreetMap map; and
   your own bounding-box servers: *Add…*, *Duplicate…*, *Edit…*). Enter your personal API key
   here; it is kept in the system keyring (Secret Service), or, without one, in your database
   with a warning. *Test Connection* makes one small request, and the panel shows the calls

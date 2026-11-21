@@ -498,7 +498,7 @@ orthophoto files in §4.5.5.
 
 | ID | Requirement | Pri |
 |----|-------------|-----|
-| FR-TER-O01 | Elevation protocols: **REST bounding-box endpoints returning GeoTIFF** — first and initially only provider: **OpenTopography** (Global DEM API and USGS 3DEP API) (M). XYZ/TMS tiles (Terrarium, Terrain-RGB, GeoTIFF), OGC WCS, OGC API – Coverages and COG range requests for later providers (S). | M / S |
+| FR-TER-O01 | Elevation protocols: **REST bounding-box endpoints returning GeoTIFF** — first provider: **OpenTopography** (Global DEM API and USGS 3DEP API) (M); then the French **Géoplateforme** (IGN, cartes.gouv.fr), whose WMS-Raster GetMap returns GeoTIFF heights for an EPSG:4326 box (S). XYZ/TMS tiles (Terrarium, Terrain-RGB, GeoTIFF), OGC WCS, OGC API – Coverages and COG range requests for later providers (S). | M / S |
 | FR-TER-O02 | Provider configuration: URL template with placeholders `{dataset} {south} {north} {west} {east} {bbox} {width} {height} {crs} {format} {apiKey}` (tile providers later add `{z} {x} {y}`), protocol, dataset list, encoding, native resolution, CRS, vertical datum, NoData value, coverage area, **max area per request**, **daily call limit**, attribution/citation, licence, cache policy. Built-in presets (`assets/providers/`) plus user-defined providers. | M |
 | FR-TER-O03 | Payloads are decoded **in memory**: GeoTIFF and images through GDAL (`/vsimem/`), Terrarium/Terrain-RGB height decoding in project code. GDAL's own network drivers are disabled. | M |
 | FR-TER-O04 | CRS handling: Web-Mercator tiles (EPSG:3857) and projected/geographic coverages are reprojected into the scene's local ENU frame anchored at the scene origin. Band scale/offset and vertical units (m / ft) applied. | M |
@@ -507,7 +507,7 @@ orthophoto files in §4.5.5.
 | FR-TER-O07 | NoData voids and failed tiles are filled from the next coarser level or by interpolation; persistent gaps are reported in the UI. | M |
 | FR-TER-O08 | Extent: with dimensions (FR-TER-04a) a bounded rectangle, otherwise streaming around the drone within provider coverage. Outside the extent or coverage: *clamp edge*, *fade to base height* or *procedural fill*; a soft geofence warns before the edge. A requested extent outside provider coverage is rejected with a clear message. | M |
 | FR-TER-O09 | **Area pre-download:** "Download area" for a rectangle + max resolution with size estimate, progress and cancel. Missions on online terrain require their area **fully cached before PreFlight**, so a scored attempt never depends on the network. | M |
-| FR-TER-O10 | Online orthophoto providers (after the file-based orthophotos of §4.5.5): **WMTS** and **XYZ/TMS** (S), **WMS GetMap** (C); JPEG/PNG/WebP; reprojected and draped like orthophoto files. Only Web-Mercator tile grids (EPSG:3857, the `GoogleMapsCompatible` matrix set) are supported. Imagery is streamed tile by tile while flying and never downloaded by area. Presets: IGN PNOA (Spain, WMTS), swisstopo SWISSIMAGE and USGS The National Map imagery. | S / C |
+| FR-TER-O10 | Online orthophoto providers (after the file-based orthophotos of §4.5.5): **WMTS** and **XYZ/TMS** (S), **WMS GetMap** (C); JPEG/PNG/WebP; reprojected and draped like orthophoto files. Only Web-Mercator tile grids (EPSG:3857, the `GoogleMapsCompatible` matrix set) are supported. Imagery is streamed tile by tile while flying and never downloaded by area. Presets: IGN PNOA (Spain, WMTS), swisstopo SWISSIMAGE, USGS The National Map imagery, the Géoplateforme of IGN France (WMTS: BD ORTHO, Plan IGN) and the OpenStreetMap standard map (XYZ, under the OSMF tile usage policy). | S / C |
 | FR-TER-O11 | Vertical exaggeration factor (default 1.0; missions force 1.0). | S |
 | FR-TER-O12 | Metadata view: provider, protocol, CRS, coverage, resolution, cached area and size, min/max elevation of the loaded area, attribution. | M |
 | FR-TER-O13 | **Attribution:** the attribution required by each provider whose data is visible is shown in the viewport and in debrief screenshots. | M |
@@ -1441,7 +1441,7 @@ The first binary release format is a **Debian package** that installs into
     ├── assets/                # shaders, models, textures, sky, environment
     ├── vehicles/              # reference aerial and ground profiles
     ├── missions/              # built-in missions (files, or folders with dem/) + mission.schema.json
-    ├── providers/             # data-provider presets (OpenTopography)
+    ├── providers/             # data-provider presets (OpenTopography, Géoplateforme, imagery)
     └── doc/                   # LICENSE, THIRD_PARTY_NOTICES.md, user guide
 /usr/bin/drone-simulator -> /opt/drone_simulator/bin/drone_simulator
 /usr/share/applications/drone-simulator.desktop
@@ -2063,6 +2063,31 @@ so Markdown pages appear in the generated site.
       refused at launch. With the real-data library it is also flown over the
       `my-lidar` folder there, if any.
   - *Documentation:* `docs/TERRAIN.md`.
+- **After step 9 — OpenStreetMap and Géoplateforme presets (done):**
+  - *Presets* (`assets/providers/`, request formats checked against the live services and
+    their GetCapabilities on 2026-11-21; terms to be rechecked before release, §12.4.1):
+    - `geoplateforme-elevation`: WMS-Raster GetMap of `data.geopf.fr/wms-r` as
+      `rest_bbox` (WMS 1.3.0, so the EPSG:4326 box is latitude first), `image/geotiff`
+      32-bit float heights in NGF-IGN69. Datasets: RGE ALTI fetched at 5 m (default),
+      the LiDAR HD terrain model at 1 m (partial coverage: NoData where not surveyed) and
+      BD ALTI at 25 m; coverage metropolitan France and Corsica; 4 km streamed blocks.
+    - `geoplateforme-imagery`: WMTS of `data.geopf.fr/wmts` in the `PM_0_19` matrix set,
+      the same grid as `GoogleMapsCompatible`: BD ORTHO photographs (JPEG) and the Plan IGN
+      map (PNG), zoom ≤ 19.
+    - `osm-standard`: `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, zoom ≤ 19, two
+      requests at a time, 7-day cache, no expired tiles offline.
+  - *Provider options:* `maxSizePx` (largest image a server makes): extent requests are
+    split so neither side exceeds it, a larger request is refused before it is sent, and a
+    provider whose streamed blocks would not fit is invalid. `serveStale` (default true):
+    when false, expired cache entries are still revalidated, but never stand in offline,
+    over quota or after a network error.
+  - *Tests:* the shipped presets (URLs built for a box and for tiles, limits, coverage,
+    round trip), the planner splitting by pixel size, the provider validation, stale
+    entries refused offline, and a real 48 × 40 px Géoplateforme response
+    (`tests/fixtures/online/`, Licence Ouverte 2.0) opened as a raster, its heights
+    matching GDAL's bilinear values within 0.5 m. CI never contacts the services.
+  - *Not done:* OpenStreetMap vector data (buildings, roads, trees as 3D objects or
+    obstacles) is not used; only the rendered standard map is draped on the terrain.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 
@@ -2687,7 +2712,8 @@ decisions):
 **Open questions:**
 - **Online orthophotos:** *answered in M4 step 8.* Imagery providers are configured like
   elevation providers. The presets are open national services: IGN PNOA, swisstopo
-  SWISSIMAGE and USGS. Their licences must be confirmed before release.
+  SWISSIMAGE and USGS, then the Géoplateforme of IGN France and the OpenStreetMap standard
+  map. Their licences must be confirmed before release.
 
 ---
 
@@ -2781,6 +2807,17 @@ Assets are licensed separately from code and need their own entries in
   (e.g. Copernicus for COP30); respect the daily call limits. Free distribution of this
   MIT project is fine; **anyone selling a product that integrates OpenTopography keys
   needs an OpenTopography Enterprise key**.
+- **OpenStreetMap tile servers** (`osm-standard`): the OSMF tile usage policy allows normal
+  interactive viewing only: HTTPS on `tile.openstreetmap.org`, a distinct `User-Agent`
+  (`DroneSimulator/<version>`), cache headers honoured (7 days without them), no bulk
+  download, prefetching or offline use, and the attribution visible on the map. The preset
+  therefore never serves expired tiles (`serveStale: false`), and imagery is never
+  downloaded by area. The servers are run on donated resources and may block heavy use, so
+  the documentation points heavy users to their own or a commercial tile server.
+- **Géoplateforme** (`geoplateforme-elevation`, `geoplateforme-imagery`): public endpoints
+  without a key; WMTS without a rate limit, WMS-Raster limited to 40 requests/s per IP and
+  5010 px a side (cartes.gouv.fr/cgu). IGN datasets are under the Licence Ouverte 2.0
+  (Etalab), as their catalogue records state.
 
 ### 12.5 Distribution checklist
 1. `LICENSE` (MIT) at the repo root, installed to `/opt/drone_simulator/share/doc/`, and

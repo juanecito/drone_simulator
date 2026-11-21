@@ -80,12 +80,19 @@ struct ProviderConfig {
     std::string licence;                  ///< Licence / terms summary.
     std::string termsUrl;                 ///< Terms of use.
     bool allowCache = true;               ///< Provider allows caching (FR-NET-05).
+    /// Expired cache entries may stand in when the provider cannot be reached (offline mode,
+    /// quota used up, network errors). False for services that forbid offline use, such as
+    /// the OpenStreetMap tile servers: only entries the server's cache lifetime allows are used.
+    bool serveStale = true;
     std::optional<int> maxAgeDays;        ///< Cache lifetime; empty ⇒ unlimited.
     std::optional<double> rateLimitRps;   ///< Max requests per second.
     std::optional<int> dailyCallLimit;    ///< Rolling 24 h call budget (FR-TER-O17).
     int maxConcurrent = 2;                ///< Simultaneous requests (FR-NET-01).
     bool insecureHttp = false;            ///< Plain HTTP allowed (FR-NET-02).
     std::uint64_t maxResponseBytes = std::uint64_t{64} << 20U;  ///< FR-NET-02 (64 MB).
+    /// Largest width and height of one bounding-box response in pixels (a WMS server's
+    /// MaxWidth / MaxHeight); requests are split to stay within it. Empty ⇒ no limit.
+    std::optional<int> maxSizePx;
     std::vector<std::string> contentTypes;                      ///< Allowed response content types.
     std::vector<std::string> quotaErrorPatterns;  ///< Body texts marking a daily-quota error.
     double blockSizeKm = 20.0;       ///< Block size for streaming without extent (FR-TER-O16).

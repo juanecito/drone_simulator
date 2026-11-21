@@ -64,3 +64,11 @@ path = "tests/fixtures/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>"
 SPDX-License-Identifier = "MIT"
+
+# A real Géoplateforme WMS-R response (RGE ALTI, 48 × 40 px over Chamonix), kept to test the
+# reading of its unusual GeoTIFF tags.
+[[annotations]]
+path = "tests/fixtures/online/geoplateforme-rge-alti.tif"
+precedence = "override"
+SPDX-FileCopyrightText = "IGN (Institut national de l'information géographique et forestière), RGE ALTI®"
+SPDX-License-Identifier = "etalab-2.0"

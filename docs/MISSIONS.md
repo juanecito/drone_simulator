@@ -165,7 +165,10 @@ Instead of `orthophotoFiles`, file and online terrain can be covered with imager
 ```
 
 - **Providers:** the built-in ones are IGN PNOA (Spain), swisstopo SWISSIMAGE
-  (Switzerland) and USGS The National Map (USA); none needs a key. You can add others that
+  (Switzerland), USGS The National Map (USA), the Géoplateforme of IGN France
+  (`geoplateforme-imagery`: aerial photographs, or the Plan IGN map with
+  `"imageryDataset": "GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"`) and the OpenStreetMap standard
+  map (`osm-standard`); none needs a key. You can add others that
   serve Web-Mercator tiles (XYZ, TMS, WMTS `GoogleMapsCompatible`) or EPSG:3857 WMS maps.
   `imageryDataset` picks a layer; without it the provider's default layer is used.
 - **Files or a provider:** a mission gives `orthophotoFiles` or `imageryProvider`, not both.
@@ -229,6 +232,10 @@ its dataset (e.g. `"COP30"`, else the provider's default). `origin` is required.
   providers, which keeps it in the system keyring. The environment variable
   `DS_API_KEY_OPENTOPOGRAPHY=<your key>` overrides the stored key. Without a key a mission is
   *unavailable* unless its area is already cached.
+- **France:** `"elevationProvider": "geoplateforme-elevation"` uses the Géoplateforme of IGN
+  France (cartes.gouv.fr), without a key: RGE ALTI at 5 m by default, or
+  `"dataset": "IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.WGS84G"` for the 1 m LiDAR HD
+  terrain model (see the Terrain guide).
 - **Your own provider:** `elevationProvider` may also be the key of a provider added in
   Settings › Data providers.
 - **Origin:** as for files: with `altRef` `"AMSL"` that altitude is height 0, otherwise the

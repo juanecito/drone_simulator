@@ -14,6 +14,10 @@
 namespace ds::net {
 namespace {
 
+// Streamed blocks are fetched with a few pixels of margin, and blocks of a latitude band are
+// slightly wider than blockSizeKm.
+constexpr double kBlockPxHeadroom = 1.1;
+
 using common::Json;
 using common::JsonReader;
 
@@ -170,7 +174,8 @@ common::Result<ProviderConfig> parseProvider(const Json& json) {
                       "insecureHttp",   "maxResponseBytes",
                       "contentTypes",   "quotaErrorPatterns",
                       "blockSizeKm",    "origin",
-                      "tileSizePx"});
+                      "tileSizePx",     "maxSizePx",
+                      "serveStale"});
     const int version = r.integer("schemaVersion", 1, 1000);
     if (r.ok() && version > kProviderSchemaVersion) {
         r.fail("schemaVersion",
@@ -252,6 +257,23 @@ common::Result<ProviderConfig> parseProvider(const Json& json) {
     p.contentTypes = stringList(r, "contentTypes");
     p.quotaErrorPatterns = stringList(r, "quotaErrorPatterns");
     p.blockSizeKm = r.number("blockSizeKm", 1.0, 500.0, 20.0);
+    p.serveStale = r.boolean("serveStale", true);
+    p.maxSizePx = optionalInteger(r, "maxSizePx", 64, 1'000'000);
+    if (imagery && p.maxSizePx) {
+        r.fail("maxSizePx", "is for bounding-box providers");
+    } else if (r.ok() && p.maxSizePx) {
+        // A streamed block, with its margin, must fit in one response.
+        for (const DatasetConfig& d : p.datasets) {
+            const double px = p.blockSizeKm * 1000.0 / d.resolutionM * kBlockPxHeadroom;
+            if (px > *p.maxSizePx) {
+                r.fail("blockSizeKm",
+                       std::format("blocks of {:g} km need about {:.0f} px at the {:g} m of "
+                                   "\"{}\", more than maxSizePx ({})",
+                                   p.blockSizeKm, px, d.resolutionM, d.id, *p.maxSizePx));
+                break;
+            }
+        }
+    }
     p.origin = r.has("origin") ? r.choice("origin", {"builtin", "user"}) : "builtin";
     if (!r.ok()) {
         return common::makeError(r.errorText());
@@ -337,6 +359,10 @@ Json toJson(const ProviderConfig& p) {
     j["contentTypes"] = p.contentTypes;
     j["quotaErrorPatterns"] = p.quotaErrorPatterns;
     j["blockSizeKm"] = p.blockSizeKm;
+    j["serveStale"] = p.serveStale;
+    if (p.maxSizePx) {
+        j["maxSizePx"] = *p.maxSizePx;
+    }
     j["origin"] = p.origin;
     return j;
 }

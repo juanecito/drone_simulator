@@ -37,10 +37,16 @@ double greatCircleKm(double lat1, double lon1, double lat2, double lon2) noexcep
 
 }  // namespace
 
-std::uint64_t estimateResponseBytes(const GeoRect& area, const DatasetConfig& dataset) noexcept {
+ResponseSize responseSizePx(const GeoRect& area, const DatasetConfig& dataset) noexcept {
     const double resKm = dataset.resolutionM / 1000.0;
-    const double px = std::ceil(area.widthKm() / resKm) * std::ceil(area.heightKm() / resKm);
-    return static_cast<std::uint64_t>(px * dataset.bytesPerSample);
+    return {static_cast<long>(std::ceil(area.widthKm() / resKm)),
+            static_cast<long>(std::ceil(area.heightKm() / resKm))};
+}
+
+std::uint64_t estimateResponseBytes(const GeoRect& area, const DatasetConfig& dataset) noexcept {
+    const ResponseSize size = responseSizePx(area, dataset);
+    return static_cast<std::uint64_t>(static_cast<double>(size.width) *
+                                      static_cast<double>(size.height) * dataset.bytesPerSample);
 }
 
 NetResult<std::vector<GeoRect>> planExtentRequests(const GeoRect& area,
@@ -57,8 +63,10 @@ NetResult<std::vector<GeoRect>> planExtentRequests(const GeoRect& area,
     const double maxArea = dataset.maxAreaKm2.value_or(std::numeric_limits<double>::infinity());
     // Leave 10 % headroom: the payload has headers and the estimate is approximate.
     const auto maxBytes = static_cast<double>(provider.maxResponseBytes) * 0.9;
+    const long maxPx = provider.maxSizePx.value_or(std::numeric_limits<int>::max());
     auto fits = [&](const GeoRect& r) {
-        return r.areaKm2() <= maxArea &&
+        const ResponseSize size = responseSizePx(r, dataset);
+        return r.areaKm2() <= maxArea && size.width <= maxPx && size.height <= maxPx &&
                static_cast<double>(estimateResponseBytes(r, dataset)) <= maxBytes;
     };
     for (int count = 1; count <= kMaxPieces; ++count) {

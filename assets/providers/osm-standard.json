@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "key": "osm-standard",
+  "name": "OpenStreetMap standard map",
+  "kind": "imagery",
+  "protocol": "xyz",
+  "x-note": "Standard tile layer of the OpenStreetMap Foundation; URL and rules from its tile usage policy (operations.osmfoundation.org/policies/tiles, read 2026-11-21): HTTPS on tile.openstreetmap.org only, a distinct User-Agent (DroneSimulator/<version>), cache headers honoured (7 days without them), no bulk download, prefetching or offline use, so expired tiles are never used (serveStale false). The policy may change and heavy use may be blocked without notice; recheck before release.",
+  "urlTemplate": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  "format": "image/png",
+  "crs": "EPSG:3857",
+  "tileSizePx": 256,
+  "defaultDataset": "standard",
+  "datasets": [
+    { "id": "standard", "name": "Standard map (world)",
+      "minZoom": 0, "maxZoom": 19,
+      "coverage": { "west": -180.0, "south": -85.0511, "east": 180.0, "north": 85.0511 },
+      "attribution": "© OpenStreetMap contributors" }
+  ],
+  "requiresKey": false,
+  "attribution": "Map data © OpenStreetMap contributors, ODbL (openstreetmap.org/copyright)",
+  "licence": "Map data under the Open Database Licence (ODbL) 1.0. Tiles of the OSMF standard layer under its tile usage policy: no bulk download, prefetching or offline use; access may be blocked without notice.",
+  "termsUrl": "https://operations.osmfoundation.org/policies/tiles/",
+  "allowCache": true,
+  "maxAgeDays": 7,
+  "serveStale": false,
+  "rateLimitRps": 4,
+  "dailyCallLimit": null,
+  "maxConcurrent": 2,
+  "insecureHttp": false,
+  "maxResponseBytes": 1048576,
+  "contentTypes": ["image/png"],
+  "quotaErrorPatterns": []
+}

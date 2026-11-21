@@ -5,7 +5,8 @@ Drone Simulator flies over three kinds of terrain:
 - **procedural** terrain, generated from a seed (the default);
 - **elevation files** you provide: rasters (COG / GeoTIFF, `.hgt`, `.asc`, `.img`) or
   classified lidar point clouds (LAS / LAZ);
-- **online elevation** from a web service such as OpenTopography.
+- **online elevation** from a web service such as OpenTopography or the French
+  Géoplateforme (cartes.gouv.fr).
 
 File and online terrain can be covered with **aerial imagery**, either from orthophoto files
 or streamed from an imagery provider.
@@ -139,12 +140,34 @@ Data providers). Supported services are Web-Mercator tile services (EPSG:3857):
 |---|---|---|
 | `xyz` | `{z}`, `{x}`, `{y}` | `https://tiles.example.org/{z}/{x}/{y}.jpg` |
 | `tms` | as xyz, rows counted from the south | |
-| `wmts` | as xyz (`TileMatrix={z}&TileRow={y}&TileCol={x}`) | `GoogleMapsCompatible` matrix set only |
+| `wmts` | as xyz (`TileMatrix={z}&TileRow={y}&TileCol={x}`) | `GoogleMapsCompatible` matrix set, or one with the same grid (the Géoplateforme's `PM_0_19`) |
 | `wms` | `{bbox}` (EPSG:3857 metres), `{width}`, `{height}` | `…&CRS=EPSG:3857&BBOX={bbox}&WIDTH={width}&HEIGHT={height}` |
 
-The built-in providers are **IGN PNOA** (Spain), **swisstopo SWISSIMAGE** (Switzerland) and
-**USGS The National Map** (USA). None needs a key. Imagery is not downloaded ahead of a flight:
-what you have flown over stays in the cache and is used offline.
+The built-in providers need no key:
+
+| Provider | Key | Layers | Area |
+|---|---|---|---|
+| IGN PNOA | `ign-pnoa` | orthophotos | Spain |
+| swisstopo SWISSIMAGE | `swisstopo-swissimage` | orthophotos | Switzerland |
+| USGS The National Map | `usgs-imagery` | orthophotos | USA |
+| Géoplateforme (IGN France, cartes.gouv.fr) | `geoplateforme-imagery` | `ORTHOIMAGERY.ORTHOPHOTOS` (BD ORTHO aerial photographs), `GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2` (Plan IGN map) | metropolitan France and Corsica |
+| OpenStreetMap | `osm-standard` | the standard map | world |
+
+Imagery is not downloaded ahead of a flight: what you have flown over stays in the cache and
+is used offline, for as long as the provider allows.
+
+**OpenStreetMap** draws a street map, not a photograph, on the terrain: useful to find roads,
+paths and buildings. Its tile servers are run by volunteers on donated resources, and their
+[tile usage policy](https://operations.osmfoundation.org/policies/tiles/) applies:
+
+- tiles are fetched only for the area you are flying over, two at a time, and never in bulk;
+- the simulator honours the servers' cache lifetime (at least 7 days), and it never uses
+  expired tiles offline, which the policy forbids (`"serveStale": false`): without network,
+  only recently fetched tiles are shown;
+- the attribution "© OpenStreetMap contributors" is shown in the view;
+- heavy use can be blocked by the OpenStreetMap operators without notice. For a lot of
+  flying, add your own tile server or a commercial OpenStreetMap tile service in Settings ›
+  Data providers.
 
 ## Mission folders and paths
 
@@ -241,6 +264,9 @@ Online elevation comes from REST services that return a raster for a bounding bo
 | `allowCache`, `maxAgeDays` | Caching allowed by the terms, and for how long. |
 | `rateLimitRps`, `dailyCallLimit`, `maxConcurrent` | Request limits. |
 | `maxResponseBytes`, `contentTypes`, `quotaErrorPatterns` | Response checks. |
+| `maxSizePx` | Largest image the server makes (a WMS's `MaxWidth`); larger areas are split. |
+| `serveStale` | `false` if expired cache entries may not stand in offline (default `true`). |
+| `blockSizeKm` | Side of the blocks streamed around the drone. |
 
 **OpenTopography** (built in): create a free account at
 <https://portal.opentopography.org/>, request an API key, and enter it in Settings › Data
@@ -248,6 +274,21 @@ providers. It is stored in the system keyring (or in the private database if the
 keyring). It can also come from the environment variable `DS_API_KEY_OPENTOPOGRAPHY`.
 Non-academic keys allow **50 calls per 24 hours**. The simulator counts them, shows what is
 left, and asks before a download. *Test connection* uses one call.
+
+**Géoplateforme** (built in, `geoplateforme-elevation`): the French mapping agency IGN's
+elevation service on cartes.gouv.fr, free and without a key. It covers metropolitan France and
+Corsica with three layers, all heights in NGF-IGN69 (IGN78 in Corsica):
+
+| Dataset | Resolution | |
+|---|---|---|
+| `ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES` | 5 m | RGE ALTI, the default |
+| `IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.WGS84G` | 1 m | terrain model from the LiDAR HD survey; parts not yet surveyed have no data |
+| `ELEVATION.ELEVATIONGRIDCOVERAGE` | 25 m | BD ALTI |
+
+The data is under the Licence Ouverte 2.0 (Etalab): free use, including commercial use, with
+the source named; the attribution is shown in the view. The service allows 40 requests per
+second and images of up to 5010 px a side, so the simulator asks for at most 5000 px and
+streams 4 km blocks.
 
 - **Areas:** a bounded online terrain (an online mission defaults to 10 × 10 km) is downloaded
   once, in as few requests as the provider's limits allow, before the flight. It is then

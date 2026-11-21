@@ -144,6 +144,34 @@ TEST(RasterMemory, OpensPayloadsAndPiecesOfALargerSurface) {
     EXPECT_FALSE(terrain::RasterSource::openMemory(junk, options, "junk").has_value());
 }
 
+TEST(RasterMemory, OpensAGeoplateformeResponse) {
+    // A real WMS-R answer (RGE ALTI over Chamonix, © IGN, Licence Ouverte 2.0): 32-bit float
+    // heights, NoData -99999, and an unnamed geographic CRS whose GeoTIFF tags libtiff
+    // complains about.
+    const fs::path file = fs::path(DS_TEST_FIXTURES_DIR) / "online" / "geoplateforme-rge-alti.tif";
+    std::string bytes(static_cast<std::size_t>(fs::file_size(file)), '\0');
+    std::ifstream in(file, std::ios::binary);
+    ASSERT_TRUE(in.read(bytes.data(), static_cast<std::streamsize>(bytes.size())));
+    const std::array<std::string, 1> payload{std::move(bytes)};
+    terrain::RasterOptions options;
+    options.origin = geo::LatLon{45.905, 6.8675};
+    options.verticalDatum = "NGF-IGN69";
+    auto raster = terrain::RasterSource::openMemory(payload, options, "Géoplateforme RGE ALTI");
+    ASSERT_TRUE(raster.has_value()) << raster.error().message;
+    const terrain::SourceMetadata& meta = (*raster)->metadata();
+    EXPECT_GT(meta.minHeightM, 1000.0);
+    EXPECT_LT(meta.maxHeightM, 1900.0);
+    // East and north the right way round: bilinear values of the file at 300 m from the
+    // origin, computed with GDAL's Python bindings.
+    EXPECT_NEAR(meta.origin.heightM, 1465.07, 0.5);
+    const auto amsl = [&](double x, double z) {
+        return (*raster)->height(x, z) + meta.origin.heightM;
+    };
+    EXPECT_NEAR(amsl(300.0, 0.0), 1663.50, 0.5);
+    EXPECT_NEAR(amsl(0.0, -300.0), 1404.35, 0.5);
+    EXPECT_NEAR(amsl(-300.0, 300.0), 1331.19, 0.5);
+}
+
 // A flat source whose eastern half rises when "data arrives".
 class ArrivingSource final : public terrain::HeightSource {
 public:
