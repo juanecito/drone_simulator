@@ -352,6 +352,57 @@ TEST_F(FileTerrainTest, TerrainTabDrapesOrthophotos) {
     EXPECT_TRUE(panel.formConfig().ortho.files.empty());
 }
 
+TEST_F(FileTerrainTest, TerrainTabInterpolatesAndSmoothsTheElevation) {
+    const fs::path dem = homeDir() / "dem.tif";
+    test::RasterSpec spec = test::planarUtmSpec();
+    spec.value = [](int i, int j) { return i == 100 && j == 100 ? 900.0 : 500.0; };  // A spike.
+    test::writeRaster(dem, spec);
+    SceneController scene(settings_.get(), findAssetDirectory());
+    TerrainPanel panel(scene);
+    TerrainConfig config;
+    config.kind = TerrainKind::File;
+    config.file.files = {dem};
+    panel.setFormConfig(config);
+    auto* box = panel.findChild<QWidget*>(QStringLiteral("ProcessingBox"));
+    ASSERT_NE(box, nullptr);
+    EXPECT_FALSE(box->isHidden());
+    auto* interpolation = panel.findChild<QComboBox*>(QStringLiteral("InterpolationCombo"));
+    auto* despike = panel.findChild<QDoubleSpinBox*>(QStringLiteral("DespikeSpin"));
+    auto* smooth = panel.findChild<QDoubleSpinBox*>(QStringLiteral("SmoothSpin"));
+    ASSERT_TRUE(interpolation && despike && smooth);
+    EXPECT_EQ(panel.formConfig().processing, terrain::HeightProcessing{});
+    ASSERT_TRUE(panel.regenerate());
+    EXPECT_GT(scene.terrain().origin.heightM, 550.0);  // The spike touches the origin.
+
+    interpolation->setCurrentIndex(
+        interpolation->findData(static_cast<int>(terrain::HeightInterpolation::Bicubic)));
+    despike->setValue(10.0);
+    smooth->setValue(20.0);
+    const terrain::HeightProcessing wanted{.interpolation = terrain::HeightInterpolation::Bicubic,
+                                           .despikeRadiusM = 10.0,
+                                           .smoothRadiusM = 20.0};
+    EXPECT_EQ(panel.formConfig().processing, wanted);
+    ASSERT_TRUE(panel.regenerate());
+    EXPECT_EQ(scene.terrain().processing, wanted);
+    EXPECT_NEAR(scene.terrain().origin.heightM, 500.0, 1e-6);
+    EXPECT_NEAR(scene.query().height(5.0, 5.0), 0.0, 1e-6);
+    const QString meta = panel.findChild<QLabel*>(QStringLiteral("MetadataLabel"))->text();
+    EXPECT_TRUE(meta.contains(QStringLiteral("bicubic, spikes removed within 10 m")))
+        << meta.toStdString();
+
+    // Loading a configuration shows its processing; procedural terrain hides the group.
+    TerrainConfig other = config;
+    other.processing.interpolation = terrain::HeightInterpolation::Nearest;
+    panel.setFormConfig(other);
+    EXPECT_EQ(interpolation->currentData().toInt(),
+              static_cast<int>(terrain::HeightInterpolation::Nearest));
+    EXPECT_EQ(despike->value(), 0.0);
+    EXPECT_EQ(despike->text(), QStringLiteral("Off"));
+    panel.findChild<QComboBox*>(QStringLiteral("SourceCombo"))->setCurrentIndex(0);
+    EXPECT_TRUE(box->isHidden());
+    EXPECT_EQ(panel.formConfig().processing, terrain::HeightProcessing{});
+}
+
 TEST_F(FileTerrainTest, ADamagedElevationFileStopsTheMission) {
     writeDemMission(std::string(64, 'a'));  // Not the file's sha256.
     openWindow();

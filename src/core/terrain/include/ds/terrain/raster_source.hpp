@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "ds/geo/coordinates.hpp"
+#include "ds/terrain/height_processing.hpp"
 #include "ds/terrain/height_source.hpp"
 #include "ds/terrain/procedural_source.hpp"
 #include "ds/terrain/terrain_error.hpp"
@@ -50,6 +51,10 @@ struct RasterOptions {
     EdgeMode edge = EdgeMode::Cliff;
     /// Width of the fade band, metres.
     static constexpr double kFadeBandM = 500.0;
+    /// Interpolation between cells and filters (FR-TER-C03). Filters work on cells of the
+    /// raster: a filter radius of more than a few cells reads coarser (averaged) cells, at
+    /// most 6 cells across for the spike filter and 24 for smoothing.
+    HeightProcessing processing;
     /// A piece of a larger surface (an online streaming block): the source has no extent and
     /// the origin may lie outside the data, in which case @ref originAltitudeM is required.
     /// The caller only queries points the data covers.
@@ -84,7 +89,9 @@ struct SourceMetadata {
 /// GDAL block cache of 256 MB. Grids up to RasterOptions::fullDetailStepM read full-resolution
 /// pixels, so they equal height() bit for bit; coarser grids read data averaged over aligned
 /// blocks (from overviews when present), which agree between windows to float rounding.
-/// Heights are bilinear between pixel centres. NoData pixels are filled
+/// Heights are interpolated between pixel centres (bilinear by default, or as
+/// RasterOptions::processing says; filtered pixels are computed once per 128-px tile and kept
+/// in a process-wide cache of 64 MB). NoData pixels are filled
 /// from valid pixels within 8 pixels (inverse-distance weights), otherwise with the lowest
 /// elevation of the data (FR-TER-C01). Read errors in a damaged file count as NoData and are
 /// counted (readErrors()). Thread-safe; each thread reads through its own GDAL handle.
@@ -136,6 +143,16 @@ private:
     void sampleAmsl(Reader& reader, std::span<const double> xs, std::span<const double> zs, int d,
                     std::span<double> out) const;
     [[nodiscard]] int decimationFor(double step) const noexcept;
+    // Pixels [a0, a1) × [b0, b1) on the grid decimated by @p d, as metres AMSL with voids
+    // filled and the filters applied, into @p out (row-major).
+    void pixels(Reader& reader, int d, int a0, int b0, int a1, int b1,
+                std::vector<double>& out) const;
+    // Raw pixels with voids filled (no filters) of the same block.
+    void filledPixels(Reader& reader, int d, int a0, int b0, int a1, int b1,
+                      std::vector<double>& out) const;
+    // Filtered tile (@p tx, @p ty) of decimation @p d, from the cache or computed.
+    [[nodiscard]] std::shared_ptr<const std::vector<double>> tile(Reader& reader, int d, int tx,
+                                                                  int ty) const;
     // Applies the edge treatment to a height AMSL at world (x, z).
     [[nodiscard]] double edged(double amsl, double x, double z) const noexcept;
 
@@ -145,6 +162,7 @@ private:
     double originAltitude_ = 0.0;
     double fallbackAmsl_ = 0.0;
     double fadeBandM_ = 0.0;  // 0 ⇒ no fading.
+    std::uint64_t serial_ = 0;  // Key of this source's tiles in the cache.
     bool unbounded_ = false;
     mutable std::mutex readersMutex_;
     mutable std::vector<std::unique_ptr<Reader>> readers_;

@@ -143,8 +143,10 @@ rate.
   `.img`) or an online provider (*Download Area…* keeps an area for offline use). Choose a
   preset (built-in or your own: *Save As…* / *Delete*), set the seed
   (*Random*), shape parameters, water level, unlimited or custom dimensions with the edge
-  treatment, and the geographic origin; *Regenerate* applies them. A shaded 2D preview shows
-  the result.
+  treatment, and the geographic origin; *Regenerate* applies them. For file and online
+  elevation, *Elevation processing* chooses the interpolation (bilinear, bicubic, B-spline
+  or nearest) and can remove spikes and smooth the heights; for lidar, a cell takes the
+  mean or the lowest ground point. A shaded 2D preview shows the result.
 - **Environment tab:** date and time in any time zone (or UTC), *Now*, a time-of-day slider and
   running time (up to 3600×); Sun and Moon position, phase, rise/set and twilight times; exposure
   (automatic with compensation, or manual EV), visibility (haze and fog), the wind level

@@ -120,6 +120,7 @@ private:
     QCheckBox* lidarAuto_ = nullptr;
     QDoubleSpinBox* lidarResolution_ = nullptr;
     QComboBox* lidarInterpolation_ = nullptr;
+    QComboBox* lidarCell_ = nullptr;
     QLabel* bandLabel_ = nullptr;
     QGroupBox* onlineBox_ = nullptr;
     QComboBox* provider_ = nullptr;
@@ -128,6 +129,11 @@ private:
     QPushButton* download_ = nullptr;
     QLabel* quota_ = nullptr;
     QTimer* refresh_ = nullptr;
+    // Interpolation and filters of file and online elevation (FR-TER-C03).
+    QGroupBox* processingBox_ = nullptr;
+    QComboBox* interpolation_ = nullptr;
+    QDoubleSpinBox* despike_ = nullptr;
+    QDoubleSpinBox* smooth_ = nullptr;
     QGroupBox* orthoBox_ = nullptr;  // Orthophotos over file or online elevation (FR-TER-I10).
     QFormLayout* orthoForm_ = nullptr;
     QComboBox* orthoSource_ = nullptr;  // Files, or an online imagery provider (FR-TER-O10).

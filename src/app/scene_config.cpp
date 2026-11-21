@@ -96,6 +96,9 @@ QJsonObject fileToJson(const FileTerrainConfig& f) {
         json.insert(QStringLiteral("interpolation"),
                     f.interpolation == terrain::LidarInterpolation::Idw ? QStringLiteral("idw")
                                                                         : QStringLiteral("tin"));
+        json.insert(QStringLiteral("cellHeight"), f.cellHeight == terrain::LidarCellHeight::Lowest
+                                                      ? QStringLiteral("lowest")
+                                                      : QStringLiteral("mean"));
         json.insert(QStringLiteral("classifyGround"), f.classifyGround);
     }
     return json;
@@ -154,6 +157,12 @@ common::Result<FileTerrainConfig> fileFromJson(const QJsonObject& json) {
     }
     f.interpolation = interpolation == QLatin1String("idw") ? terrain::LidarInterpolation::Idw
                                                             : terrain::LidarInterpolation::Tin;
+    const QString cell = json.value(QStringLiteral("cellHeight")).toString(QStringLiteral("mean"));
+    if (cell != QLatin1String("mean") && cell != QLatin1String("lowest")) {
+        return common::makeError("'cellHeight' must be \"mean\" or \"lowest\"");
+    }
+    f.cellHeight = cell == QLatin1String("lowest") ? terrain::LidarCellHeight::Lowest
+                                                   : terrain::LidarCellHeight::Mean;
     f.classifyGround = json.value(QStringLiteral("classifyGround")).toBool(false);
     return f;
 }
@@ -253,6 +262,38 @@ common::Result<OnlineTerrainConfig> onlineFromJson(const QJsonObject& json) {
     return o;
 }
 
+QJsonObject processingToJson(const terrain::HeightProcessing& p) {
+    return QJsonObject{
+        {QStringLiteral("interpolation"),
+         QString::fromUtf8(terrain::interpolationName(p.interpolation))},
+        {QStringLiteral("despikeRadiusM"), p.despikeRadiusM},
+        {QStringLiteral("smoothRadiusM"), p.smoothRadiusM},
+    };
+}
+
+common::Result<terrain::HeightProcessing> processingFromJson(const QJsonObject& json) {
+    terrain::HeightProcessing p;
+    const QString name =
+        json.value(QStringLiteral("interpolation")).toString(QStringLiteral("bilinear"));
+    const auto interpolation = terrain::interpolationFromName(name.toStdString());
+    if (!interpolation) {
+        return common::makeError(
+            "'processing.interpolation' must be \"bilinear\", \"bicubic\", \"bspline\" or "
+            "\"nearest\"");
+    }
+    p.interpolation = *interpolation;
+    for (const auto& [key, out] : {std::pair{"despikeRadiusM", &p.despikeRadiusM},
+                                   std::pair{"smoothRadiusM", &p.smoothRadiusM}}) {
+        if (auto r = readNumber(json, key, *out); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+    if (const std::string bad = terrain::validateProcessing(p); !bad.empty()) {
+        return common::makeError(bad);
+    }
+    return p;
+}
+
 QString sourceName(TerrainKind kind) {
     switch (kind) {
         case TerrainKind::File: return QStringLiteral("file");
@@ -265,8 +306,8 @@ QString sourceName(TerrainKind kind) {
 
 bool TerrainConfig::operator==(const TerrainConfig& o) const noexcept {
     return kind == o.kind && file == o.file && online == o.online && ortho == o.ortho &&
-           presetKey == o.presetKey && params == o.params && extent == o.extent &&
-           origin.latitudeDeg == o.origin.latitudeDeg &&
+           processing == o.processing && presetKey == o.presetKey && params == o.params &&
+           extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
            origin.longitudeDeg == o.origin.longitudeDeg && origin.heightM == o.origin.heightM;
 }
 
@@ -388,6 +429,9 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
     if (c.kind != TerrainKind::Procedural && c.ortho.any()) {
         json.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
     }
+    if (c.kind != TerrainKind::Procedural && c.processing != terrain::HeightProcessing{}) {
+        json.insert(QStringLiteral("processing"), processingToJson(c.processing));
+    }
     return json;
 }
 
@@ -421,6 +465,14 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
             return std::unexpected(o.error());
         }
         c.ortho = std::move(*o);
+    }
+    if (const QJsonValue processing = json.value(QStringLiteral("processing"));
+        processing.isObject() && c.kind != TerrainKind::Procedural) {
+        auto p = processingFromJson(processing.toObject());
+        if (!p) {
+            return std::unexpected(p.error());
+        }
+        c.processing = *p;
     }
     auto params = paramsFromJson(json.value(QStringLiteral("params")).toObject());
     if (!params) {
@@ -596,6 +648,9 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     if (c.kind != TerrainKind::Procedural && c.ortho.any()) {
         params.insert(QStringLiteral("ortho"), orthoToJson(c.ortho));
     }
+    if (c.kind != TerrainKind::Procedural && c.processing != terrain::HeightProcessing{}) {
+        params.insert(QStringLiteral("processing"), processingToJson(c.processing));
+    }
     r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
     return r;
 }
@@ -640,6 +695,14 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         }
         c.ortho = std::move(*o);
     }
+    if (const QJsonValue processing = doc.object().value(QStringLiteral("processing"));
+        processing.isObject() && c.kind != TerrainKind::Procedural) {
+        auto p = processingFromJson(processing.toObject());
+        if (!p) {
+            return common::makeError(std::format("preset '{}': {}", r.name, p.error().message));
+        }
+        c.processing = *p;
+    }
     c.presetKey = r.key;
     c.params = std::move(*params);
     if (r.seed) {
@@ -666,6 +729,7 @@ common::Result<terrain::OnlineTerrainRequest> onlineRequest(const TerrainConfig&
     r.originAltitudeM = config.online.originAltitudeM;
     r.extent = config.extent;
     r.edge = config.online.edge;
+    r.processing = config.processing;
     return r;
 }
 
@@ -765,6 +829,13 @@ terrain::OrthoOptions orthoOptions(const OrthoConfig& o) {
 
 namespace {
 
+// FR-TER-C03: the metadata view says how the heights were processed.
+void noteProcessing(const TerrainConfig& config, terrain::SourceMetadata& meta) {
+    if (config.processing != terrain::HeightProcessing{}) {
+        meta.notes.push_back("Heights: " + terrain::describeProcessing(config.processing));
+    }
+}
+
 common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServices* data) {
     BuiltTerrain built;
     if (config.kind == TerrainKind::Online) {
@@ -786,6 +857,7 @@ common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServi
         built.attribution = opened->online.attribution;
         built.online = std::move(opened->online);
         built.dataHash = std::move(opened->dataHash);
+        noteProcessing(config, *built.metadata);
         return built;
     }
     if (config.kind == TerrainKind::Procedural) {
@@ -827,6 +899,7 @@ common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServi
     options.originAltitudeM = f.originAltitudeM;
     options.extent = config.extent;
     options.edge = f.edge;
+    options.processing = config.processing;
     auto source = terrain::RasterSource::open(files, options);
     if (!source) {
         return common::makeError(source.error().message);
@@ -845,7 +918,11 @@ common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServi
             "by {}, {} without data",
             lidar->points, lidar->groundPoints, lidar->dropped, lidar->filledCells,
             lidar->interpolation == "idw" ? "IDW" : "TIN", lidar->noDataCells));
+        if (lidar->cellHeight == "lowest") {
+            m.notes.emplace_back("Cells take the lowest ground point");
+        }
     }
+    noteProcessing(config, *built.metadata);
     built.origin = built.metadata->origin;
     built.attribution = f.attribution;
     built.source = std::move(*source);
@@ -863,6 +940,7 @@ terrain::LidarOptions lidarOptions(const FileTerrainConfig& f) {
     terrain::LidarOptions o;
     o.resolutionM = f.resolutionM;
     o.interpolation = f.interpolation;
+    o.cellHeight = f.cellHeight;
     o.crs = f.crs;
     o.classifyGround = f.classifyGround;
     return o;

@@ -73,6 +73,7 @@ RasterOptions rasterOptions(const OnlineTerrainRequest& request,
     o.extent = request.extent;
     o.edge = request.edge;
     o.verticalDatum = dataset.verticalDatum;
+    o.processing = request.processing;
     return o;
 }
 
@@ -98,9 +99,14 @@ TerrainResult<const net::DatasetConfig*> onlineDataset(const OnlineTerrainReques
 }
 
 net::GeoRect blockFetchRect(const net::BlockKey& key, const net::ProviderConfig& provider,
-                            const net::DatasetConfig& dataset) noexcept {
+                            const net::DatasetConfig& dataset,
+                            const HeightProcessing& processing) noexcept {
+    // Filters look this far, plus a filter cell and the cubic support (filters always reach
+    // at least one cell).
+    const double filterM =
+        processing.filtered() ? 1.25 * processing.reachM() + 2.0 * dataset.resolutionM : 0.0;
     return net::blockRect(key, provider.blockSizeKm)
-        .expandedKm(kMarginPixels * dataset.resolutionM / 1000.0);
+        .expandedKm((kMarginPixels * dataset.resolutionM + filterM) / 1000.0);
 }
 
 TerrainResult<net::GeoRect> onlineRequiredArea(const OnlineTerrainRequest& request) {
@@ -127,7 +133,7 @@ TerrainResult<net::GeoRect> onlineRequiredArea(const OnlineTerrainRequest& reque
     } else {
         const net::BlockKey key =
             net::blockAt(o.latitudeDeg, o.longitudeDeg, request.provider.blockSizeKm);
-        area = blockFetchRect(key, request.provider, d);
+        area = blockFetchRect(key, request.provider, d, request.processing);
         const net::GeoRect point{o.longitudeDeg - 1e-6, o.latitudeDeg - 1e-6, o.longitudeDeg + 1e-6,
                                  o.latitudeDeg + 1e-6};
         if (d.coverage && !d.coverage->contains(point)) {
@@ -214,6 +220,9 @@ TerrainResult<OpenedOnlineTerrain> openOnlineTerrain(net::DataClient& client,
     }
     out.data = (*raster)->metadata();
     out.online.pieces = static_cast<int>(plan->size());
+    if (request.processing != HeightProcessing{}) {
+        hashes += "processing " + describeProcessing(request.processing);  // Other heights.
+    }
     out.dataHash = common::sha256Hex(hashes);
     out.source = std::move(*raster);
     return out;
@@ -234,9 +243,9 @@ TerrainResult<std::shared_ptr<OnlineStreamSource>> OnlineStreamSource::open(
     if (!dataset) {
         return std::unexpected(dataset.error());
     }
-    auto area = onlineRequiredArea(OnlineTerrainRequest{request.provider, request.dataset,
-                                                        request.origin, request.originAltitudeM,
-                                                        std::nullopt, request.edge});
+    OnlineTerrainRequest originBlock = request;
+    originBlock.extent.reset();
+    auto area = onlineRequiredArea(originBlock);
     if (!area) {
         return std::unexpected(area.error());
     }
@@ -462,7 +471,8 @@ void OnlineStreamSource::focus(double x, double z) {
         std::weak_ptr<OnlineStreamSource> weak = weak_from_this();
         const net::RequestId id = client_->fetch(
             request_.provider,
-            net::BBoxRequest{dataset_.id, blockFetchRect(b.key, request_.provider, dataset_)},
+            net::BBoxRequest{dataset_.id, blockFetchRect(b.key, request_.provider, dataset_,
+                                                         request_.processing)},
             b.distanceKm, [weak, key = b.key](net::NetResult<net::Payload> r) {
                 if (auto self = weak.lock()) {
                     self->arrived(key, std::move(r));

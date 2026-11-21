@@ -43,6 +43,12 @@ struct FileRef {
 /// @brief Interpolation used to rasterize lidar ground points (FR-TER-L03).
 enum class LidarInterpolation { Tin, Idw };
 
+/// @brief Height a DTM cell takes from the ground points that fall in it (FR-TER-L03).
+enum class LidarCellHeight {
+    Mean,    ///< Mean of the points: the least noise.
+    Lowest,  ///< Lowest point: drops low vegetation or objects classified as ground.
+};
+
 /// @brief Mission terrain with `"source": "file"` (FR-TER-F02, FR-TER-I02).
 struct FileTerrainSpec {
     ElevationFormat format = ElevationFormat::Raster;  ///< `format`: raster | las | laz.

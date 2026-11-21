@@ -288,12 +288,14 @@ public:
           mean_(static_cast<std::size_t>(cols) * static_cast<std::size_t>(rows), kNaN),
           count_(mean_.size(), 0) {}
 
-    void add(int col, int row, float z) {
+    void add(int col, int row, float z, bool lowest) {
         const std::size_t i = index(col, row);
         std::uint16_t& n = count_[i];
         if (n == 0) {
             mean_[i] = z;
             n = 1;
+        } else if (lowest) {
+            mean_[i] = std::min(mean_[i], z);
         } else if (n < std::numeric_limits<std::uint16_t>::max()) {
             ++n;
             mean_[i] += (z - mean_[i]) / static_cast<float>(n);
@@ -651,6 +653,8 @@ TerrainResult<LidarSummary> rasterizeLidar(std::span<const fs::path> files,
     summary.widthPx = cols;
     summary.heightPx = rows;
     summary.interpolation = options.interpolation == LidarInterpolation::Idw ? "idw" : "tin";
+    const bool lowest = options.cellHeight == LidarCellHeight::Lowest;
+    summary.cellHeight = lowest ? "lowest" : "mean";
     Grid grid(cols, rows);
     std::uint64_t done = 0;
     for (const LidarHeader& h : headers) {
@@ -692,7 +696,7 @@ TerrainResult<LidarSummary> rasterizeLidar(std::span<const fs::path> files,
             const double z = (p.Z * hd.z_scale_factor + hd.z_offset) * zToM;
             const int c = std::clamp(static_cast<int>((x - x0) / res), 0, cols - 1);
             const int r = std::clamp(static_cast<int>((y1 - y) / res), 0, rows - 1);
-            grid.add(c, r, static_cast<float>(z));
+            grid.add(c, r, static_cast<float>(z), lowest);
             ++summary.groundPoints;
         }
     }
@@ -756,6 +760,7 @@ TerrainResult<LidarSummary> rasterizeLidar(std::span<const fs::path> files,
     put("NODATA", std::to_string(summary.noDataCells));
     put("CRS", summary.crs);
     put("INTERPOLATION", summary.interpolation);
+    put("CELL_HEIGHT", summary.cellHeight);
     if (written != CE_None) {
         GDALClose(mem);
         return std::unexpected(error(TerrainErrorCode::CorruptData, gdal::lastError()));
@@ -823,6 +828,9 @@ TerrainResult<std::string> lidarDemKey(std::span<const fs::path> files,
                         options.resolutionM ? std::format("{}", *options.resolutionM) : "auto",
                         options.interpolation == LidarInterpolation::Idw ? "idw" : "tin",
                         options.crs, options.classifyGround ? 1 : 0, options.maxHoleM);
+    if (options.cellHeight == LidarCellHeight::Lowest) {
+        text += "cell=lowest\n";  // Means keep the keys of earlier DTMs.
+    }
     return common::sha256Hex(text);
 }
 
@@ -853,6 +861,9 @@ TerrainResult<LidarSummary> readLidarSummary(const fs::path& cog) {
     s.noDataCells = u64("NODATA");
     s.crs = get("CRS");
     s.interpolation = get("INTERPOLATION");
+    if (const std::string cell = get("CELL_HEIGHT"); !cell.empty()) {
+        s.cellHeight = cell;  // DTMs made before the option hold means.
+    }
     s.widthPx = GDALGetRasterXSize(ds.get());
     s.heightPx = GDALGetRasterYSize(ds.get());
     return s;

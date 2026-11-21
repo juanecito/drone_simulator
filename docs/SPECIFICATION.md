@@ -551,6 +551,7 @@ The files travel with the mission (mission folder) or live in the user's geodata
 |----|-------------|-----|
 | FR-TER-C01 | Single-band elevation (or a `band` chosen in the mission); Int16, UInt16, Int32, Float32, Float64; scale/offset applied; NoData filled by interpolation for small voids and a fallback height for large ones. | M |
 | FR-TER-C02 | **Partial reads:** chunks read only the part of the file they need (COG/tiled GeoTIFF tiles, or windows of other formats); coarse LODs use internal overviews when present (otherwise built in memory or, for large files, a COG copy is cached like FR-TER-L05); memory bounded (default 256 MB). | M |
+| FR-TER-C03 | **Interpolation and filters** (file and online elevation, Terrain tab): interpolation between cells bilinear (default), bicubic (Catmull-Rom), cubic B-spline or nearest; a median spike filter (radius ≤ 10 m) and Gaussian smoothing (radius ≤ 100 m), applied after the NoData fill and before interpolation; the mesh, physics and preview use the same heights; filters wider than 6 (median) or 24 (Gaussian) cells read cells averaged by powers of two; saved with the scene and presets (`processing`); missions use the default. | S |
 
 **LAS / LAZ specifics**
 
@@ -2088,6 +2089,36 @@ so Markdown pages appear in the generated site.
     matching GDAL's bilinear values within 0.5 m. CI never contacts the services.
   - *Not done:* OpenStreetMap vector data (buildings, roads, trees as 3D objects or
     obstacles) is not used; only the rendered standard map is draped on the terrain.
+- **After step 9 — Interpolation and smoothing of elevation (done, FR-TER-C03):**
+  - *Core:* `terrain::HeightProcessing` (`ds/terrain/height_processing.hpp`) in
+    `RasterOptions` and `OnlineTerrainRequest`. `RasterSource` interpolates from a block of
+    pixels: 2 × 2 for bilinear and nearest, 4 × 4 for bicubic and B-spline. With a filter on,
+    the pixels come from 128-px tiles. Each tile is read with a margin of fill radius +
+    median + Gaussian half-widths; each stage clamps its neighbours to the block below it,
+    which is the raster border wherever the block reaches it. A pixel's value therefore does
+    not depend on the tile, and full-detail grids still equal height() bit for bit. The tiles
+    live in a process-wide LRU cache of 64 MB, keyed by source, decimation and tile.
+  - *Online:* `blockFetchRect` widens streamed blocks by 1.25 × the filter reach plus two
+    cells when a filter is on (interpolation alone needs no more). The bounded area's
+    300 m margin is enough. A bounded terrain's `dataHash` includes the processing.
+  - *Lidar:* `LidarCellHeight` (mean or lowest ground point, `cellHeight`). The DTM key
+    only changes for *lowest*, so existing cached DTMs stay valid. The COG metadata has
+    `CELL_HEIGHT`.
+  - *App:* `TerrainConfig::processing` in the scene JSON and presets (`processing`,
+    written only when not the default; not for procedural terrain). The metadata view
+    gets a *Heights: …* note. The Terrain tab has the *Elevation processing* group
+    (`InterpolationCombo`, `DespikeSpin`, `SmoothSpin`) and the lidar *Cell height*
+    (`LidarCellCombo`).
+  - *Tests:* every option keeps a plane; nearest shows the raw cells; the cubic slopes are
+    continuous; spikes, pits and checkerboard noise are removed. Filtered heights agree
+    across tile borders, between windows, between sources and between threads. Wide
+    filters on 1 m data use coarser cells. Out-of-range radii are refused. Also covered:
+    JSON, presets and the built metadata; the lidar lowest-point cells and key; streamed
+    block margins and the hash; and the Terrain tab.
+  - *Cost* (release, 1 m data): a 129 × 129 chunk grid takes about 5 ms more when its
+    tiles are first computed, nothing more once cached; a point query is about 2.5 µs
+    instead of 0.5 µs.
+  - *Not done:* missions cannot set the processing; edge-preserving (bilateral) smoothing.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

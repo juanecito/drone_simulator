@@ -43,6 +43,7 @@ struct OnlineTerrainRequest {
     std::optional<double> originAltitudeM;  ///< AMSL of world height 0; empty ⇒ the ground.
     std::optional<Extent> extent;           ///< Bounded terrain; empty ⇒ streaming blocks.
     EdgeMode edge = EdgeMode::Cliff;        ///< Border of a bounded terrain (Cliff or Fade).
+    HeightProcessing processing;            ///< Interpolation and filters (FR-TER-C03).
 };
 
 /// @brief What the metadata view shows about the provider data (FR-TER-O12).
@@ -74,10 +75,12 @@ struct OnlineMetadata {
 [[nodiscard]] TerrainResult<net::GeoRect> onlineRequiredArea(const OnlineTerrainRequest& request);
 
 /// @brief Rectangle fetched for streaming block @p key: the block plus three pixels on every
-/// side, so bilinear interpolation up to the block's border stays inside its data.
+/// side, so interpolation up to the block's border stays inside its data, plus the reach of
+/// the filters of @p processing (if any), so blocks join without seams.
 [[nodiscard]] net::GeoRect blockFetchRect(const net::BlockKey& key,
                                           const net::ProviderConfig& provider,
-                                          const net::DatasetConfig& dataset) noexcept;
+                                          const net::DatasetConfig& dataset,
+                                          const HeightProcessing& processing = {}) noexcept;
 
 /// @brief Tuning of block streaming.
 struct OnlineStreamOptions {

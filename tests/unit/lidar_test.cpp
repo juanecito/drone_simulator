@@ -147,6 +147,35 @@ TEST(Lidar, LasAndLazGiveTheSameDtmOfTheSurface) {
     EXPECT_EQ(summary->widthPx, a->widthPx);
 }
 
+TEST(Lidar, CellsCanTakeTheLowestGroundPoint) {
+    Fixture fx;
+    const auto pts = test::lidarPoints(kX0, kY0, 120, 100, 0.4);  // Several points a cell.
+    const fs::path las = fx.write("low.las", pts);
+    auto mean = rasterizeLidar(std::array{las}, {.resolutionM = 2.0}, fx.dir / "mean.tif");
+    auto low =
+        rasterizeLidar(std::array{las}, {.resolutionM = 2.0, .cellHeight = LidarCellHeight::Lowest},
+                       fx.dir / "low.tif");
+    ASSERT_TRUE(mean.has_value() && low.has_value());
+    EXPECT_EQ(mean->cellHeight, "mean");
+    EXPECT_EQ(low->cellHeight, "lowest");
+    double lower = 0.0;
+    int cells = 0;
+    for (double y = kY0 + 5.5; y < kY0 + 95; y += 7.3) {
+        for (double x = kX0 + 5.5; x < kX0 + 115; x += 6.1) {
+            const auto m = dtmAt(fx.dir / "mean.tif", x, y);
+            const auto l = dtmAt(fx.dir / "low.tif", x, y);
+            ASSERT_TRUE(m && l);
+            EXPECT_LE(*l, *m + 1e-4);
+            lower += *m - *l;
+            ++cells;
+        }
+    }
+    EXPECT_GT(lower / cells, 0.01);  // On a slope the lowest point sits below the mean.
+    auto summary = readLidarSummary(fx.dir / "low.tif");
+    ASSERT_TRUE(summary.has_value());
+    EXPECT_EQ(summary->cellHeight, "lowest");
+}
+
 TEST(Lidar, Las14DropsNoiseAndWithheldPoints) {
     Fixture fx;
     auto pts = test::lidarPoints(kX0, kY0, 60, 60, 1.0);
@@ -302,6 +331,7 @@ TEST(Lidar, DemKeyFollowsTheFilesAndOptions) {
     EXPECT_NE(*key, *lidarDemKey(std::array{f}, {.resolutionM = 1.0}));
     EXPECT_NE(*key, *lidarDemKey(std::array{f}, {.interpolation = LidarInterpolation::Idw}));
     EXPECT_NE(*key, *lidarDemKey(std::array{f}, {.crs = "EPSG:25830"}));
+    EXPECT_NE(*key, *lidarDemKey(std::array{f}, {.cellHeight = LidarCellHeight::Lowest}));
     // A rewritten file is a new key.
     (void)fx.write("k.las", test::lidarPoints(kX0, kY0, 20, 21, 1.0));
     EXPECT_NE(*key, *lidarDemKey(std::array{f}, {}));

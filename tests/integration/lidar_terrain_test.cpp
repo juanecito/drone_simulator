@@ -157,6 +157,12 @@ TEST_F(LidarTerrainTest, TerrainTabMakesTheDtmOnceAndShowsWhatItCameFrom) {
         EXPECT_DOUBLE_EQ(
             panel.findChild<QDoubleSpinBox*>(QStringLiteral("LidarResolutionSpin"))->value(), 2.0);
         EXPECT_EQ(panel.formConfig().file.resolutionM, 2.0);
+        auto* cell = panel.findChild<QComboBox*>(QStringLiteral("LidarCellCombo"));
+        ASSERT_NE(cell, nullptr);
+        EXPECT_EQ(panel.formConfig().file.cellHeight, terrain::LidarCellHeight::Mean);
+        cell->setCurrentIndex(cell->findData(static_cast<int>(terrain::LidarCellHeight::Lowest)));
+        EXPECT_EQ(panel.formConfig().file.cellHeight, terrain::LidarCellHeight::Lowest);
+        cell->setCurrentIndex(cell->findData(static_cast<int>(terrain::LidarCellHeight::Mean)));
 
         ASSERT_TRUE(panel.regenerate());
         EXPECT_EQ(demFiles(demDir), 1);

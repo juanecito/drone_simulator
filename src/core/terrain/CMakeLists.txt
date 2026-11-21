@@ -6,6 +6,7 @@ ds_add_core_module(terrain
         chunk.cpp
         chunk_selection.cpp
         gdal_support.cpp
+        height_processing.cpp
         height_source.cpp
         lidar.cpp
         module.cpp

@@ -53,6 +53,8 @@ struct LidarOptions {
     std::optional<double> resolutionM;
     /// How empty cells up to @ref maxHoleM across are filled.
     LidarInterpolation interpolation = LidarInterpolation::Tin;
+    /// Height of a cell from its ground points.
+    LidarCellHeight cellHeight = LidarCellHeight::Mean;
     /// CRS of files without one (e.g. "EPSG:25831").
     std::string crs;
     /// Requested automatic ground classification (SMRF, FR-TER-L04 S): not available yet, so
@@ -74,6 +76,7 @@ struct LidarSummary {
     std::uint64_t noDataCells = 0;   ///< Cells left without a height.
     std::string crs;                 ///< CRS of the grid.
     std::string interpolation;       ///< "tin" or "idw".
+    std::string cellHeight = "mean";  ///< "mean" or "lowest".
 };
 
 /// @brief Fraction done, 0 … 1 (any thread).
@@ -87,11 +90,11 @@ using LidarProgress = std::function<void(double fraction)>;
 /// @p output.
 /// @details Points are streamed (never the whole cloud in memory). Withheld points and noise
 /// (classes 7, 18) are dropped; ground (2) and water (9) points give the surface. A cell
-/// holds the mean height of its ground points; empty cells inside gaps up to
-/// LidarOptions::maxHoleM across are filled by TIN (Delaunay triangulation of the gap's rim)
-/// or IDW; larger gaps and areas outside the data stay NoData. Heights are written in metres.
-/// The COG is written next to @p output and renamed when complete, so a cancelled or failed
-/// run leaves no file.
+/// holds the mean (or the lowest, LidarOptions::cellHeight) height of its ground points; empty
+/// cells inside gaps up to LidarOptions::maxHoleM across are filled by TIN (Delaunay triangulation
+/// of the gap's rim) or IDW; larger gaps and areas outside the data stay NoData. Heights are
+/// written in metres. The COG is written next to @p output and renamed when complete, so a
+/// cancelled or failed run leaves no file.
 /// @return The summary, or MissingCrs, MixedCrs, NotSupported (geographic CRS, no ground
 /// points), TooLarge, Cancelled, CorruptData, FileNotFound.
 [[nodiscard]] TerrainResult<LidarSummary> rasterizeLidar(

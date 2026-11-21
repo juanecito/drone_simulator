@@ -10,7 +10,9 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <list>
 #include <numbers>
+#include <unordered_map>
 #include <utility>
 
 #include "ds/common/log.hpp"
@@ -25,6 +27,10 @@ namespace ds::terrain {
 namespace {
 
 constexpr int kFillRadiusPx = 8;      // NoData voids up to this distance are interpolated.
+constexpr int kTilePx = 128;          // Side of a filtered tile, decimated pixels.
+constexpr int kMaxMedianPx = 6;       // Largest spike-filter half-width before coarser cells.
+constexpr int kMaxGaussPx = 24;       // Largest smoothing half-width before coarser cells.
+constexpr std::size_t kTileCacheBytes = 64ULL << 20U;  // Filtered tiles of every source.
 constexpr int kStatsSizePx = 512;     // Longest side of the reduced read for min/max/NoData.
 constexpr int kCoverageSamples = 64;  // Points per side when checking a rectangle is covered.
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
@@ -73,6 +79,158 @@ std::string fileList(std::span<const std::filesystem::path> files) {
 
 }  // namespace
 
+namespace {
+
+// A block of pixels [x0, x0 + nx) × [y0, y0 + ny); reads outside are clamped to it.
+struct Plane {
+    int x0 = 0;
+    int y0 = 0;
+    int nx = 0;
+    int ny = 0;
+    std::vector<double> v;
+
+    void reset(int ax, int ay, int bx, int by) {
+        x0 = ax;
+        y0 = ay;
+        nx = bx - ax;
+        ny = by - ay;
+        v.assign(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny), kNaN);
+    }
+    [[nodiscard]] std::size_t index(int i, int j) const noexcept {
+        return static_cast<std::size_t>(j - y0) * static_cast<std::size_t>(nx) +
+               static_cast<std::size_t>(i - x0);
+    }
+    [[nodiscard]] double at(int i, int j) const noexcept {
+        return v[index(std::clamp(i, x0, x0 + nx - 1), std::clamp(j, y0, y0 + ny - 1))];
+    }
+    double& ref(int i, int j) noexcept { return v[index(i, j)]; }
+};
+
+// Filter half-widths on a decimated grid, pixels.
+struct Kernel {
+    int medianX = 0;
+    int medianY = 0;
+    int gaussX = 0;
+    int gaussY = 0;
+    std::vector<double> weightsX;  // 2·gaussX + 1 normalised weights.
+    std::vector<double> weightsY;
+};
+
+std::vector<double> gaussWeights(int half, double sigma) {
+    std::vector<double> w(static_cast<std::size_t>(2 * half + 1));
+    double sum = 0.0;
+    for (int k = -half; k <= half; ++k) {
+        const double x = static_cast<double>(k) / sigma;
+        w[static_cast<std::size_t>(k + half)] = std::exp(-0.5 * x * x);
+        sum += w[static_cast<std::size_t>(k + half)];
+    }
+    for (double& x : w) {
+        x /= sum;
+    }
+    return w;
+}
+
+Kernel kernelFor(const HeightProcessing& p, double pixelX, double pixelY) {
+    Kernel k;
+    k.medianX = static_cast<int>(std::lround(p.despikeRadiusM / pixelX));
+    k.medianY = static_cast<int>(std::lround(p.despikeRadiusM / pixelY));
+    if (p.despikeRadiusM > 0.0 && k.medianX == 0 && k.medianY == 0) {
+        k.medianX = k.medianY = 1;  // Smaller than a cell: the 3 × 3 neighbourhood.
+    }
+    // σ is half the radius; a σ under a third of a pixel changes nothing.
+    const auto gauss = [&](double pixel, int& half, std::vector<double>& weights) {
+        const double sigma = 0.5 * p.smoothRadiusM / pixel;
+        if (sigma >= 1.0 / 3.0) {
+            half = static_cast<int>(std::ceil(p.smoothRadiusM / pixel));
+            weights = gaussWeights(half, sigma);
+        }
+    };
+    gauss(pixelX, k.gaussX, k.weightsX);
+    gauss(pixelY, k.gaussY, k.weightsY);
+    return k;
+}
+
+// The cache of filtered tiles shared by every raster source.
+struct TileKey {
+    std::uint64_t source = 0;
+    int d = 0;
+    int tx = 0;
+    int ty = 0;
+    bool operator==(const TileKey&) const = default;
+};
+struct TileKeyHash {
+    std::size_t operator()(const TileKey& k) const noexcept {
+        std::uint64_t h = k.source * std::uint64_t{0x9E3779B97F4A7C15};
+        h ^= (static_cast<std::uint64_t>(static_cast<std::uint32_t>(k.tx)) << 32U) ^
+             static_cast<std::uint32_t>(k.ty);
+        h ^= static_cast<std::uint64_t>(k.d) * std::uint64_t{0xBF58476D1CE4E5B9};
+        return static_cast<std::size_t>(h ^ (h >> 29U));
+    }
+};
+using TileData = std::shared_ptr<const std::vector<double>>;
+
+class TileCache {
+public:
+    static TileCache& instance() {
+        static TileCache cache;
+        return cache;
+    }
+    TileData find(const TileKey& key) {
+        const std::scoped_lock lock(mutex_);
+        const auto it = map_.find(key);
+        if (it == map_.end()) {
+            return nullptr;
+        }
+        lru_.splice(lru_.begin(), lru_, it->second.position);
+        return it->second.data;
+    }
+    void insert(const TileKey& key, TileData data, std::size_t bytes) {
+        const std::scoped_lock lock(mutex_);
+        if (map_.contains(key)) {
+            return;  // Another thread made the same tile.
+        }
+        bytes_ += bytes;
+        lru_.push_front(key);
+        map_.emplace(key, Entry{std::move(data), bytes, lru_.begin()});
+        while (bytes_ > kTileCacheBytes && lru_.size() > 1) {
+            if (const auto last = map_.find(lru_.back()); last != map_.end()) {
+                bytes_ -= last->second.bytes;
+                map_.erase(last);
+            }
+            lru_.pop_back();
+        }
+    }
+    void forget(std::uint64_t source) {
+        const std::scoped_lock lock(mutex_);
+        for (auto it = lru_.begin(); it != lru_.end();) {
+            if (it->source == source) {
+                if (const auto entry = map_.find(*it); entry != map_.end()) {
+                    bytes_ -= entry->second.bytes;
+                    map_.erase(entry);
+                }
+                it = lru_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+private:
+    struct Entry {
+        TileData data;
+        std::size_t bytes = 0;
+        std::list<TileKey>::iterator position;
+    };
+    std::mutex mutex_;
+    std::list<TileKey> lru_;
+    std::unordered_map<TileKey, Entry, TileKeyHash> map_;
+    std::size_t bytes_ = 0;
+};
+
+std::atomic<std::uint64_t> nextSerial{1};
+
+}  // namespace
+
 // ---------------------------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------------------------
@@ -93,7 +251,11 @@ struct RasterSource::Layout {
     std::string srsWkt;  // Horizontal CRS of the raster.
     std::optional<geo::LocalFrame> frame;
     double pixelSizeM = 1.0;
+    double pixelXM = 1.0;  // Ground size of a pixel along the raster's columns and rows.
+    double pixelYM = 1.0;
     double fullDetailStepM = 2.0;
+    HeightProcessing processing;
+    int filterDecimation = 1;  // Smallest decimation the filters allow.
 };
 
 struct RasterSource::Reader {
@@ -123,9 +285,10 @@ private:
     std::unique_ptr<Reader> reader_;
 };
 
-RasterSource::RasterSource() : layout_(std::make_unique<Layout>()) {}
+RasterSource::RasterSource() : layout_(std::make_unique<Layout>()), serial_(nextSerial++) {}
 
 RasterSource::~RasterSource() {
+    TileCache::instance().forget(serial_);
     readers_.clear();  // Close every handle before the VRT goes.
     if (!layout_->vrtPath.empty()) {
         VSIUnlink(layout_->vrtPath.c_str());
@@ -238,20 +401,206 @@ void RasterSource::release(std::unique_ptr<Reader> reader) const {
 
 int RasterSource::decimationFor(double step) const noexcept {
     const Layout& l = *layout_;
-    if (step <= l.fullDetailStepM * (1.0 + 1e-9)) {
-        return 1;
-    }
     int d = 1;
-    while (2.0 * d * l.pixelSizeM <= 0.5 * step && l.width / (2 * d) >= 2 &&
-           l.height / (2 * d) >= 2) {
-        d *= 2;
+    if (step > l.fullDetailStepM * (1.0 + 1e-9)) {
+        while (2.0 * d * l.pixelSizeM <= 0.5 * step && l.width / (2 * d) >= 2 &&
+               l.height / (2 * d) >= 2) {
+            d *= 2;
+        }
     }
-    return d;
+    return std::max(d, l.filterDecimation);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Sampling
 // ---------------------------------------------------------------------------------------------
+
+void RasterSource::filledPixels(Reader& reader, int d, int a0, int b0, int a1, int b1,
+                                std::vector<double>& out) const {
+    const Layout& l = *layout_;
+    const int wd = l.width / d;
+    const int hd = l.height / d;
+    // Reads decimated pixels into @p raw as metres AMSL (NaN = NoData). Windows are aligned
+    // to the decimation, so every pixel has the same value whichever window it is read in.
+    Plane raw;
+    auto read = [&](int x0, int y0, int x1, int y1) {
+        raw.reset(x0, y0, x1, y1);
+        GDALRasterIOExtraArg extra;
+        INIT_RASTERIO_EXTRA_ARG(extra);
+        extra.eResampleAlg = d > 1 ? GRIORA_Average : GRIORA_NearestNeighbour;
+        const CPLErr err =
+            GDALRasterIOEx(reader.band, GF_Read, x0 * d, y0 * d, raw.nx * d, raw.ny * d,
+                           raw.v.data(), raw.nx, raw.ny, GDT_Float64, 0, 0, &extra);
+        if (err != CE_None) {
+            ++readErrors_;
+            std::ranges::fill(raw.v, kNaN);
+            return;
+        }
+        for (double& h : raw.v) {
+            if (std::isnan(h) || (l.noData && h == *l.noData)) {
+                h = kNaN;
+            } else {
+                h = (h * l.scale + l.offset) * l.unitFactor;
+            }
+        }
+    };
+    read(a0, b0, a1, b1);
+    const bool voids = std::ranges::any_of(raw.v, [](double h) { return std::isnan(h); });
+    if (voids) {
+        // Read again with a margin, so every void pixel sees all its neighbours within the
+        // fill radius (clamped only by the raster border, which is the same for every read).
+        read(std::max(0, a0 - kFillRadiusPx), std::max(0, b0 - kFillRadiusPx),
+             std::min(wd, a1 + kFillRadiusPx), std::min(hd, b1 + kFillRadiusPx));
+    }
+    const int nx = a1 - a0;
+    out.resize(static_cast<std::size_t>(nx) * static_cast<std::size_t>(b1 - b0));
+    for (int j = b0; j < b1; ++j) {
+        for (int i = a0; i < a1; ++i) {
+            double h = raw.at(i, j);
+            if (std::isnan(h)) {
+                double sum = 0.0;
+                double weights = 0.0;
+                const int bLo = std::max(raw.y0, j - kFillRadiusPx);
+                const int bHi = std::min(raw.y0 + raw.ny - 1, j + kFillRadiusPx);
+                const int aLo = std::max(raw.x0, i - kFillRadiusPx);
+                const int aHi = std::min(raw.x0 + raw.nx - 1, i + kFillRadiusPx);
+                for (int b = bLo; b <= bHi; ++b) {
+                    for (int a = aLo; a <= aHi; ++a) {
+                        const int r2 = (a - i) * (a - i) + (b - j) * (b - j);
+                        if (r2 > kFillRadiusPx * kFillRadiusPx) {
+                            continue;
+                        }
+                        const double s = raw.at(a, b);
+                        if (!std::isnan(s)) {
+                            const double w = 1.0 / static_cast<double>(r2);
+                            sum += w * s;
+                            weights += w;
+                        }
+                    }
+                }
+                h = weights > 0.0 ? sum / weights : fallbackAmsl_;
+            }
+            out[static_cast<std::size_t>(j - b0) * static_cast<std::size_t>(nx) +
+                static_cast<std::size_t>(i - a0)] = h;
+        }
+    }
+}
+
+std::shared_ptr<const std::vector<double>> RasterSource::tile(Reader& reader, int d, int tx,
+                                                              int ty) const {
+    const TileKey key{serial_, d, tx, ty};
+    if (TileData cached = TileCache::instance().find(key)) {
+        return cached;
+    }
+    const Layout& l = *layout_;
+    const int wd = l.width / d;
+    const int hd = l.height / d;
+    const Kernel k = kernelFor(l.processing, l.pixelXM * d, l.pixelYM * d);
+    // Tile pixels, then the pixels the smoothing needs, then those the median needs; each
+    // stage clamps its neighbours to the block below it, which is the raster border wherever
+    // the block reaches it, so a pixel's value does not depend on the tile it is made in.
+    const int a0 = tx * kTilePx;
+    const int b0 = ty * kTilePx;
+    const int a1 = std::min(wd, a0 + kTilePx);
+    const int b1 = std::min(hd, b0 + kTilePx);
+    Plane smooth;  // Input of the smoothing.
+    smooth.reset(std::max(0, a0 - k.gaussX), std::max(0, b0 - k.gaussY),
+                 std::min(wd, a1 + k.gaussX), std::min(hd, b1 + k.gaussY));
+    Plane filled;  // Input of the median.
+    filled.reset(std::max(0, smooth.x0 - k.medianX), std::max(0, smooth.y0 - k.medianY),
+                 std::min(wd, smooth.x0 + smooth.nx + k.medianX),
+                 std::min(hd, smooth.y0 + smooth.ny + k.medianY));
+    filledPixels(reader, d, filled.x0, filled.y0, filled.x0 + filled.nx, filled.y0 + filled.ny,
+                 filled.v);
+
+    if (k.medianX > 0 || k.medianY > 0) {
+        std::vector<double> window;
+        for (int j = smooth.y0; j < smooth.y0 + smooth.ny; ++j) {
+            for (int i = smooth.x0; i < smooth.x0 + smooth.nx; ++i) {
+                window.clear();
+                for (int b = j - k.medianY; b <= j + k.medianY; ++b) {
+                    for (int a = i - k.medianX; a <= i + k.medianX; ++a) {
+                        window.push_back(filled.at(a, b));
+                    }
+                }
+                const auto mid = window.begin() + static_cast<std::ptrdiff_t>(window.size() / 2);
+                std::ranges::nth_element(window, mid);
+                smooth.ref(i, j) = *mid;
+            }
+        }
+    } else {
+        for (int j = smooth.y0; j < smooth.y0 + smooth.ny; ++j) {
+            for (int i = smooth.x0; i < smooth.x0 + smooth.nx; ++i) {
+                smooth.ref(i, j) = filled.at(i, j);
+            }
+        }
+    }
+
+    // Separable Gaussian: along x into rows of the smoothing block, then along y.
+    Plane rows;
+    rows.reset(a0, smooth.y0, a1, smooth.y0 + smooth.ny);
+    for (int j = rows.y0; j < rows.y0 + rows.ny; ++j) {
+        for (int i = a0; i < a1; ++i) {
+            double h = 0.0;
+            if (k.gaussX == 0) {
+                h = smooth.at(i, j);
+            } else {
+                for (int t = -k.gaussX; t <= k.gaussX; ++t) {
+                    h += k.weightsX[static_cast<std::size_t>(t + k.gaussX)] * smooth.at(i + t, j);
+                }
+            }
+            rows.ref(i, j) = h;
+        }
+    }
+    auto out = std::make_shared<std::vector<double>>(static_cast<std::size_t>(a1 - a0) *
+                                                     static_cast<std::size_t>(b1 - b0));
+    for (int j = b0; j < b1; ++j) {
+        for (int i = a0; i < a1; ++i) {
+            double h = 0.0;
+            if (k.gaussY == 0) {
+                h = rows.at(i, j);
+            } else {
+                for (int t = -k.gaussY; t <= k.gaussY; ++t) {
+                    h += k.weightsY[static_cast<std::size_t>(t + k.gaussY)] * rows.at(i, j + t);
+                }
+            }
+            (*out)[static_cast<std::size_t>(j - b0) * static_cast<std::size_t>(a1 - a0) +
+                   static_cast<std::size_t>(i - a0)] = h;
+        }
+    }
+    const std::size_t bytes = out->size() * sizeof(double);
+    TileData data = std::move(out);
+    TileCache::instance().insert(key, data, bytes);
+    return data;
+}
+
+void RasterSource::pixels(Reader& reader, int d, int a0, int b0, int a1, int b1,
+                          std::vector<double>& out) const {
+    if (!layout_->processing.filtered()) {
+        filledPixels(reader, d, a0, b0, a1, b1, out);
+        return;
+    }
+    const Layout& l = *layout_;
+    const int wd = l.width / d;
+    const int nx = a1 - a0;
+    out.resize(static_cast<std::size_t>(nx) * static_cast<std::size_t>(b1 - b0));
+    for (int ty = b0 / kTilePx; ty <= (b1 - 1) / kTilePx; ++ty) {
+        for (int tx = a0 / kTilePx; tx <= (a1 - 1) / kTilePx; ++tx) {
+            const TileData t = tile(reader, d, tx, ty);
+            const int tw = std::min(wd, (tx + 1) * kTilePx) - tx * kTilePx;
+            for (int j = std::max(b0, ty * kTilePx); j < std::min(b1, (ty + 1) * kTilePx); ++j) {
+                for (int i = std::max(a0, tx * kTilePx); i < std::min(a1, (tx + 1) * kTilePx);
+                     ++i) {
+                    out[static_cast<std::size_t>(j - b0) * static_cast<std::size_t>(nx) +
+                        static_cast<std::size_t>(i - a0)] =
+                        (*t)[static_cast<std::size_t>(j - ty * kTilePx) *
+                                 static_cast<std::size_t>(tw) +
+                             static_cast<std::size_t>(i - tx * kTilePx)];
+                }
+            }
+        }
+    }
+}
 
 void RasterSource::sampleAmsl(Reader& reader, std::span<const double> xs,
                               std::span<const double> zs, int d, std::span<double> out) const {
@@ -303,85 +652,17 @@ void RasterSource::sampleAmsl(Reader& reader, std::span<const double> xs,
         return;
     }
 
-    // Reads decimated pixels [a0, a1) × [b0, b1) into reader.window as metres AMSL (NaN =
-    // NoData). Windows are aligned to the decimation, so every pixel has the same value
-    // whichever window it is read in.
-    int wx0 = 0;
-    int wy0 = 0;
-    int wnx = 0;
-    int wny = 0;
-    auto readWindow = [&](int a0, int b0, int a1, int b1) {
-        wx0 = a0;
-        wy0 = b0;
-        wnx = a1 - a0;
-        wny = b1 - b0;
-        reader.window.resize(static_cast<std::size_t>(wnx) * static_cast<std::size_t>(wny));
-        GDALRasterIOExtraArg extra;
-        INIT_RASTERIO_EXTRA_ARG(extra);
-        extra.eResampleAlg = d > 1 ? GRIORA_Average : GRIORA_NearestNeighbour;
-        const CPLErr err =
-            GDALRasterIOEx(reader.band, GF_Read, a0 * d, b0 * d, wnx * d, wny * d,
-                           reader.window.data(), wnx, wny, GDT_Float64, 0, 0, &extra);
-        if (err != CE_None) {
-            ++readErrors_;
-            std::ranges::fill(reader.window, kNaN);
-            return;
-        }
-        for (double& h : reader.window) {
-            if (std::isnan(h) || (l.noData && h == *l.noData)) {
-                h = kNaN;
-            } else {
-                h = (h * l.scale + l.offset) * l.unitFactor;
-            }
-        }
-    };
-    auto at = [&](int i, int j) {
-        return reader.window[static_cast<std::size_t>(j - wy0) * static_cast<std::size_t>(wnx) +
-                             static_cast<std::size_t>(i - wx0)];
-    };
-
-    readWindow(i0, j0, i1, j1);
-    bool voids = false;
-    for (std::size_t i = 0; i < n && !voids; ++i) {
-        if (std::isnan(reader.u[i])) {
-            continue;
-        }
-        const int ci = std::min(static_cast<int>(reader.u[i]), wd - 2);
-        const int cj = std::min(static_cast<int>(reader.v[i]), hd - 2);
-        voids = std::isnan(at(ci, cj)) || std::isnan(at(ci + 1, cj)) ||
-                std::isnan(at(ci, cj + 1)) || std::isnan(at(ci + 1, cj + 1));
-    }
-    if (voids) {
-        // Read again with a margin, so every void pixel sees all its neighbours within the
-        // fill radius (clamped only by the raster border, which is the same for every read).
-        readWindow(std::max(0, i0 - kFillRadiusPx), std::max(0, j0 - kFillRadiusPx),
-                   std::min(wd, i1 + kFillRadiusPx), std::min(hd, j1 + kFillRadiusPx));
-    }
-    auto value = [&](int i, int j) {
-        const double h = at(i, j);
-        if (!std::isnan(h)) {
-            return h;
-        }
-        double sum = 0.0;
-        double weights = 0.0;
-        for (int b = std::max(0, j - kFillRadiusPx); b <= std::min(hd - 1, j + kFillRadiusPx);
-             ++b) {
-            for (int a = std::max(0, i - kFillRadiusPx); a <= std::min(wd - 1, i + kFillRadiusPx);
-                 ++a) {
-                const int r2 = (a - i) * (a - i) + (b - j) * (b - j);
-                if (r2 > kFillRadiusPx * kFillRadiusPx) {
-                    continue;
-                }
-                const double s = at(a, b);
-                if (!std::isnan(s)) {
-                    const double w = 1.0 / static_cast<double>(r2);
-                    sum += w * s;
-                    weights += w;
-                }
-            }
-        }
-        return weights > 0.0 ? sum / weights : fallbackAmsl_;
-    };
+    // The pixels the interpolation reads: the 2 × 2 cell around each point, 4 × 4 for cubics.
+    const HeightInterpolation how = l.processing.interpolation;
+    const int support =
+        how == HeightInterpolation::Bicubic || how == HeightInterpolation::BSpline ? 1 : 0;
+    Plane block;
+    block.x0 = std::max(0, i0 - support);
+    block.y0 = std::max(0, j0 - support);
+    block.nx = std::min(wd, i1 + support) - block.x0;
+    block.ny = std::min(hd, j1 + support) - block.y0;
+    pixels(reader, d, block.x0, block.y0, block.x0 + block.nx, block.y0 + block.ny, reader.window);
+    block.v.swap(reader.window);
 
     for (std::size_t i = 0; i < n; ++i) {
         if (std::isnan(reader.u[i])) {
@@ -394,12 +675,51 @@ void RasterSource::sampleAmsl(Reader& reader, std::span<const double> xs,
         const int cj = std::min(static_cast<int>(V), hd - 2);
         const double fx = U - ci;
         const double fy = V - cj;
-        const double h00 = value(ci, cj);
-        const double h10 = value(ci + 1, cj);
-        const double h01 = value(ci, cj + 1);
-        const double h11 = value(ci + 1, cj + 1);
-        out[i] = (h00 * (1.0 - fx) + h10 * fx) * (1.0 - fy) + (h01 * (1.0 - fx) + h11 * fx) * fy;
+        switch (how) {
+            case HeightInterpolation::Nearest:
+                out[i] =
+                    block.at(static_cast<int>(std::lround(U)), static_cast<int>(std::lround(V)));
+                break;
+            case HeightInterpolation::Bicubic:
+            case HeightInterpolation::BSpline: {
+                // Catmull-Rom passes through the pixels; the B-spline approximates them.
+                const auto weights = [how](double t) {
+                    const double t2 = t * t;
+                    const double t3 = t2 * t;
+                    if (how == HeightInterpolation::Bicubic) {
+                        return std::array{0.5 * (-t3 + 2.0 * t2 - t),
+                                          0.5 * (3.0 * t3 - 5.0 * t2 + 2.0),
+                                          0.5 * (-3.0 * t3 + 4.0 * t2 + t), 0.5 * (t3 - t2)};
+                    }
+                    const double s = 1.0 - t;
+                    return std::array{s * s * s / 6.0, (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0,
+                                      (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0, t3 / 6.0};
+                };
+                const auto wx = weights(fx);
+                const auto wy = weights(fy);
+                double h = 0.0;
+                for (int b = 0; b < 4; ++b) {
+                    double row = 0.0;
+                    for (int a = 0; a < 4; ++a) {
+                        row += wx[static_cast<std::size_t>(a)] * block.at(ci - 1 + a, cj - 1 + b);
+                    }
+                    h += wy[static_cast<std::size_t>(b)] * row;
+                }
+                out[i] = h;
+                break;
+            }
+            case HeightInterpolation::Bilinear: {
+                const double h00 = block.at(ci, cj);
+                const double h10 = block.at(ci + 1, cj);
+                const double h01 = block.at(ci, cj + 1);
+                const double h11 = block.at(ci + 1, cj + 1);
+                out[i] =
+                    (h00 * (1.0 - fx) + h10 * fx) * (1.0 - fy) + (h01 * (1.0 - fx) + h11 * fx) * fy;
+                break;
+            }
+        }
     }
+    reader.window.swap(block.v);
 }
 
 double RasterSource::heightAmsl(double x, double z) const {
@@ -408,7 +728,7 @@ double RasterSource::heightAmsl(double x, double z) const {
         return fallbackAmsl_;
     }
     std::array<double, 1> out{};
-    sampleAmsl(*lease.get(), std::span(&x, 1), std::span(&z, 1), 1, out);
+    sampleAmsl(*lease.get(), std::span(&x, 1), std::span(&z, 1), decimationFor(0.0), out);
     return out[0];
 }
 
@@ -477,6 +797,10 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     Layout& l = *source->layout_;
     l.band = options.band;
     l.fullDetailStepM = options.fullDetailStepM;
+    if (const std::string bad = validateProcessing(options.processing); !bad.empty()) {
+        return terrainError(TerrainErrorCode::InvalidSpec, bad);
+    }
+    l.processing = options.processing;
     SourceMetadata& meta = source->metadata_;
     meta.fileCount = static_cast<int>(files.size());
 
@@ -698,11 +1022,19 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     l.frame.emplace(geo::Geodetic{origin.latitudeDeg, origin.longitudeDeg, 0.0});
     if (srs.IsGeographic()) {
         const double cosLat = std::cos(cy * std::numbers::pi / 180.0);
-        l.pixelSizeM = 0.5 * (std::hypot(gt[1], gt[4]) * 111'320.0 * cosLat +
-                              std::hypot(gt[2], gt[5]) * 110'574.0);
+        l.pixelXM = std::hypot(gt[1], gt[4]) * 111'320.0 * cosLat;
+        l.pixelYM = std::hypot(gt[2], gt[5]) * 110'574.0;
     } else {
-        l.pixelSizeM =
-            0.5 * (std::hypot(gt[1], gt[4]) + std::hypot(gt[2], gt[5])) * srs.GetLinearUnits();
+        l.pixelXM = std::hypot(gt[1], gt[4]) * srs.GetLinearUnits();
+        l.pixelYM = std::hypot(gt[2], gt[5]) * srs.GetLinearUnits();
+    }
+    l.pixelSizeM = 0.5 * (l.pixelXM + l.pixelYM);
+    // Filters wider than a few cells read coarser cells (FR-TER-C03).
+    const double finest = std::min(l.pixelXM, l.pixelYM);
+    while (l.width / (2 * l.filterDecimation) >= 2 && l.height / (2 * l.filterDecimation) >= 2 &&
+           (l.processing.despikeRadiusM / (finest * l.filterDecimation) > kMaxMedianPx + 0.5 ||
+            l.processing.smoothRadiusM / (finest * l.filterDecimation) > kMaxGaussPx)) {
+        l.filterDecimation *= 2;
     }
     meta.resolutionM = l.pixelSizeM;
 
@@ -771,7 +1103,8 @@ TerrainResult<std::shared_ptr<RasterSource>> RasterSource::open(
     std::array<double, 1> originHeight{};
     if (originCovered) {
         const double zero = 0.0;
-        source->sampleAmsl(reader, std::span(&zero, 1), std::span(&zero, 1), 1, originHeight);
+        source->sampleAmsl(reader, std::span(&zero, 1), std::span(&zero, 1),
+                           source->decimationFor(0.0), originHeight);
     }
     source->originAltitude_ = options.originAltitudeM.value_or(originHeight[0]);
     meta.origin = geo::Geodetic{origin.latitudeDeg, origin.longitudeDeg, source->originAltitude_};

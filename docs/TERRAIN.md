@@ -78,6 +78,47 @@ gdalbuildvrt tiles.vrt tiles/*.tif
 gdal_translate -of COG -co COMPRESS=DEFLATE tiles.vrt dem/area.tif
 ```
 
+## Interpolation and smoothing
+
+The *Elevation processing* group of the Terrain tab changes how heights are made from file
+and online elevation data (rasters, lidar terrain models and providers). It is not shown
+for procedural terrain. Press *Regenerate* to apply it. The mesh, the physics, the drone's
+height above ground and the 2D preview all use the same heights.
+
+The steps run in this order: NoData holes are filled, spikes removed, the cells smoothed,
+then heights interpolated between the cells.
+
+| Option | Choices | Use it for |
+|---|---|---|
+| *Interpolation* | **Bilinear** (default): straight lines between cell centres. | Most data. On coarse data (25–30 m) slopes show creases along the cells. |
+| | **Bicubic** (Catmull-Rom): smooth slopes that still pass through every cell height. | Coarse DEMs (SRTM, Copernicus, BD ALTI). It can overshoot by a little at cliffs. |
+| | **B-spline**: the smoothest surface. It does not pass through the cells, so peaks and ridges come out slightly lower. | Noisy or coarse data where a soft look matters more than exact heights. |
+| | **Nearest**: each cell is a flat step. | Seeing the raw cells of the data. |
+| *Remove spikes* | Median filter radius, 0 (*Off*) to 10 m. | Isolated spikes and pits: lidar noise, birds, artefacts at the seams of DEM tiles. Slopes and edges stay sharp. |
+| *Smoothing* | Gaussian radius, 0 (*Off*) to 100 m. The kernel reaches the radius (σ is half of it). | Noise, and the terracing of data stored in whole metres. It also softens small real detail. |
+
+- **Radius and cells:** a filter always covers at least the neighbouring cells. On fine
+  data a wide filter would need very many cells, so it reads coarser, averaged cells. Above
+  6 cells for spike removal or 24 cells for smoothing, the cell size doubles until the
+  filter fits. For example, smoothing over 100 m on 1 m lidar uses 8 m cells, which is
+  smooth anyway.
+- **Cost:** the filtered cells are computed once per 128-cell tile and kept in a 64 MB
+  cache, so the terrain loads slightly slower but flies at the same speed.
+- **Online streaming:** with a filter on, each streamed block is fetched with a wider margin
+  (about 1.25 × the filter reach), so blocks join without seams. The first flight after
+  turning a filter on downloads the blocks again. A bounded online area already has a 300 m
+  margin, so it needs no new download.
+- **Saved with the scene and presets** as a `processing` object, for example:
+
+  ```json
+  "processing": { "interpolation": "bicubic", "despikeRadiusM": 2, "smoothRadiusM": 10 }
+  ```
+
+  Missions always use the default (bilinear, no filters), so every pilot flies the same
+  surface.
+- **Metadata:** the terrain information in the Terrain tab shows a line such as
+  *Heights: bicubic, spikes removed within 2 m, smoothed over 10 m*.
+
 ## Lidar point clouds (LAS / LAZ)
 
 LAS 1.0–1.4 and LAZ, including COPC files, are turned into a terrain model (a DTM) once and
@@ -95,6 +136,11 @@ cached. Building it takes about 10 s per 40 million points (release build).
 
 - **Resolution** (`resolutionM`, at least 0.25 m): by default about two point spacings,
   between 0.5 and 20 m, and coarser when the grid would exceed 32 million cells.
+- **Cell height:** the mean of the ground points in a cell (the default, the least noise),
+  or the lowest of them (*Cell height › Lowest ground point* in the Terrain tab,
+  `"cellHeight": "lowest"` in a saved scene). The lowest point drops low vegetation and
+  objects wrongly classified as ground, but follows the low side of any noise. Choosing it
+  makes a new terrain model. *Remove spikes* (see above) then cleans up what is left.
 - **Gaps** up to 50 m across are filled by triangulation (`"interpolation": "tin"`, the
   default) or inverse-distance weighting (`"idw"`). Larger gaps keep no height and are filled
   like raster NoData.

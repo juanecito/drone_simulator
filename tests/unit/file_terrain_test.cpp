@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
@@ -66,6 +67,7 @@ TEST(FileTerrain, ConfigJsonAndPresetRoundTrip) {
     EXPECT_FALSE(app::isPointCloud(c.file));
     pc.file.resolutionM = 0.5;
     pc.file.interpolation = terrain::LidarInterpolation::Idw;
+    pc.file.cellHeight = terrain::LidarCellHeight::Lowest;
     pc.file.classifyGround = true;
     auto pcBack = app::terrainFromJson(app::terrainToJson(pc));
     ASSERT_TRUE(pcBack.has_value()) << pcBack.error().message;
@@ -79,6 +81,10 @@ TEST(FileTerrain, ConfigJsonAndPresetRoundTrip) {
     badFile.insert(QStringLiteral("interpolation"), QStringLiteral("max"));
     bad.insert(QStringLiteral("file"), badFile);
     EXPECT_FALSE(app::terrainFromJson(bad).has_value());
+    badFile.insert(QStringLiteral("interpolation"), QStringLiteral("tin"));
+    badFile.insert(QStringLiteral("cellHeight"), QStringLiteral("highest"));
+    bad.insert(QStringLiteral("file"), badFile);
+    EXPECT_FALSE(app::terrainFromJson(bad).has_value());
 
     // No files, or a water edge, are not file terrain.
     QJsonObject json = app::terrainToJson(c);
@@ -90,6 +96,58 @@ TEST(FileTerrain, ConfigJsonAndPresetRoundTrip) {
     file.insert(QStringLiteral("files"), QJsonArray());
     json.insert(QStringLiteral("file"), file);
     EXPECT_FALSE(app::terrainFromJson(json).has_value());
+}
+
+TEST(FileTerrain, ProcessingIsSavedWithTheSceneAndPresetsAndApplied) {
+    TempDir dir("file_terrain");
+    test::RasterSpec spec = test::planarUtmSpec();
+    spec.value = [](int i, int j) { return i == 100 && j == 100 ? 900.0 : 500.0; };
+    test::writeRaster(dir / "dem.tif", spec);
+    app::TerrainConfig c = fileConfig(dir / "dem.tif");
+    c.processing = {.interpolation = terrain::HeightInterpolation::BSpline,
+                    .despikeRadiusM = 10.0,
+                    .smoothRadiusM = 25.0};
+    const QJsonObject json = app::terrainToJson(c);
+    EXPECT_EQ(json.value(QStringLiteral("processing"))
+                  .toObject()
+                  .value(QStringLiteral("interpolation"))
+                  .toString(),
+              QStringLiteral("bspline"));
+    const auto back = app::terrainFromJson(json);
+    ASSERT_TRUE(back.has_value()) << back.error().message;
+    EXPECT_EQ(*back, c);
+    const auto preset = app::fromPresetRecord(app::toPresetRecord(c, "user.smooth", "Smooth"));
+    ASSERT_TRUE(preset.has_value()) << preset.error().message;
+    EXPECT_EQ(preset->processing, c.processing);
+    // The default is not written, and procedural terrain has none.
+    EXPECT_FALSE(
+        app::terrainToJson(fileConfig(dir / "dem.tif")).contains(QStringLiteral("processing")));
+    app::TerrainConfig procedural;
+    procedural.processing = c.processing;
+    EXPECT_FALSE(app::terrainToJson(procedural).contains(QStringLiteral("processing")));
+
+    for (const auto& [key, value] :
+         {std::pair{"interpolation", QJsonValue(QStringLiteral("cubic"))},
+          std::pair{"despikeRadiusM", QJsonValue(50.0)},
+          std::pair{"smoothRadiusM", QJsonValue(-1.0)},
+          std::pair{"smoothRadiusM", QJsonValue(QStringLiteral("10"))}}) {
+        QJsonObject bad = json;
+        QJsonObject p = bad.value(QStringLiteral("processing")).toObject();
+        p.insert(QLatin1StringView(key), value);
+        bad.insert(QStringLiteral("processing"), p);
+        EXPECT_FALSE(app::terrainFromJson(bad).has_value()) << key;
+    }
+
+    // Built: the spike under the origin is gone, and the metadata says how.
+    auto raw = app::buildTerrain(fileConfig(dir / "dem.tif"));
+    auto built = app::buildTerrain(c);
+    ASSERT_TRUE(raw.has_value() && built.has_value());
+    EXPECT_GT(raw->source->height(5.0, 5.0) + raw->origin.heightM, 600.0);
+    EXPECT_NEAR(built->source->height(5.0, 5.0) + built->origin.heightM, 500.0, 1e-6);
+    EXPECT_NEAR(built->origin.heightM, 500.0, 1e-6);
+    EXPECT_TRUE(std::ranges::any_of(built->metadata->notes, [](const std::string& n) {
+        return n == "Heights: bspline, spikes removed within 10 m, smoothed over 25 m";
+    }));
 }
 
 TEST(FileTerrain, BuildTerrainOpensTheFilesAndTakesTheOriginFromTheData) {

@@ -236,6 +236,16 @@ void TerrainPanel::buildUi() {
         tr("Fills gaps up to %1 m across; larger gaps stay without data")
             .arg(terrain::kLidarMaxHoleM));
     lform->addRow(tr("Gap filling:"), lidarInterpolation_);
+    lidarCell_ = new QComboBox;
+    lidarCell_->setObjectName(QStringLiteral("LidarCellCombo"));
+    lidarCell_->addItem(tr("Mean of the ground points"),
+                        static_cast<int>(terrain::LidarCellHeight::Mean));
+    lidarCell_->addItem(tr("Lowest ground point"),
+                        static_cast<int>(terrain::LidarCellHeight::Lowest));
+    lidarCell_->setToolTip(
+        tr("Mean: the least noise. Lowest: drops low vegetation or objects wrongly classified "
+           "as ground."));
+    lform->addRow(tr("Cell height:"), lidarCell_);
     fform->addRow(lidarBox_);
     connect(lidarAuto_, &QCheckBox::toggled, this, &TerrainPanel::updateEnabled);
     crs_ = new QLineEdit;
@@ -316,6 +326,57 @@ void TerrainPanel::buildUi() {
         connect(services, &DataServices::apiKeysChanged, this, &TerrainPanel::updateQuota);
         connect(services, &DataServices::networkSettingsChanged, this, &TerrainPanel::updateQuota);
     }
+
+    // Interpolation and filters of file and online elevation (FR-TER-C03).
+    processingBox_ = new QGroupBox(tr("Elevation processing"));
+    processingBox_->setObjectName(QStringLiteral("ProcessingBox"));
+    auto* hform = new QFormLayout(processingBox_);
+    interpolation_ = new QComboBox;
+    interpolation_->setObjectName(QStringLiteral("InterpolationCombo"));
+    interpolation_->addItem(tr("Bilinear"),
+                            static_cast<int>(terrain::HeightInterpolation::Bilinear));
+    interpolation_->addItem(tr("Bicubic (smooth, exact at the cells)"),
+                            static_cast<int>(terrain::HeightInterpolation::Bicubic));
+    interpolation_->addItem(tr("B-spline (smoothest)"),
+                            static_cast<int>(terrain::HeightInterpolation::BSpline));
+    interpolation_->addItem(tr("Nearest (raw cells)"),
+                            static_cast<int>(terrain::HeightInterpolation::Nearest));
+    interpolation_->setToolTip(
+        tr("How heights are interpolated between the cells of the data.\n"
+           "Bilinear: straight lines between cells; slopes show creases on coarse data.\n"
+           "Bicubic: smooth slopes through the cell heights; may overshoot at cliffs.\n"
+           "B-spline: the smoothest surface; slightly lowers peaks and ridges.\n"
+           "Nearest: flat steps, to see the raw cells."));
+    hform->addRow(tr("Interpolation:"), interpolation_);
+    despike_ = new QDoubleSpinBox;
+    despike_->setObjectName(QStringLiteral("DespikeSpin"));
+    despike_->setRange(0.0, terrain::kMaxDespikeRadiusM);
+    despike_->setSingleStep(0.5);
+    despike_->setDecimals(1);
+    despike_->setSuffix(tr(" m"));
+    despike_->setSpecialValueText(tr("Off"));
+    despike_->setToolTip(
+        tr("Median filter: each cell becomes the median of the cells within this radius. "
+           "Removes isolated spikes and pits (lidar noise, DEM artefacts) and keeps slopes "
+           "and edges."));
+    hform->addRow(tr("Remove spikes:"), despike_);
+    smooth_ = new QDoubleSpinBox;
+    smooth_->setObjectName(QStringLiteral("SmoothSpin"));
+    smooth_->setRange(0.0, terrain::kMaxSmoothRadiusM);
+    smooth_->setSingleStep(1.0);
+    smooth_->setDecimals(1);
+    smooth_->setSuffix(tr(" m"));
+    smooth_->setSpecialValueText(tr("Off"));
+    smooth_->setToolTip(
+        tr("Gaussian smoothing over this radius: removes noise and the terracing of "
+           "whole-metre data, and softens small detail. Large radii on fine data use coarser "
+           "cells."));
+    hform->addRow(tr("Smoothing:"), smooth_);
+    auto* processingNote =
+        new QLabel(tr("Applied to the mesh, the physics and the preview; press Regenerate."));
+    processingNote->setWordWrap(true);
+    hform->addRow(processingNote);
+    layout->addWidget(processingBox_);
 
     // Orthophotos over file or online elevation (FR-TER-I10).
     orthoBox_ = new QGroupBox(tr("Imagery"));
@@ -603,6 +664,7 @@ TerrainConfig TerrainPanel::formConfig() const {
             }
             f.interpolation = static_cast<terrain::LidarInterpolation>(
                 lidarInterpolation_->currentData().toInt());
+            f.cellHeight = static_cast<terrain::LidarCellHeight>(lidarCell_->currentData().toInt());
         }
         if (!autoOrigin_->isChecked()) {
             f.origin = geo::LatLon{latitude_->value(), longitude_->value()};
@@ -617,6 +679,12 @@ TerrainConfig TerrainPanel::formConfig() const {
         if (!autoOrigin_->isChecked()) {
             o.originAltitudeM = altitude_->value();
         }
+    }
+    if (c.kind != TerrainKind::Procedural) {
+        c.processing.interpolation =
+            static_cast<terrain::HeightInterpolation>(interpolation_->currentData().toInt());
+        c.processing.despikeRadiusM = despike_->value();
+        c.processing.smoothRadiusM = smooth_->value();
     }
     if (c.kind != TerrainKind::Procedural && orthoSource_->currentIndex() > 0) {
         c.ortho.provider = orthoSource_->currentData().toString().toStdString();
@@ -699,6 +767,12 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     }
     lidarInterpolation_->setCurrentIndex(
         std::max(lidarInterpolation_->findData(static_cast<int>(c.file.interpolation)), 0));
+    lidarCell_->setCurrentIndex(
+        std::max(lidarCell_->findData(static_cast<int>(c.file.cellHeight)), 0));
+    interpolation_->setCurrentIndex(
+        std::max(interpolation_->findData(static_cast<int>(c.processing.interpolation)), 0));
+    despike_->setValue(c.processing.despikeRadiusM);
+    smooth_->setValue(c.processing.smoothRadiusM);
     fillImageryProviders();
     if (!c.ortho.provider.empty()) {
         const QString key = QString::fromStdString(c.ortho.provider);
@@ -1175,6 +1249,7 @@ void TerrainPanel::updateEnabled() {
     fileBox_->setVisible(file);
     onlineBox_->setVisible(online);
     orthoBox_->setVisible(file || online);
+    processingBox_->setVisible(file || online);
     removeOrtho_->setEnabled(!orthoFiles_->selectedItems().isEmpty());
     const bool files = orthoSource_->currentIndex() <= 0;
     orthoForm_->setRowVisible(orthoLayer_, !files);

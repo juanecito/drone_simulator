@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -382,6 +383,226 @@ TEST(RasterSource, QueriesMatchTheLevelZeroMesh) {
         const double z = mesh.originZ + v.v * mesh.spacingM;
         EXPECT_NEAR(query.height(x, z), v.height, 1e-3);
     }
+}
+
+// --- Interpolation and filters (FR-TER-C03) ------------------------------------------------
+
+RasterOptions processed(HeightInterpolation interpolation, double despikeM = 0.0,
+                        double smoothM = 0.0) {
+    RasterOptions o;
+    o.processing = {
+        .interpolation = interpolation, .despikeRadiusM = despikeM, .smoothRadiusM = smoothM};
+    return o;
+}
+
+TEST(RasterSource, EveryInterpolationAndFilterKeepsAPlane) {
+    // Cubic interpolations, a symmetric Gaussian and the median of a symmetric window all
+    // reproduce a linear surface, so the heights match the analytic plane away from the
+    // raster's border.
+    TempDir dir;
+    writeRaster(dir / "dem.tif", planarUtmSpec());
+    for (const auto& options :
+         {processed(HeightInterpolation::Bicubic), processed(HeightInterpolation::BSpline),
+          processed(HeightInterpolation::Bilinear, 10.0, 0.0),
+          processed(HeightInterpolation::Bilinear, 0.0, 60.0),
+          processed(HeightInterpolation::Bicubic, 5.0, 100.0)}) {
+        auto source = openOne(dir / "dem.tif", options);
+        ASSERT_TRUE(source);
+        for (double x = -700.0; x <= 700.0; x += 137.0) {
+            for (double z = -700.0; z <= 700.0; z += 151.0) {
+                EXPECT_NEAR(source->heightAmsl(x, z), expectedPlanar(*source, x, z), 1e-3)
+                    << describeProcessing(options.processing) << " at " << x << ", " << z;
+            }
+        }
+    }
+}
+
+TEST(RasterSource, NearestShowsTheRawCellsAndCubicsAreSmooth) {
+    TempDir dir;
+    RasterSpec s = planarUtmSpec();
+    s.value = [](int i, int j) { return 500.0 + 30.0 * std::sin(0.3 * i) * std::cos(0.2 * j); };
+    writeRaster(dir / "dem.tif", s);
+    RasterOptions agl;
+    agl.originAltitudeM = 0.0;
+    auto nearestOptions = processed(HeightInterpolation::Nearest);
+    nearestOptions.originAltitudeM = 0.0;
+    auto nearest = openOne(dir / "dem.tif", nearestOptions);
+    auto bilinear = openOne(dir / "dem.tif", agl);
+    ASSERT_TRUE(nearest && bilinear);
+    // Pixel (100, 100) has its centre about (5, 5) m from the origin: inside it, the nearest
+    // height is that pixel's value, flat.
+    const double pixel = s.value(100, 100);
+    EXPECT_NEAR(nearest->height(3.0, 3.5), pixel, 1e-4);
+    EXPECT_NEAR(nearest->height(7.0, 6.5), pixel, 1e-4);
+    EXPECT_NE(bilinear->height(3.0, 3.5), bilinear->height(7.0, 6.5));
+
+    // The slope of a bilinear surface jumps at a cell border, that of a cubic one does not.
+    auto slopeJump = [](const RasterSource& r, double x) {
+        const double e = 0.05;
+        const double left = (r.height(x, 2.0) - r.height(x - e, 2.0)) / e;
+        const double right = (r.height(x + e, 2.0) - r.height(x, 2.0)) / e;
+        return std::abs(right - left);
+    };
+    for (const HeightInterpolation how :
+         {HeightInterpolation::Bicubic, HeightInterpolation::BSpline}) {
+        auto o = processed(how);
+        o.originAltitudeM = 0.0;
+        auto cubic = openOne(dir / "dem.tif", o);
+        ASSERT_TRUE(cubic);
+        // Bilinear cells join at pixel centres, near x = 5 + 10 k m (UTM convergence moves
+        // them a centimetre here).
+        double bilinearJump = 0.0;
+        double cubicJump = 0.0;
+        for (const double x : {-15.0, -5.0, 5.0, 15.0, 25.0}) {
+            bilinearJump = std::max(bilinearJump, slopeJump(*bilinear, x));
+            cubicJump = std::max(cubicJump, slopeJump(*cubic, x));
+        }
+        EXPECT_GT(bilinearJump, 0.05) << interpolationName(how);
+        EXPECT_LT(cubicJump, 0.25 * bilinearJump) << interpolationName(how);
+        // Catmull-Rom passes through the cells; the B-spline approximates them.
+        const double atCell = cubic->height(5.0, 5.0);
+        if (how == HeightInterpolation::Bicubic) {
+            EXPECT_NEAR(atCell, bilinear->height(5.0, 5.0), 0.05);
+        }
+    }
+}
+
+TEST(RasterSource, SpikeFilterRemovesSpikesAndSmoothingRemovesNoise) {
+    TempDir dir;
+    RasterSpec s = planarUtmSpec();
+    s.value = [](int i, int j) {
+        if (i == 100 && j == 100) {
+            return 550.0;  // A spike of 50 m, one pixel.
+        }
+        if (i == 120 && j == 80) {
+            return 470.0;  // A pit.
+        }
+        return 500.0 + ((i + j) % 2 == 0 ? 0.5 : -0.5);  // ±0.5 m checkerboard noise.
+    };
+    writeRaster(dir / "dem.tif", s);
+    auto o = [](double despike, double smooth) {
+        auto options = processed(HeightInterpolation::Bilinear, despike, smooth);
+        options.originAltitudeM = 0.0;
+        return options;
+    };
+    auto raw = openOne(dir / "dem.tif", o(0.0, 0.0));
+    auto despiked = openOne(dir / "dem.tif", o(10.0, 0.0));
+    auto smoothed = openOne(dir / "dem.tif", o(0.0, 30.0));
+    auto both = openOne(dir / "dem.tif", o(10.0, 30.0));
+    ASSERT_TRUE(raw && despiked && smoothed && both);
+    // The spike pixel's centre is about (5, 5) m from the origin, the pit's (205, -195).
+    EXPECT_GT(raw->height(5.0, 5.0), 540.0);
+    EXPECT_LT(raw->height(205.0, -195.0), 480.0);
+    EXPECT_NEAR(despiked->height(5.0, 5.0), 500.0, 0.6);
+    EXPECT_NEAR(despiked->height(205.0, -195.0), 500.0, 0.6);
+    // A Gaussian spreads the spike instead of removing it, and flattens the noise.
+    EXPECT_LT(smoothed->height(5.0, 5.0), 510.0);
+    EXPECT_GT(smoothed->height(5.0, 5.0), 501.0);
+    double lowest = 1e9;
+    double highest = -1e9;
+    for (double x = -300.0; x <= 300.0; x += 3.0) {
+        lowest = std::min(lowest, raw->height(x, 405.0));
+        highest = std::max(highest, raw->height(x, 405.0));
+        EXPECT_NEAR(smoothed->height(x, 405.0), 500.0, 0.05) << x;
+        EXPECT_NEAR(both->height(x, 405.0), 500.0, 0.05) << x;
+    }
+    EXPECT_GT(highest - lowest, 0.5);
+    EXPECT_NEAR(both->height(5.0, 5.0), 500.0, 0.05);
+}
+
+TEST(RasterSource, FilteredHeightsDoNotDependOnTheQuery) {
+    // Heights come from 128-pixel tiles: grids across a tile border, single points, a second
+    // source (computing its own tiles) and other threads must all see the same values.
+    TempDir dir;
+    RasterSpec s = planarUtmSpec();
+    s.value = [](int i, int j) {
+        return 700.0 + 40.0 * std::sin(0.11 * i) * std::cos(0.07 * j) + ((i * 7 + j * 3) % 5);
+    };
+    writeRaster(dir / "dem.tif", s);
+    const auto options = processed(HeightInterpolation::Bicubic, 10.0, 40.0);
+    auto source = openOne(dir / "dem.tif", options);
+    auto other = openOne(dir / "dem.tif", options);
+    ASSERT_TRUE(source && other);
+    // Pixel column 128 starts about 280 m east of the origin.
+    constexpr int kN = 41;
+    std::vector<double> grid(kN * kN);
+    source->sampleGrid(240.0, 230.0, 2.0, kN, kN, grid);
+    std::vector<double> shifted(kN * kN);
+    source->sampleGrid(250.0, 240.0, 2.0, kN, kN, shifted);
+    for (int row = 0; row < kN; ++row) {
+        for (int col = 0; col < kN; ++col) {
+            const double x = 240.0 + col * 2.0;
+            const double z = 230.0 + row * 2.0;
+            const double h = grid[static_cast<std::size_t>(row * kN + col)];
+            ASSERT_EQ(h, source->height(x, z)) << x << ", " << z;
+            ASSERT_EQ(h, other->height(x, z)) << x << ", " << z;
+            if (row >= 5 && col >= 5) {
+                ASSERT_EQ(h, shifted[static_cast<std::size_t>((row - 5) * kN + col - 5)]);
+            }
+        }
+    }
+    std::vector<std::vector<double>> results(6, std::vector<double>(kN * kN));
+    {
+        auto fresh = openOne(dir / "dem.tif", options);
+        ASSERT_TRUE(fresh);
+        std::vector<std::jthread> threads;
+        for (auto& r : results) {
+            threads.emplace_back([&fresh, &r] { fresh->sampleGrid(240.0, 230.0, 2.0, kN, kN, r); });
+        }
+    }
+    for (const auto& r : results) {
+        EXPECT_EQ(r, grid);
+    }
+}
+
+TEST(RasterSource, WideFiltersOnFineDataReadCoarserCells) {
+    // 1 m cells: a 10 m spike filter would need 21 × 21 cells, so it runs on 2 m cells; the
+    // plane survives and full-detail grids still equal single queries.
+    TempDir dir;
+    RasterSpec s = planarUtmSpec();
+    s.width = 400;
+    s.height = 400;
+    s.geoTransform = {kE0, 1.0, 0.0, kN0, 0.0, -1.0};
+    s.value = [](int i, int j) { return 300.0 + 0.2 * i - 0.1 * j; };
+    writeRaster(dir / "fine.tif", s);
+    auto source = openOne(dir / "fine.tif", processed(HeightInterpolation::Bilinear, 10.0, 80.0));
+    ASSERT_TRUE(source);
+    const ds::geo::LocalFrame frame(source->metadata().origin);
+    for (double x = -60.0; x <= 60.0; x += 17.0) {
+        const ds::geo::Geodetic g = frame.toGeodetic(ds::geo::Enu{x, -x, 0.0});
+        const auto utm = ds::geo::toUtmInZone(g.latitudeDeg, g.longitudeDeg, 30);
+        ASSERT_TRUE(utm.has_value());
+        const double i = utm->easting - kE0 - 0.5;
+        const double j = kN0 - utm->northing - 0.5;
+        EXPECT_NEAR(source->heightAmsl(x, x), 300.0 + 0.2 * i - 0.1 * j, 1e-3) << x;
+    }
+    std::vector<double> grid(9 * 9);
+    source->sampleGrid(-8.0, -8.0, 2.0, 9, 9, grid);
+    for (int k = 0; k < 81; ++k) {
+        EXPECT_EQ(grid[static_cast<std::size_t>(k)],
+                  source->height(-8.0 + (k % 9) * 2.0, -8.0 + (k / 9) * 2.0));
+    }
+}
+
+TEST(RasterSource, RejectsFilterRadiiOutOfRange) {
+    TempDir dir;
+    writeRaster(dir / "dem.tif", planarUtmSpec());
+    const std::array<fs::path, 1> files{dir / "dem.tif"};
+    for (const auto& options :
+         {processed(HeightInterpolation::Bilinear, -1.0),
+          processed(HeightInterpolation::Bilinear, kMaxDespikeRadiusM + 1.0),
+          processed(HeightInterpolation::Bilinear, 0.0, kMaxSmoothRadiusM + 1.0)}) {
+        auto source = RasterSource::open(files, options);
+        ASSERT_FALSE(source.has_value());
+        EXPECT_EQ(source.error().code, TerrainErrorCode::InvalidSpec);
+    }
+    EXPECT_EQ(interpolationFromName("bspline"), HeightInterpolation::BSpline);
+    EXPECT_EQ(interpolationFromName("cubic"), std::nullopt);
+    EXPECT_EQ(describeProcessing({}), "bilinear");
+    EXPECT_EQ(describeProcessing({.interpolation = HeightInterpolation::Bicubic,
+                                  .despikeRadiusM = 2.0,
+                                  .smoothRadiusM = 10.0}),
+              "bicubic, spikes removed within 2 m, smoothed over 10 m");
 }
 
 }  // namespace

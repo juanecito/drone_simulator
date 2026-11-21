@@ -319,6 +319,47 @@ TEST(OnlineTerrain, StreamingFetchesBlocksAroundTheDrone) {
     EXPECT_DOUBLE_EQ(grid[40], stream.height(far - 2100.0 + 8.0, -40.0 + 8.0));
 }
 
+TEST(OnlineTerrain, ProcessingWidensStreamingBlocksAndChangesTheHash) {
+    Online online;
+    const terrain::HeightProcessing smooth{.interpolation = terrain::HeightInterpolation::Bicubic,
+                                           .smoothRadiusM = 90.0};
+    const net::DatasetConfig& d = online.provider.datasets.front();
+    const net::BlockKey key =
+        net::blockAt(kOrigin.latitudeDeg, kOrigin.longitudeDeg, online.provider.blockSizeKm);
+    const net::GeoRect plain = terrain::blockFetchRect(key, online.provider, d);
+    // Interpolation alone needs no more data; filters need their reach beyond the block.
+    EXPECT_EQ(terrain::blockFetchRect(key, online.provider, d,
+                                      {.interpolation = terrain::HeightInterpolation::BSpline}),
+              plain);
+    const net::GeoRect wide = terrain::blockFetchRect(key, online.provider, d, smooth);
+    EXPECT_GT(wide.east - wide.west, plain.east - plain.west);
+    EXPECT_GT(wide.north - wide.south, plain.north - plain.south);
+
+    // Streaming with smoothing: the block under the origin is the wider one.
+    auto streaming = online.request(std::nullopt);
+    streaming.processing = smooth;
+    EXPECT_EQ(*terrain::onlineRequiredArea(streaming), wide);
+    ASSERT_TRUE(online.download(wide));
+    auto stream = terrain::openOnlineTerrain(online.client, streaming);
+    ASSERT_TRUE(stream.has_value()) << stream.error().message;
+    EXPECT_NEAR(stream->source->height(0.0, 0.0), 0.0, 1e-6);
+
+    // Bounded: the same downloaded area, other heights, another hash.
+    auto bounded = online.request(terrain::Extent{3000.0, 2000.0});
+    ASSERT_TRUE(online.download(*terrain::onlineRequiredArea(bounded)));
+    auto plainTerrain = terrain::openOnlineTerrain(online.client, bounded);
+    bounded.processing = smooth;
+    EXPECT_EQ(*terrain::onlineRequiredArea(bounded),
+              *terrain::onlineRequiredArea(online.request(terrain::Extent{3000.0, 2000.0})));
+    auto smoothTerrain = terrain::openOnlineTerrain(online.client, bounded);
+    ASSERT_TRUE(plainTerrain.has_value() && smoothTerrain.has_value());
+    EXPECT_NE(plainTerrain->dataHash, smoothTerrain->dataHash);
+    const geo::LocalFrame frame(smoothTerrain->data.origin);
+    for (const auto& [x, z] : {std::pair{0.0, 0.0}, {1400.0, 900.0}, {-1450.0, -950.0}}) {
+        EXPECT_NEAR(smoothTerrain->source->height(x, z), expected(frame, x, z), 2.0);
+    }
+}
+
 TEST(OnlineTerrain, StreamingStopsAtTheQuotaAndReportsWhy) {
     Online online;
     const auto request = online.request(std::nullopt);

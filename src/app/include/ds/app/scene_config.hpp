@@ -67,6 +67,7 @@ struct FileTerrainConfig {
     // LAS / LAZ point clouds (FR-TER-L02 … L04); unused for rasters.
     std::optional<double> resolutionM;  ///< DTM cell size; empty ⇒ automatic.
     terrain::LidarInterpolation interpolation = terrain::LidarInterpolation::Tin;  ///< Gaps.
+    terrain::LidarCellHeight cellHeight = terrain::LidarCellHeight::Mean;          ///< Cell value.
     bool classifyGround = false;  ///< Asked for automatic ground classification.
     /// @brief Equality.
     bool operator==(const FileTerrainConfig&) const = default;
@@ -109,6 +110,8 @@ struct TerrainConfig {
     OnlineTerrainConfig online;             ///< Online provider (kind Online).
     OrthoConfig ortho;                      ///< Imagery (kinds File and Online).
     std::optional<terrain::Extent> extent;  ///< Dimensions; empty = unlimited (FR-TER-04a).
+    /// Interpolation and filters of file and online elevation (FR-TER-C03).
+    terrain::HeightProcessing processing;
     /// Geographic origin; heightM is AMSL (FR-TER-09). For file and online terrain heightM
     /// (and for file terrain the position) is the origin in use, filled in when the terrain
     /// is built (buildTerrain()).
