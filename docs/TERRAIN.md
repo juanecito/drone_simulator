@@ -58,6 +58,12 @@ and overrides single parameters in `terrain.params`. Bounded terrain (`extent`) 
   take the lowest height of the data.
 - **Size:** at most 40 000 px a side and 4 GB per terrain.
 - **Levels of detail:** files with overviews load faster when you fly high; a COG has them.
+- **Terrain size:** in the Terrain tab, *Dimensions › Fit to the data* (the default for
+  files) makes the terrain cover the data: all of it when the origin is the centre of the
+  data, otherwise the largest rectangle centred on the origin. The terrain is aligned with
+  true north, so over a projected grid a few metres at the edges may be left out. The
+  width × length then show the size; *Custom* starts from it, to fly over a part. The same
+  applies to LAS/LAZ point clouds, once their terrain model is made.
 
 Making a COG with overviews, in the CRS of your choice, from any raster GDAL reads:
 

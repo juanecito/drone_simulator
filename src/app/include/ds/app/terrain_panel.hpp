@@ -61,6 +61,9 @@ private:
     void deletePreset();
     void updatePreview();
     void updateEnabled();
+    /// Shows the size of the loaded elevation data in the width × length boxes when the
+    /// terrain fits the data, so that "Custom" starts from it.
+    void showDataSize();
     void showStatus(const QString& text, bool error);
     void addFiles();
     void addOrthoFiles();

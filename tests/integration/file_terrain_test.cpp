@@ -7,8 +7,10 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QStandardItemModel>
 #include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTest>
@@ -180,6 +182,69 @@ TEST_F(FileTerrainTest, TerrainTabLoadsElevationFilesAndShowsTheirMetadata) {
         EXPECT_FALSE(panel.regenerate());  // The error is shown in the panel.
         EXPECT_EQ(scene.terrain().kind, TerrainKind::Procedural);
     }
+}
+
+// "Fit to the data": the terrain covers the elevation files, and the Terrain tab shows their
+// size, from which a custom size starts.
+TEST_F(FileTerrainTest, TerrainTabFitsTheTerrainToTheData) {
+    const fs::path dem = homeDir() / "wide.tif";
+    test::RasterSpec wide = test::planarUtmSpec();
+    wide.width = 300;  // 3 × 1.5 km at 10 m.
+    wide.height = 150;
+    test::writeRaster(dem, wide);
+    SceneController scene(settings_.get(), findAssetDirectory());
+    TerrainPanel panel(scene);
+    auto* dimensions = panel.findChild<QComboBox*>(QStringLiteral("DimensionsCombo"));
+    auto* width = panel.findChild<QDoubleSpinBox*>(QStringLiteral("WidthSpin"));
+    auto* length = panel.findChild<QDoubleSpinBox*>(QStringLiteral("LengthSpin"));
+    auto* source = panel.findChild<QComboBox*>(QStringLiteral("SourceCombo"));
+    ASSERT_NE(dimensions, nullptr);
+    const auto* items = qobject_cast<QStandardItemModel*>(dimensions->model());
+    ASSERT_NE(items, nullptr);
+    EXPECT_FALSE(items->item(2)->isEnabled());  // Procedural terrain has no data to fit.
+
+    TerrainConfig config;
+    config.kind = TerrainKind::File;
+    config.file.files = {dem};
+    panel.setFormConfig(config);
+    EXPECT_EQ(dimensions->currentIndex(), 2);
+    EXPECT_TRUE(items->item(2)->isEnabled());
+    EXPECT_FALSE(items->item(0)->isEnabled());  // Files are never unlimited.
+    EXPECT_FALSE(width->isEnabled());
+    ASSERT_TRUE(panel.regenerate());
+    EXPECT_FALSE(panel.formConfig().extent.has_value());
+    const auto extent = scene.source()->extent();
+    ASSERT_TRUE(extent.has_value());
+    // Nearly all of it: a true-north rectangle inside a UTM grid tile (whose north is a little
+    // rotated), short of its outer half-pixels.
+    EXPECT_GT(extent->widthM, 0.98 * 3000.0);
+    EXPECT_LE(extent->widthM, 3000.0);
+    EXPECT_GT(extent->lengthM, 0.98 * 1500.0);
+    EXPECT_LE(extent->lengthM, 1500.0);
+    EXPECT_NEAR(width->value(), extent->widthM / 1000.0, 1e-3);
+    EXPECT_NEAR(length->value(), extent->lengthM / 1000.0, 1e-3);
+
+    // Custom starts from the data's size; a part of it is fine.
+    dimensions->setCurrentIndex(1);
+    EXPECT_TRUE(width->isEnabled());
+    EXPECT_NEAR(width->value(), extent->widthM / 1000.0, 1e-3);
+    width->setValue(2.0);
+    ASSERT_TRUE(panel.regenerate());
+    const auto part = scene.source()->extent();
+    ASSERT_TRUE(part.has_value());
+    EXPECT_DOUBLE_EQ(part->widthM, 2000.0);
+    EXPECT_NEAR(part->lengthM, extent->lengthM, 1.0);  // Shown to the metre.
+    // More than the data: refused, pointing at "Fit to the data".
+    width->setValue(5.0);
+    EXPECT_FALSE(panel.regenerate());
+    const QString status = panel.findChild<QLabel*>(QStringLiteral("StatusLabel"))->text();
+    EXPECT_TRUE(status.contains(QStringLiteral("Fit to the data"))) << status.toStdString();
+
+    // Back to procedural terrain from "Fit to the data": unlimited.
+    dimensions->setCurrentIndex(2);
+    source->setCurrentIndex(0);
+    EXPECT_EQ(dimensions->currentIndex(), 0);
+    EXPECT_FALSE(items->item(2)->isEnabled());
 }
 
 TEST_F(FileTerrainTest, MissionOnElevationFilesIsFlownAndRecordsItsDataHash) {

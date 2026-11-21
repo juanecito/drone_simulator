@@ -42,6 +42,11 @@ namespace {
 constexpr int kPreviewSize = 200;
 constexpr double kUnboundedPreviewM = 20'000.0;
 
+// Items of the Dimensions combo.
+constexpr int kUnlimited = 0;
+constexpr int kCustomSize = 1;
+constexpr int kFitData = 2;  // Elevation files only: the terrain covers the data.
+
 QDoubleSpinBox* spin(const char* name, double min, double max, double step, int decimals,
                      const QString& suffix = {}) {
     auto* box = new QDoubleSpinBox;
@@ -54,13 +59,17 @@ QDoubleSpinBox* spin(const char* name, double min, double max, double step, int 
     return box;
 }
 
-void disableItem(QComboBox* combo, int index, const QString& tip) {
+void setItemEnabled(QComboBox* combo, int index, bool enabled, const QString& tip = {}) {
     if (auto* model = qobject_cast<QStandardItemModel*>(combo->model())) {
         if (QStandardItem* item = model->item(index)) {
-            item->setEnabled(false);
+            item->setEnabled(enabled);
             item->setToolTip(tip);
         }
     }
+}
+
+void disableItem(QComboBox* combo, int index, const QString& tip) {
+    setItemEnabled(combo, index, false, tip);
 }
 
 // Hypsometric tint: green lowlands → brown hills → grey rock → white peaks.
@@ -151,7 +160,11 @@ void TerrainPanel::buildUi() {
     connect(source_, &QComboBox::currentIndexChanged, this, &TerrainPanel::updateEnabled);
     dimensions_ = new QComboBox;
     dimensions_->setObjectName(QStringLiteral("DimensionsCombo"));
-    dimensions_->addItems({tr("Unlimited"), tr("Custom")});
+    dimensions_->addItems({tr("Unlimited"), tr("Custom"), tr("Fit to the data")});
+    dimensions_->setToolTip(
+        tr("Fit to the data: the terrain covers the elevation files — all of them with the "
+           "origin at the centre of the data, otherwise the largest rectangle centred on the "
+           "origin. Its size is shown once loaded."));
     form->addRow(tr("Dimensions:"), dimensions_);
     widthKm_ = spin("WidthSpin", 0.256, 200.0, 1.0, 3, tr(" km"));
     lengthKm_ = spin("LengthSpin", 0.256, 200.0, 1.0, 3, tr(" km"));
@@ -568,7 +581,7 @@ TerrainConfig TerrainPanel::formConfig() const {
     p.waterLevelM =
         water_->isChecked() ? std::optional<double>(waterLevel_->value()) : std::nullopt;
     p.edge = static_cast<terrain::EdgeMode>(edge_->currentData().toInt());
-    if (dimensions_->currentIndex() == 1) {
+    if (dimensions_->currentIndex() == kCustomSize) {
         c.extent = terrain::Extent{widthKm_->value() * 1000.0, lengthKm_->value() * 1000.0};
     }
     c.origin = {latitude_->value(), longitude_->value(), altitude_->value()};
@@ -645,7 +658,9 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
     water_->setChecked(p.waterLevelM.has_value());
     waterLevel_->setValue(p.waterLevelM.value_or(0.0));
     edge_->setCurrentIndex(std::max(edge_->findData(static_cast<int>(p.edge)), 0));
-    dimensions_->setCurrentIndex(c.extent ? 1 : 0);
+    dimensions_->setCurrentIndex(c.extent                      ? kCustomSize
+                                 : c.kind == TerrainKind::File ? kFitData
+                                                               : kUnlimited);
     widthKm_->setValue(c.extent ? c.extent->widthM / 1000.0 : 10.0);
     lengthKm_->setValue(c.extent ? c.extent->lengthM / 1000.0 : 10.0);
     latitude_->setValue(c.origin.latitudeDeg);
@@ -759,7 +774,12 @@ bool TerrainPanel::regenerate() {
         }
     }
     if (auto applied = scene_->setTerrain(config); !applied) {
-        showStatus(QString::fromStdString(applied.error().message), true);
+        QString problem = QString::fromStdString(applied.error().message);
+        if (config.kind == TerrainKind::File && config.extent &&
+            problem.contains(QLatin1String("not covered by the elevation data"))) {
+            problem += tr(" — choose “Fit to the data”, or a smaller size");
+        }
+        showStatus(problem, true);
         return false;
     }
     if (orthoProblem.isEmpty()) {
@@ -1042,6 +1062,7 @@ void TerrainPanel::updateOrthoInfo() {
 
 void TerrainPanel::updateMetadata() {
     updateOrthoInfo();
+    showDataSize();
     const auto& meta = scene_->terrainMetadata();
     if (!meta) {
         metadata_->clear();
@@ -1125,9 +1146,30 @@ void TerrainPanel::updateMetadata() {
     metadata_->setText(lines.join(QLatin1Char('\n')));
 }
 
+void TerrainPanel::showDataSize() {
+    if (dimensions_->currentIndex() != kFitData || scene_->terrain().kind != TerrainKind::File ||
+        scene_->source() == nullptr) {
+        return;
+    }
+    if (const auto extent = scene_->source()->extent()) {
+        widthKm_->setValue(extent->widthM / 1000.0);
+        lengthKm_->setValue(extent->lengthM / 1000.0);
+    }
+}
+
 void TerrainPanel::updateEnabled() {
-    const bool custom = dimensions_->currentIndex() == 1;
     const bool file = source_->currentIndex() == 2;
+    // Elevation files end where their data ends: they fit the data or take a size, and only
+    // they have data to fit.
+    setItemEnabled(dimensions_, kUnlimited, !file,
+                   file ? tr("Elevation files end where their data ends.") : QString());
+    setItemEnabled(dimensions_, kFitData, file, file ? QString() : tr("Only for elevation files."));
+    if (file && dimensions_->currentIndex() == kUnlimited) {
+        dimensions_->setCurrentIndex(kFitData);
+    } else if (!file && dimensions_->currentIndex() == kFitData) {
+        dimensions_->setCurrentIndex(kUnlimited);
+    }
+    const bool custom = dimensions_->currentIndex() == kCustomSize;
     const bool online = source_->currentIndex() == 1;
     procedural_->setVisible(!file && !online);
     fileBox_->setVisible(file);
