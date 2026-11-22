@@ -146,7 +146,8 @@ rate.
   treatment, and the geographic origin; *Regenerate* applies them. For file and online
   elevation, *Elevation processing* chooses the interpolation (bilinear, bicubic, B-spline
   or nearest) and can remove spikes and smooth the heights; for lidar, a cell takes the
-  mean or the lowest ground point. A shaded 2D preview shows the result.
+  mean or the lowest ground point. *Finest mesh spacing* (0.25–4 m) sets the detail of the
+  terrain near the camera. A shaded 2D preview shows the result.
 - **Environment tab:** date and time in any time zone (or UTC), *Now*, a time-of-day slider and
   running time (up to 3600×); Sun and Moon position, phase, rise/set and twilight times; exposure
   (automatic with compensation, or manual EV), visibility (haze and fog), the wind level

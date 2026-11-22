@@ -202,6 +202,38 @@ TEST(ProceduralSource, LevelZeroGridEqualsHeight) {
 
 // --- Chunks (FR-TER-04, FR-TER-06, FR-TER-08) ----------------------------------------------------
 
+TEST(ChunkLayout, FinerSpacingsAddLevelsNearTheCameraOnly) {
+    EXPECT_EQ(layoutForSpacing(kDefaultMeshSpacingM), ChunkLayout{});
+    const double root = ChunkLayout{}.size(ChunkLayout{}.lodCount - 1);
+    for (const double spacing : kMeshSpacingsM) {
+        const ChunkLayout layout = layoutForSpacing(spacing);
+        EXPECT_TRUE(isMeshSpacing(spacing));
+        EXPECT_TRUE(layout.isValid()) << spacing;
+        EXPECT_DOUBLE_EQ(layout.spacing(0), spacing);
+        EXPECT_EQ(layout.gridSize, ChunkLayout{}.gridSize);
+        EXPECT_DOUBLE_EQ(layout.size(layout.lodCount - 1), root) << spacing;  // Same reach.
+    }
+    EXPECT_EQ(layoutForSpacing(0.5).lodCount, 10);
+    for (const double bad : {0.0, 0.3, 3.0, 8.0, -1.0}) {
+        EXPECT_FALSE(isMeshSpacing(bad));
+        EXPECT_EQ(layoutForSpacing(bad), ChunkLayout{});
+    }
+
+    // Low over the ground each halving draws one ring of small chunks more; high up the
+    // finer levels are not reached and nothing changes.
+    const auto drawn = [](double spacing, double y) {
+        const auto ready = [](const ChunkId&) {
+            return std::optional<std::pair<float, float>>{{0.0F, 0.0F}};
+        };
+        return selectChunks(layoutForSpacing(spacing), std::nullopt, 0.0, y, 0.0, {}, ready)
+            .render.size();
+    };
+    const std::size_t low = drawn(2.0, 30.0);
+    EXPECT_GT(drawn(0.5, 30.0), low);
+    EXPECT_LT(static_cast<double>(drawn(0.5, 30.0)), 1.35 * static_cast<double>(low));
+    EXPECT_EQ(drawn(0.5, 1000.0), drawn(2.0, 1000.0));
+}
+
 TEST(ChunkLayout, Geometry) {
     const ChunkLayout layout;
     EXPECT_TRUE(layout.isValid());

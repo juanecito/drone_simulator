@@ -51,6 +51,9 @@ common::Result<void> validateTerrain(const TerrainConfig& config) {
             return valid;
         }
     }
+    if (!terrain::isMeshSpacing(config.meshSpacingM)) {
+        return common::makeError("the mesh spacing must be 0.25, 0.5, 1, 2 or 4 m");
+    }
     return {};
 }
 
@@ -121,6 +124,7 @@ common::Result<void> SceneController::applyTerrain(const TerrainConfig& config) 
     }
     orthoStreamer_.reset();
     streamer_.reset();
+    layout_ = terrain::layoutForSpacing(terrain_.meshSpacingM);  // FR-TER-C04.
     terrain::StreamerSettings settings;
     settings.selection.viewRadiusM = kViewRadiusM;
     streamer_ = std::make_unique<terrain::TerrainStreamer>(source_, layout_, pool_, settings);

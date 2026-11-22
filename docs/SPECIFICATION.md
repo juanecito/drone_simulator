@@ -552,6 +552,7 @@ The files travel with the mission (mission folder) or live in the user's geodata
 | FR-TER-C01 | Single-band elevation (or a `band` chosen in the mission); Int16, UInt16, Int32, Float32, Float64; scale/offset applied; NoData filled by interpolation for small voids and a fallback height for large ones. | M |
 | FR-TER-C02 | **Partial reads:** chunks read only the part of the file they need (COG/tiled GeoTIFF tiles, or windows of other formats); coarse LODs use internal overviews when present (otherwise built in memory or, for large files, a COG copy is cached like FR-TER-L05); memory bounded (default 256 MB). | M |
 | FR-TER-C03 | **Interpolation and filters** (file and online elevation, Terrain tab): interpolation between cells bilinear (default), bicubic (Catmull-Rom), cubic B-spline or nearest; a median spike filter (radius ≤ 10 m) and Gaussian smoothing (radius ≤ 100 m), applied after the NoData fill and before interpolation; the mesh, physics and preview use the same heights; filters wider than 6 (median) or 24 (Gaussian) cells read cells averaged by powers of two; saved with the scene and presets (`processing`); missions use the default. | S |
+| FR-TER-C04 | **Finest mesh spacing** (any terrain, Terrain tab): the level-0 vertex spacing is 0.25, 0.5, 1, 2 (default) or 4 m. Chunks keep 129 × 129 vertices, so a level-0 chunk is 128 × the spacing; levels are added or removed so the coarsest chunk stays 32 km. Physics queries use the same lattice; elevation data is read at full resolution up to the spacing; orthophoto tiles stay 4 per chunk side. Saved with the scene and presets (`meshSpacingM`); missions use 2 m. | S |
 
 **LAS / LAZ specifics**
 
@@ -2119,6 +2120,22 @@ so Markdown pages appear in the generated site.
     tiles are first computed, nothing more once cached; a point query is about 2.5 µs
     instead of 0.5 µs.
   - *Not done:* missions cannot set the processing; edge-preserving (bilateral) smoothing.
+- **After step 9 — Finest mesh spacing (done, FR-TER-C04):**
+  - *Core:* `terrain::layoutForSpacing()` and `kMeshSpacingsM` (`ds/terrain/chunk.hpp`).
+    Since a level is drawn at distances proportional to its chunk size, a finer spacing
+    only adds levels near the camera: the levels farther out keep their place and detail.
+    `RasterOptions::fullDetailStepM` and `OnlineTerrainRequest::meshSpacingM` follow the
+    spacing, so level 0 reads full-resolution data at 4 m too.
+  - *App:* `TerrainConfig::meshSpacingM` (`meshSpacingM` in the scene JSON and presets,
+    written only when not 2). `SceneController` makes the layout from it for the streamer,
+    the query and the physics. Orthophoto tiles are a quarter of a chunk, so imagery near
+    the camera gets finer with the mesh and stays the same at a distance. The Terrain tab
+    has *Finest mesh spacing* (`MeshSpacingCombo`); the metadata view notes
+    *Mesh: a vertex every … m near the camera*.
+  - *Cost* (chunks drawn, all ready, camera 30 m up): 272 at 4 m, 320 at 2 m, 368 at 1 m,
+    416 at 0.5 m, 464 at 0.25 m, about 15 % more per halving. From 1000 m up all
+    spacings draw about 284 chunks. A chunk mesh is about 270 kB.
+  - *Not done:* missions cannot set the spacing.
 
 **M5 implementation notes** (done; deliberate scope decisions):
 

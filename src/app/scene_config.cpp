@@ -294,6 +294,18 @@ common::Result<terrain::HeightProcessing> processingFromJson(const QJsonObject& 
     return p;
 }
 
+// FR-TER-C04: the finest mesh spacing, written only when it is not the default.
+common::Result<double> meshSpacingFromJson(const QJsonValue& value) {
+    if (value.isUndefined()) {
+        return terrain::kDefaultMeshSpacingM;
+    }
+    const double spacing = value.toDouble(-1.0);
+    if (!terrain::isMeshSpacing(spacing)) {
+        return common::makeError("'meshSpacingM' must be 0.25, 0.5, 1, 2 or 4");
+    }
+    return spacing;
+}
+
 QString sourceName(TerrainKind kind) {
     switch (kind) {
         case TerrainKind::File: return QStringLiteral("file");
@@ -306,8 +318,9 @@ QString sourceName(TerrainKind kind) {
 
 bool TerrainConfig::operator==(const TerrainConfig& o) const noexcept {
     return kind == o.kind && file == o.file && online == o.online && ortho == o.ortho &&
-           processing == o.processing && presetKey == o.presetKey && params == o.params &&
-           extent == o.extent && origin.latitudeDeg == o.origin.latitudeDeg &&
+           processing == o.processing && meshSpacingM == o.meshSpacingM &&
+           presetKey == o.presetKey && params == o.params && extent == o.extent &&
+           origin.latitudeDeg == o.origin.latitudeDeg &&
            origin.longitudeDeg == o.origin.longitudeDeg && origin.heightM == o.origin.heightM;
 }
 
@@ -432,6 +445,9 @@ QJsonObject terrainToJson(const TerrainConfig& c) {
     if (c.kind != TerrainKind::Procedural && c.processing != terrain::HeightProcessing{}) {
         json.insert(QStringLiteral("processing"), processingToJson(c.processing));
     }
+    if (c.meshSpacingM != terrain::kDefaultMeshSpacingM) {
+        json.insert(QStringLiteral("meshSpacingM"), c.meshSpacingM);
+    }
     return json;
 }
 
@@ -474,6 +490,11 @@ common::Result<TerrainConfig> terrainFromJson(const QJsonObject& json) {
         }
         c.processing = *p;
     }
+    auto spacing = meshSpacingFromJson(json.value(QStringLiteral("meshSpacingM")));
+    if (!spacing) {
+        return std::unexpected(spacing.error());
+    }
+    c.meshSpacingM = *spacing;
     auto params = paramsFromJson(json.value(QStringLiteral("params")).toObject());
     if (!params) {
         return std::unexpected(params.error());
@@ -651,6 +672,9 @@ storage::TerrainPresetRecord toPresetRecord(const TerrainConfig& c, const std::s
     if (c.kind != TerrainKind::Procedural && c.processing != terrain::HeightProcessing{}) {
         params.insert(QStringLiteral("processing"), processingToJson(c.processing));
     }
+    if (c.meshSpacingM != terrain::kDefaultMeshSpacingM) {
+        params.insert(QStringLiteral("meshSpacingM"), c.meshSpacingM);
+    }
     r.paramsJson = QJsonDocument(params).toJson(QJsonDocument::Compact).toStdString();
     return r;
 }
@@ -703,6 +727,11 @@ common::Result<TerrainConfig> fromPresetRecord(const storage::TerrainPresetRecor
         }
         c.processing = *p;
     }
+    auto spacing = meshSpacingFromJson(doc.object().value(QStringLiteral("meshSpacingM")));
+    if (!spacing) {
+        return common::makeError(std::format("preset '{}': {}", r.name, spacing.error().message));
+    }
+    c.meshSpacingM = *spacing;
     c.presetKey = r.key;
     c.params = std::move(*params);
     if (r.seed) {
@@ -730,10 +759,17 @@ common::Result<terrain::OnlineTerrainRequest> onlineRequest(const TerrainConfig&
     r.extent = config.extent;
     r.edge = config.online.edge;
     r.processing = config.processing;
+    r.meshSpacingM = config.meshSpacingM;
     return r;
 }
 
 namespace {
+
+// Orthophoto tiles share the chunk lattice: kOrthoTilesPerChunk a side of a chunk, so a finer
+// mesh also has finer imagery near the camera and the same imagery at a distance.
+double orthoTileSizeFor(const TerrainConfig& config) {
+    return terrain::layoutForSpacing(config.meshSpacingM).chunkSizeM / terrain::kOrthoTilesPerChunk;
+}
 
 // Opens the imagery of @p config over the built terrain (FR-TER-I08: problems only disable
 // it, with a warning).
@@ -766,6 +802,7 @@ void openOrtho(const TerrainConfig& config, DataServices* data, BuiltTerrain& bu
             return;
         }
         terrain::OrthoOptions tiles;
+        tiles.tileSizeM = orthoTileSizeFor(config);
         auto opened = terrain::OnlineImagerySource::open(
             data->client(), terrain::OnlineImageryRequest{*provider, o.dataset, o.color},
             built.origin, {}, tiles);
@@ -791,7 +828,9 @@ void openOrtho(const TerrainConfig& config, DataServices* data, BuiltTerrain& bu
     }
     const std::vector<std::filesystem::path> files =
         data != nullptr ? data->orthoFiles(o.files) : o.files;
-    auto opened = terrain::OrthophotoSource::open(files, orthoOptions(o), built.origin);
+    terrain::OrthoOptions options = orthoOptions(o);
+    options.tileSizeM = orthoTileSizeFor(config);
+    auto opened = terrain::OrthophotoSource::open(files, options, built.origin);
     if (!opened) {
         built.orthoWarning = opened.error().message + "; imagery disabled";
         log::warn("Orthophotos: {}", built.orthoWarning);
@@ -829,10 +868,14 @@ terrain::OrthoOptions orthoOptions(const OrthoConfig& o) {
 
 namespace {
 
-// FR-TER-C03: the metadata view says how the heights were processed.
+// FR-TER-C03, C04: the metadata view says how the heights were processed and meshed.
 void noteProcessing(const TerrainConfig& config, terrain::SourceMetadata& meta) {
     if (config.processing != terrain::HeightProcessing{}) {
         meta.notes.push_back("Heights: " + terrain::describeProcessing(config.processing));
+    }
+    if (config.meshSpacingM != terrain::kDefaultMeshSpacingM) {
+        meta.notes.push_back(
+            std::format("Mesh: a vertex every {:g} m near the camera", config.meshSpacingM));
     }
 }
 
@@ -900,6 +943,7 @@ common::Result<BuiltTerrain> buildHeights(const TerrainConfig& config, DataServi
     options.extent = config.extent;
     options.edge = f.edge;
     options.processing = config.processing;
+    options.fullDetailStepM = config.meshSpacingM;
     auto source = terrain::RasterSource::open(files, options);
     if (!source) {
         return common::makeError(source.error().message);

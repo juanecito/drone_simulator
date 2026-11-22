@@ -16,6 +16,7 @@
 #include "ds/geo/coordinates.hpp"
 #include "ds/graphics/exposure.hpp"
 #include "ds/storage/terrain_preset_store.hpp"
+#include "ds/terrain/chunk.hpp"
 #include "ds/terrain/lidar.hpp"
 #include "ds/terrain/online_imagery.hpp"
 #include "ds/terrain/online_terrain.hpp"
@@ -112,6 +113,9 @@ struct TerrainConfig {
     std::optional<terrain::Extent> extent;  ///< Dimensions; empty = unlimited (FR-TER-04a).
     /// Interpolation and filters of file and online elevation (FR-TER-C03).
     terrain::HeightProcessing processing;
+    /// Vertex spacing of the finest mesh level, which physics also uses (FR-TER-C04): one
+    /// of terrain::kMeshSpacingsM.
+    double meshSpacingM = terrain::kDefaultMeshSpacingM;
     /// Geographic origin; heightM is AMSL (FR-TER-09). For file and online terrain heightM
     /// (and for file terrain the position) is the origin in use, filled in when the terrain
     /// is built (buildTerrain()).

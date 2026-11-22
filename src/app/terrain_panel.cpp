@@ -174,6 +174,23 @@ void TerrainPanel::buildUi() {
     size->addWidget(lengthKm_);
     form->addRow(tr("Width × length:"), size);
     connect(dimensions_, &QComboBox::currentIndexChanged, this, &TerrainPanel::updateEnabled);
+    // FR-TER-C04: vertex spacing of the finest level, near the camera.
+    meshSpacing_ = new QComboBox;
+    meshSpacing_->setObjectName(QStringLiteral("MeshSpacingCombo"));
+    for (const double spacing : terrain::kMeshSpacingsM) {
+        QString text = tr("%1 m").arg(spacing, 0, 'g', 3);
+        if (spacing == terrain::kDefaultMeshSpacingM) {
+            text += tr(" (default)");
+        }
+        meshSpacing_->addItem(text, spacing);
+    }
+    meshSpacing_->setToolTip(
+        tr("Distance between the vertices of the most detailed terrain mesh, used near the "
+           "camera and by the physics. Finer spacings show detail of fine elevation data "
+           "(lidar, 0.5 m DEMs) and add detail levels near the camera: each halving draws "
+           "about 15 % more terrain meshes and imagery tiles low over the ground, and none "
+           "high up. Distant terrain is unchanged. Missions always use 2 m."));
+    form->addRow(tr("Finest mesh spacing:"), meshSpacing_);
     layout->addWidget(general);
 
     // Elevation files (FR-TER-F11).
@@ -680,6 +697,7 @@ TerrainConfig TerrainPanel::formConfig() const {
             o.originAltitudeM = altitude_->value();
         }
     }
+    c.meshSpacingM = meshSpacing_->currentData().toDouble();
     if (c.kind != TerrainKind::Procedural) {
         c.processing.interpolation =
             static_cast<terrain::HeightInterpolation>(interpolation_->currentData().toInt());
@@ -773,6 +791,9 @@ void TerrainPanel::setFormConfig(const TerrainConfig& c) {
         std::max(interpolation_->findData(static_cast<int>(c.processing.interpolation)), 0));
     despike_->setValue(c.processing.despikeRadiusM);
     smooth_->setValue(c.processing.smoothRadiusM);
+    const int spacing = meshSpacing_->findData(c.meshSpacingM);
+    meshSpacing_->setCurrentIndex(
+        spacing >= 0 ? spacing : meshSpacing_->findData(terrain::kDefaultMeshSpacingM));
     fillImageryProviders();
     if (!c.ortho.provider.empty()) {
         const QString key = QString::fromStdString(c.ortho.provider);

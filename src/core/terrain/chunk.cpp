@@ -31,6 +31,21 @@ bool ChunkLayout::isValid() const noexcept {
            std::has_single_bit(static_cast<unsigned>(cells)) && lodCount >= 5 && lodCount <= 16;
 }
 
+bool isMeshSpacing(double spacingM) noexcept {
+    return std::ranges::find(kMeshSpacingsM, spacingM) != kMeshSpacingsM.end();
+}
+
+ChunkLayout layoutForSpacing(double spacingM) noexcept {
+    ChunkLayout layout;
+    if (!isMeshSpacing(spacingM)) {
+        return layout;
+    }
+    const int extraLevels = static_cast<int>(std::lround(std::log2(layout.spacing(0) / spacingM)));
+    layout.chunkSizeM = spacingM * (layout.gridSize - 1);
+    layout.lodCount += extraLevels;
+    return layout;
+}
+
 std::size_t ChunkIdHash::operator()(const ChunkId& id) const noexcept {
     std::uint64_t h = common::mix64(static_cast<std::uint64_t>(id.ix));
     h = common::mix64(h ^ static_cast<std::uint64_t>(id.iz));

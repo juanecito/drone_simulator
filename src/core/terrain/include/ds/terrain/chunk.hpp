@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,22 @@ struct ChunkLayout {
     /// @brief Equality.
     bool operator==(const ChunkLayout&) const = default;
 };
+
+/// @brief Finest mesh spacings a terrain can use (FR-TER-C04), metres.
+inline constexpr std::array<double, 5> kMeshSpacingsM{0.25, 0.5, 1.0, 2.0, 4.0};
+/// @brief Default finest mesh spacing (the default ChunkLayout), metres.
+inline constexpr double kDefaultMeshSpacingM = 2.0;
+
+/// @brief True if @p spacingM is one of kMeshSpacingsM.
+[[nodiscard]] bool isMeshSpacing(double spacingM) noexcept;
+
+/// @brief The layout whose level 0 has a vertex every @p spacingM (one of kMeshSpacingsM;
+/// other values give the default layout).
+/// @details Chunks keep gridSize vertices a side, so a chunk of level 0 is
+/// `spacingM · (gridSize − 1)` wide. Levels are added or removed so the coarsest chunk keeps
+/// the default width (32 km): a finer spacing adds levels near the camera only, since a level
+/// is drawn at distances proportional to its chunk size.
+[[nodiscard]] ChunkLayout layoutForSpacing(double spacingM) noexcept;
 
 /// @brief Address of a chunk: level and integer position on that level's grid.
 /// @details Chunk (lod, ix, iz) spans x ∈ [ix·S, (ix+1)·S], z ∈ [iz·S, (iz+1)·S] with

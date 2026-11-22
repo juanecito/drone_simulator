@@ -12,14 +12,18 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <numbers>
 #include <string>
 #include <vector>
 
 #include "ds/app/mission_setup.hpp"
 #include "ds/app/scene_config.hpp"
 #include "ds/sim/hud.hpp"
+#include "ds/terrain/chunk.hpp"
+#include "ds/terrain/query.hpp"
 #include "ds/terrain/raster_source.hpp"
 #include "ds/terrain/terrain_files.hpp"
 
@@ -150,6 +154,77 @@ TEST(FileTerrain, ProcessingIsSavedWithTheSceneAndPresetsAndApplied) {
     }));
 }
 
+TEST(FileTerrain, MeshSpacingIsSavedAndShowsTheDetailOfFineData) {
+    TempDir dir("file_terrain_spacing");
+    // 0.5 m data, 300 m a side: waves 4 m long across the easting, 5 m high, with crests at
+    // x = 1, 5, 9, … m and zeros at the even metres from the data centre (the origin).
+    test::RasterSpec spec;
+    spec.width = spec.height = 600;
+    spec.geoTransform = {test::kE0, 0.5, 0.0, test::kN0, 0.0, -0.5};
+    spec.value = [](int i, int) {
+        return 500.0 + 5.0 * std::sin(2.0 * std::numbers::pi * ((i + 0.5) * 0.5 - 150.0) / 4.0);
+    };
+    test::writeRaster(dir / "dem.tif", spec);
+    app::TerrainConfig c = fileConfig(dir / "dem.tif");
+    c.meshSpacingM = 0.5;
+
+    // Saved with the scene and presets, only when it is not the default.
+    const QJsonObject json = app::terrainToJson(c);
+    EXPECT_EQ(json.value(QStringLiteral("meshSpacingM")).toDouble(), 0.5);
+    const auto back = app::terrainFromJson(json);
+    ASSERT_TRUE(back.has_value()) << back.error().message;
+    EXPECT_EQ(*back, c);
+    const auto preset = app::fromPresetRecord(app::toPresetRecord(c, "user.fine", "Fine"));
+    ASSERT_TRUE(preset.has_value()) << preset.error().message;
+    EXPECT_EQ(preset->meshSpacingM, 0.5);
+    EXPECT_FALSE(
+        app::terrainToJson(fileConfig(dir / "dem.tif")).contains(QStringLiteral("meshSpacingM")));
+    app::TerrainConfig procedural;
+    procedural.meshSpacingM = 1.0;  // Any terrain can use it.
+    EXPECT_EQ(app::terrainFromJson(app::terrainToJson(procedural))->meshSpacingM, 1.0);
+    for (const QJsonValue& bad :
+         {QJsonValue(3.0), QJsonValue(0.1), QJsonValue(QStringLiteral("1"))}) {
+        QJsonObject broken = json;
+        broken.insert(QStringLiteral("meshSpacingM"), bad);
+        EXPECT_FALSE(app::terrainFromJson(broken).has_value());
+    }
+
+    // The 2 m lattice only sees the zeros of the waves; the 0.5 m one sees the crests.
+    auto built = app::buildTerrain(c);
+    ASSERT_TRUE(built.has_value()) << built.error().message;
+    EXPECT_TRUE(std::ranges::any_of(built->metadata->notes, [](const std::string& n) {
+        return n == "Mesh: a vertex every 0.5 m near the camera";
+    }));
+    const terrain::TerrainQuery fine(built->source, terrain::layoutForSpacing(0.5),
+                                     built->origin.heightM);
+    const terrain::TerrainQuery coarse(built->source, terrain::layoutForSpacing(2.0),
+                                       built->origin.heightM);
+    EXPECT_GT(fine.heightAmsl(1.0, 0.0), 504.0);
+    EXPECT_NEAR(coarse.heightAmsl(1.0, 0.0), 500.0, 0.5);
+}
+
+TEST(FileTerrain, CoarseMeshSpacingStillReadsTheFullResolutionData) {
+    TempDir dir("file_terrain_coarse");
+    // 0.5 m noise: averaged cells would change every height.
+    test::RasterSpec spec;
+    spec.width = spec.height = 600;
+    spec.geoTransform = {test::kE0, 0.5, 0.0, test::kN0, 0.0, -0.5};
+    spec.value = [](int i, int j) { return 500.0 + ((i * 7919 + j * 104729) % 11) * 0.5; };
+    test::writeRaster(dir / "dem.tif", spec);
+    app::TerrainConfig c = fileConfig(dir / "dem.tif");
+    c.meshSpacingM = 4.0;
+    auto built = app::buildTerrain(c);
+    ASSERT_TRUE(built.has_value()) << built.error().message;
+    // The finest level (and so the physics) has the data's own heights at its vertices.
+    const terrain::TerrainQuery query(built->source, terrain::layoutForSpacing(4.0),
+                                      built->origin.heightM);
+    for (double x = -100.0; x <= 100.0; x += 20.0) {
+        for (double z = -100.0; z <= 100.0; z += 28.0) {
+            EXPECT_NEAR(query.height(x, z), built->source->height(x, z), 1e-9) << x << ", " << z;
+        }
+    }
+}
+
 TEST(FileTerrain, BuildTerrainOpensTheFilesAndTakesTheOriginFromTheData) {
     TempDir dir("file_terrain");
     test::writeRaster(dir / "dem.tif", test::planarUtmSpec());
@@ -210,6 +285,14 @@ TEST(FileTerrain, OrthophotosInTheConfigAndTheBuiltTerrain) {
     const terrain::OrthoMetadata& m = built->ortho->metadata();
     EXPECT_NEAR(m.minX, -404.0, 4.0);
     EXPECT_NEAR(m.maxZ, 404.0, 4.0);
+    // Imagery tiles follow the chunks: kOrthoTilesPerChunk a side (FR-TER-C04).
+    EXPECT_DOUBLE_EQ(built->ortho->options().tileSizeM, terrain::kOrthoTileSizeM);
+    app::TerrainConfig fine = c;
+    fine.meshSpacingM = 0.5;
+    auto fineBuilt = app::buildTerrain(fine);
+    ASSERT_TRUE(fineBuilt.has_value() && fineBuilt->ortho != nullptr);
+    EXPECT_DOUBLE_EQ(fineBuilt->ortho->options().tileSizeM,
+                     terrain::layoutForSpacing(0.5).chunkSizeM / terrain::kOrthoTilesPerChunk);
 
     // A broken orthophoto only disables the imagery (FR-TER-I08).
     std::ofstream(dir / "broken.tif") << "not an image";

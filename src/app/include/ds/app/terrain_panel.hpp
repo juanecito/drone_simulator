@@ -129,6 +129,7 @@ private:
     QPushButton* download_ = nullptr;
     QLabel* quota_ = nullptr;
     QTimer* refresh_ = nullptr;
+    QComboBox* meshSpacing_ = nullptr;  // Finest mesh spacing (FR-TER-C04).
     // Interpolation and filters of file and online elevation (FR-TER-C03).
     QGroupBox* processingBox_ = nullptr;
     QComboBox* interpolation_ = nullptr;

@@ -255,10 +255,14 @@ TEST_F(FileTerrainTest, MissionOnElevationFilesIsFlownAndRecordsItsDataHash) {
     openWindow();
     SimulationController& sim = *window_->simulation();
     SceneController& scene = *window_->scene();
+    TerrainConfig fine = scene.terrain();
+    fine.meshSpacingM = 0.5;  // Free mode only: missions fly the default mesh (FR-TER-C04).
+    ASSERT_TRUE(scene.setTerrain(fine).has_value());
     auto launched = window_->launchMission("dem-hop");
     ASSERT_TRUE(launched.has_value()) << launched.error().message;
     ASSERT_TRUE(waitFor([&] { return sim.missionStatus().active; }));
     EXPECT_EQ(scene.terrain().kind, TerrainKind::File);
+    EXPECT_DOUBLE_EQ(scene.layout().spacing(0), terrain::kDefaultMeshSpacingM);
     EXPECT_EQ(scene.attribution(), "Test DEM, CC BY 4.0");
     EXPECT_EQ(scene.source()->extent(), (terrain::Extent{1500.0, 1500.0}));
     // The origin is the centre of the data, the spawn on the ground there.
@@ -286,6 +290,7 @@ TEST_F(FileTerrainTest, MissionOnElevationFilesIsFlownAndRecordsItsDataHash) {
     window_->endMission();
     EXPECT_EQ(scene.terrain().kind, TerrainKind::Procedural);  // Free mode again.
     EXPECT_TRUE(scene.attribution().empty());
+    EXPECT_DOUBLE_EQ(scene.layout().spacing(0), 0.5);
 }
 
 TEST_F(FileTerrainTest, MissionOrthophotosAreDrapedAndABrokenOneOnlyDisablesThem) {
@@ -401,6 +406,50 @@ TEST_F(FileTerrainTest, TerrainTabInterpolatesAndSmoothsTheElevation) {
     panel.findChild<QComboBox*>(QStringLiteral("SourceCombo"))->setCurrentIndex(0);
     EXPECT_TRUE(box->isHidden());
     EXPECT_EQ(panel.formConfig().processing, terrain::HeightProcessing{});
+}
+
+TEST_F(FileTerrainTest, TerrainTabSetsTheFinestMeshSpacing) {
+    const fs::path dem = homeDir() / "dem.tif";
+    test::writeRaster(dem, test::planarUtmSpec());
+    SceneController scene(settings_.get(), findAssetDirectory());
+    TerrainPanel panel(scene);
+    TerrainConfig config;
+    config.kind = TerrainKind::File;
+    config.file.files = {dem};
+    panel.setFormConfig(config);
+    auto* spacing = panel.findChild<QComboBox*>(QStringLiteral("MeshSpacingCombo"));
+    ASSERT_NE(spacing, nullptr);
+    EXPECT_EQ(spacing->count(), static_cast<int>(terrain::kMeshSpacingsM.size()));
+    EXPECT_EQ(spacing->currentData().toDouble(), terrain::kDefaultMeshSpacingM);
+    EXPECT_TRUE(spacing->currentText().contains(QStringLiteral("default")));
+
+    spacing->setCurrentIndex(spacing->findData(0.5));
+    EXPECT_EQ(panel.formConfig().meshSpacingM, 0.5);
+    ASSERT_TRUE(panel.regenerate());
+    EXPECT_EQ(scene.terrain().meshSpacingM, 0.5);
+    EXPECT_DOUBLE_EQ(scene.layout().spacing(0), 0.5);
+    EXPECT_EQ(scene.layout(), terrain::layoutForSpacing(0.5));
+    EXPECT_EQ(scene.streamer().layout(), scene.layout());
+    const QString meta = panel.findChild<QLabel*>(QStringLiteral("MetadataLabel"))->text();
+    EXPECT_TRUE(meta.contains(QStringLiteral("a vertex every 0.5 m"))) << meta.toStdString();
+
+    // Kept with the scene: a new controller starts with it.
+    {
+        SceneController reloaded(settings_.get(), findAssetDirectory());
+        EXPECT_EQ(reloaded.terrain().meshSpacingM, 0.5);
+        EXPECT_DOUBLE_EQ(reloaded.layout().spacing(0), 0.5);
+    }
+    // Procedural terrain has it too; a configuration shows its own; invalid ones are refused.
+    panel.findChild<QComboBox*>(QStringLiteral("SourceCombo"))->setCurrentIndex(0);
+    spacing->setCurrentIndex(spacing->findData(4.0));
+    ASSERT_TRUE(panel.regenerate());
+    EXPECT_DOUBLE_EQ(scene.layout().spacing(0), 4.0);
+    panel.setFormConfig(config);
+    EXPECT_EQ(spacing->currentData().toDouble(), terrain::kDefaultMeshSpacingM);
+    TerrainConfig bad = config;
+    bad.meshSpacingM = 3.0;
+    EXPECT_FALSE(scene.setTerrain(bad).has_value());
+    EXPECT_DOUBLE_EQ(scene.layout().spacing(0), 4.0);
 }
 
 TEST_F(FileTerrainTest, ADamagedElevationFileStopsTheMission) {

@@ -119,6 +119,25 @@ then heights interpolated between the cells.
 - **Metadata:** the terrain information in the Terrain tab shows a line such as
   *Heights: bicubic, spikes removed within 2 m, smoothed over 10 m*.
 
+## Mesh detail
+
+*Finest mesh spacing* in the Terrain tab (any terrain) sets the distance between the
+vertices of the most detailed mesh, which is drawn near the camera and also used by the
+physics: 0.25, 0.5, 1, **2 (default)** or 4 m. Press *Regenerate* to apply it.
+
+- **When to change it:** with elevation data finer than 2 m (lidar terrain models, 0.5 m or
+  1 m DEMs), a spacing near the data's cell size shows its detail: banks, ditches, kerbs,
+  rocks. A spacing finer than the data adds vertices but no detail. 4 m lightens the load
+  on slow computers.
+- **Only near the camera:** each level of detail is drawn at a distance proportional to its
+  size, so a finer spacing adds levels close to the camera and leaves distant terrain as
+  it was. Each halving draws about 15 % more terrain meshes and imagery tiles low over
+  the ground, and none from about 1000 m up.
+- **Imagery** gets finer near the camera with the mesh, so draped orthophotos show their
+  full resolution close up.
+- **Saved with the scene and presets** as `"meshSpacingM": 0.5` (left out at 2 m).
+  Missions always use 2 m, so every pilot flies the same surface.
+
 ## Lidar point clouds (LAS / LAZ)
 
 LAS 1.0–1.4 and LAZ, including COPC files, are turned into a terrain model (a DTM) once and
@@ -135,7 +154,9 @@ cached. Building it takes about 10 s per 40 million points (release build).
   ```
 
 - **Resolution** (`resolutionM`, at least 0.25 m): by default about two point spacings,
-  between 0.5 and 20 m, and coarser when the grid would exceed 32 million cells.
+  between 0.5 and 20 m, and coarser when the grid would exceed 32 million cells. In the
+  Terrain tab, untick *DTM cell size › Automatic* to set it. To see the detail of a fine
+  model, also set *Finest mesh spacing* (see *Mesh detail*) to about its cell size.
 - **Cell height:** the mean of the ground points in a cell (the default, the least noise),
   or the lowest of them (*Cell height › Lowest ground point* in the Terrain tab,
   `"cellHeight": "lowest"` in a saved scene). The lowest point drops low vegetation and

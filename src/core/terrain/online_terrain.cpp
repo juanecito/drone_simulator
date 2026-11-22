@@ -74,6 +74,7 @@ RasterOptions rasterOptions(const OnlineTerrainRequest& request,
     o.edge = request.edge;
     o.verticalDatum = dataset.verticalDatum;
     o.processing = request.processing;
+    o.fullDetailStepM = request.meshSpacingM;
     return o;
 }
 

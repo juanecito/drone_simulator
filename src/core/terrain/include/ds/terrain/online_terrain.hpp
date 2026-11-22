@@ -44,6 +44,9 @@ struct OnlineTerrainRequest {
     std::optional<Extent> extent;           ///< Bounded terrain; empty ⇒ streaming blocks.
     EdgeMode edge = EdgeMode::Cliff;        ///< Border of a bounded terrain (Cliff or Fade).
     HeightProcessing processing;            ///< Interpolation and filters (FR-TER-C03).
+    /// Finest mesh spacing (FR-TER-C04): grids up to it read full-resolution data
+    /// (RasterOptions::fullDetailStepM).
+    double meshSpacingM = 2.0;
 };
 
 /// @brief What the metadata view shows about the provider data (FR-TER-O12).
