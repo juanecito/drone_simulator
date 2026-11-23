@@ -13,6 +13,7 @@ path = [
     "CMakePresets.json",
     "docs/**.md",
     "docs/img/screenshot_drone_simulator.png",
+    "docs/img/screenshot_drone_simulator2.png",
     "packaging/linux/drone-simulator.desktop",
     "packaging/debian/copyright",
     "packaging/debian/changelog",

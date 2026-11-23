@@ -6,6 +6,7 @@ astronomically correct day/night sky.
 
 ![image alt text](docs/img/screenshot_drone_simulator.png)
 
+![image alt text](docs/img/screenshot_drone_simulator2.png)
 
 - **Language:** C++23 · **GUI:** Qt 6 Widgets · **Graphics:** OpenGL 4.5 core
 - **Build:** CMake + Ninja · **Tests:** GoogleTest + CTest · **Docs:** Doxygen + Markdown
