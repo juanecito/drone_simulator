@@ -243,6 +243,11 @@ private:
     struct Impl;
     void renderView(const FrameTarget& target, const ViewRect& rect, const FrameInput& input,
                     bool mainView);
+    void renderLocalSpotLights(const FrameInput& input, const Camera& camera,
+                                bool mainView);
+    void renderWeather(const FrameInput& input, const Camera& camera);
+    void renderAtmosphere(const FrameInput& input);
+
     std::unique_ptr<Impl> impl_;
     bool initialized_ = false;
     Color clearColor_{0.45F, 0.62F, 0.85F, 1.0F};

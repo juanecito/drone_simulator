@@ -422,6 +422,10 @@ void HdrTargets::create(int w, int h, int msaa) {
 struct Renderer::Impl {
     explicit Impl(std::filesystem::path shaderDir) : shaders(std::move(shaderDir)) {}
 
+    // UBO -> Uniform Buffer Object
+    // VAO -> Vertex Array Object
+    // TEX -> Texture
+
     ShaderLibrary shaders;
     gl::Buffer frameUbo;
     gl::Buffer atmosphereUbo;
@@ -752,7 +756,7 @@ void Renderer::renderFrame(const FrameTarget& target, const FrameInput& input) {
     if (target.width <= 0 || target.height <= 0) {
         return;
     }
-    ++impl_->frame;
+    ++(impl_->frame);
     stats_ = {};
     renderView(target, {.x = 0, .y = 0, .width = target.width, .height = target.height}, input,
                true);
@@ -772,6 +776,56 @@ void Renderer::renderInset(const FrameTarget& target, const ViewRect& rect,
         return;
     }
     renderView(target, {.x = x0, .y = y0, .width = x1 - x0, .height = y1 - y0}, input, false);
+}
+
+void Renderer::renderLocalSpotLights(const FrameInput& input, const Camera& camera,
+                                    bool mainView)
+{
+    Impl& r = *impl_;
+    LightUniforms lu{};
+    const std::size_t count = std::min(input.lights.size(), kMaxSpotLights);
+    for (std::size_t i = 0; i < count; ++i) {
+        const SpotLight& l = input.lights[i];
+        lu.posRange[i] =
+            glm::vec4(glm::vec3(l.position - camera.position), static_cast<float>(l.rangeM));
+        lu.dirCos[i] = glm::vec4(glm::vec3(glm::normalize(l.direction)),
+                                 static_cast<float>(std::cos(l.outerAngleRad)));
+        lu.colorCd[i] = glm::vec4(l.color, static_cast<float>(l.intensityCd));
+        lu.cosInner[i] = glm::vec4(static_cast<float>(std::cos(l.innerAngleRad)), 0, 0, 0);
+    }
+    lu.count.x = static_cast<float>(count);
+    if (mainView) {
+        stats_.spotLights = static_cast<int>(count);
+    }
+    glNamedBufferSubData(r.lightUbo.id(), 0, sizeof(lu), &lu);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, r.lightUbo.id());
+}
+
+void Renderer::renderWeather(const FrameInput& input, const Camera& camera)
+{
+    Impl& r = *impl_;
+    const WeatherUniforms wu =
+        weatherUniforms(input.weather, camera.position, input.cameraVelocity);
+    glNamedBufferSubData(r.weatherUbo.id(), 0, sizeof(wu), &wu);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 4, r.weatherUbo.id());
+}
+
+void Renderer::renderAtmosphere(const FrameInput& input)
+{
+    Impl& r = *impl_;
+    r.updateAtmosphere(input.weather.aerosolVisibilityM, stats_);
+    glBindTextureUnit(0, r.transmittance.id());
+    glBindTextureUnit(1, r.multiScatter.id());
+    glUseProgram(r.shaders.program(kSkyView));
+    glBindImageTexture(0, r.skyView.id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glDispatchCompute(dispatchSize(kSkyViewW, 8), dispatchSize(kSkyViewH, 8), 1);
+    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    glBindTextureUnit(2, r.skyView.id());
+    glUseProgram(r.shaders.program(kSkyIrradiance));
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    glBindTextureUnit(3, r.moonAlbedo.id());
+    stats_.drawCalls += 2;
 }
 
 void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const FrameInput& input,
@@ -818,48 +872,13 @@ void Renderer::renderView(const FrameTarget& target, const ViewRect& view, const
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, r.exposureSsbo.id());
 
     // Local spot lights (FR-GFX-08d), camera-relative.
-    {
-        LightUniforms lu{};
-        const std::size_t count = std::min(input.lights.size(), kMaxSpotLights);
-        for (std::size_t i = 0; i < count; ++i) {
-            const SpotLight& l = input.lights[i];
-            lu.posRange[i] =
-                glm::vec4(glm::vec3(l.position - camera.position), static_cast<float>(l.rangeM));
-            lu.dirCos[i] = glm::vec4(glm::vec3(glm::normalize(l.direction)),
-                                     static_cast<float>(std::cos(l.outerAngleRad)));
-            lu.colorCd[i] = glm::vec4(l.color, static_cast<float>(l.intensityCd));
-            lu.cosInner[i] = glm::vec4(static_cast<float>(std::cos(l.innerAngleRad)), 0, 0, 0);
-        }
-        lu.count.x = static_cast<float>(count);
-        if (mainView) {
-            stats_.spotLights = static_cast<int>(count);
-        }
-        glNamedBufferSubData(r.lightUbo.id(), 0, sizeof(lu), &lu);
-        glBindBufferBase(GL_UNIFORM_BUFFER, 3, r.lightUbo.id());
-    }
+    renderLocalSpotLights(input, camera, mainView);
 
     // Weather (FR-WX-09): clouds, fog, precipitation, camera-relative.
-    {
-        const WeatherUniforms wu =
-            weatherUniforms(input.weather, camera.position, input.cameraVelocity);
-        glNamedBufferSubData(r.weatherUbo.id(), 0, sizeof(wu), &wu);
-        glBindBufferBase(GL_UNIFORM_BUFFER, 4, r.weatherUbo.id());
-    }
+    renderWeather(input, camera);
 
     // --- Atmosphere -------------------------------------------------------------------------
-    r.updateAtmosphere(input.weather.aerosolVisibilityM, stats_);
-    glBindTextureUnit(0, r.transmittance.id());
-    glBindTextureUnit(1, r.multiScatter.id());
-    glUseProgram(r.shaders.program(kSkyView));
-    glBindImageTexture(0, r.skyView.id(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glDispatchCompute(dispatchSize(kSkyViewW, 8), dispatchSize(kSkyViewH, 8), 1);
-    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-    glBindTextureUnit(2, r.skyView.id());
-    glUseProgram(r.shaders.program(kSkyIrradiance));
-    glDispatchCompute(1, 1, 1);
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-    glBindTextureUnit(3, r.moonAlbedo.id());
-    stats_.drawCalls += 2;
+    renderAtmosphere(input);
 
     const glm::dvec3 cam = camera.position;
     const glm::vec3 camF(cam);
