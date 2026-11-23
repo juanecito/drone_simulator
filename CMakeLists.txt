@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(DroneSimulator
-    VERSION 0.1.0
+    VERSION 0.5.0
     DESCRIPTION "Realistic 3D drone simulator (aerial and ground drones) with mission-based play"
     LANGUAGES C CXX)
 
