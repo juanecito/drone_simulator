@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "ds/app/asset_paths.hpp"
 #include "ds/app/hud_painter.hpp"
@@ -67,6 +68,8 @@ Viewport::Viewport(SceneController* scene, SimulationController* simulation, QWi
       renderer_(std::make_unique<graphics::Renderer>()) {
     setMinimumSize(320, 240);
     setFocusPolicy(Qt::StrongFocus);
+    // The first frame shows the vehicle where the simulation has it.
+    QMetaObject::invokeMethod(this, &Viewport::advanceSimulation, Qt::QueuedConnection);
 }
 
 Viewport::~Viewport() {
@@ -151,12 +154,36 @@ void Viewport::scheduleFrame() {
             slowFramePending_ = true;
             QTimer::singleShot(kDialogFrameMs, this, [this] {
                 slowFramePending_ = false;
+                advanceSimulation();
                 update();
             });
         }
         return;
     }
-    update();
+    // The swap is signalled while Qt flushes the window: the simulation goes on from the
+    // event loop.
+    QMetaObject::invokeMethod(
+        this,
+        [this] {
+            advanceSimulation();
+            update();
+        },
+        Qt::QueuedConnection);
+}
+
+void Viewport::advanceSimulation() {
+    const double dt =
+        simClock_.isValid()
+            ? std::min(static_cast<double>(simClock_.nsecsElapsed()) * 1e-9, kMaxFrameSeconds)
+            : 0.0;
+    simClock_.start();
+    if (SimulationController* const sim = simulation_.data()) {
+        sim->updateFrame(dt,
+                         static_cast<double>(width()) / static_cast<double>(std::max(height(), 1)));
+    }
+    if (std::exchange(statsPending_, false)) {
+        emit statsUpdated();
+    }
 }
 
 void Viewport::paintGL() {
@@ -185,13 +212,8 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
         }
     }
 
-    const double aspect =
-        static_cast<double>(target.width) / static_cast<double>(std::max(target.height, 1));
     // One raw pointer per call: the QPointer is only re-read between events.
     SimulationController* const sim = simulation_.data();
-    if (sim != nullptr) {
-        sim->updateFrame(dt, aspect);
-    }
     const bool vehicleView = sim != nullptr && sim->vehicleView();
     graphics::FreeFlyInput input;
     if (!vehicleView) {
@@ -243,6 +265,15 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
         frame.objects = sim->drawItems();
         frame.lights = sim->lights();
     }
+    // Nothing above may repaint a widget at once, which makes Qt's window context current:
+    // drawn on in that context, the frame crashed the NVIDIA driver (its vertex arrays are not
+    // ours). Should it happen again, ours is made current again.
+    if (QOpenGLContext::currentContext() != context()) {
+        if (!std::exchange(contextSwitchLogged_, true)) {
+            log::warn("Another OpenGL context became current while painting the 3D view");
+        }
+        makeCurrent();
+    }
     renderer_->renderFrame(target, frame);
     if (sim != nullptr && chaseInsetRects()) {
         renderInsets(*sim, target, frame);
@@ -264,7 +295,7 @@ void Viewport::renderScene(const graphics::FrameTarget& target) {
         fps_ = 1000.0 * framesSinceStats_ / static_cast<double>(ms);
         framesSinceStats_ = 0;
         statsClock_.restart();
-        emit statsUpdated();
+        statsPending_ = true;  // Sent between frames: its slots may repaint widgets at once.
     }
 }
 

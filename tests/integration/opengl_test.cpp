@@ -10,9 +10,11 @@
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QStatusBar>
 #include <QSurfaceFormat>
+#include <QTabWidget>
 #include <QTest>
 
 #include <gtest/gtest.h>
@@ -21,7 +23,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "ds/app/items_controller.hpp"
 #include "ds/app/main_window.hpp"
@@ -30,7 +34,10 @@
 #include "ds/app/simulation_controller.hpp"
 #include "ds/app/viewport.hpp"
 #include "ds/astro/time.hpp"
+#include "ds/common/log.hpp"
 #include "ds/graphics/renderer.hpp"
+#include "ds/input/input_selector.hpp"
+#include "ds/input/keyboard.hpp"
 
 namespace {
 
@@ -364,6 +371,76 @@ TEST(Viewport, ObstacleFiguresAreDrawn) {
         image.save(QString::fromUtf8(dir) + QStringLiteral("/obstacle_figures.png"));
     }
     EXPECT_GE(window.viewport()->frameStats().objectsDrawn, freeObjects + 4);
+}
+
+// The stick bars of the Simulation tab repaint at once when their value changes
+// (QProgressBar::setValue()), and Qt may then compose the window in its own context. Updated
+// while the 3D view was painting, that left Qt's context current, and the translucent pass
+// (propeller discs) crashed the NVIDIA driver with Qt's vertex array bound. The simulation's
+// signals are therefore never sent while the 3D view paints (its context is current then).
+TEST(Viewport, SimulationSignalsAreNotSentWhileThe3dViewPaints) {
+    DS_REQUIRE_OPENGL_45();
+
+    std::vector<std::string> warnings;
+    ds::log::setSink([&warnings](ds::log::Level level, std::string_view message) {
+        if (level >= ds::log::Level::Warn) {
+            warnings.emplace_back(message);
+        }
+    });
+    {
+        ds::app::MainWindow window;
+        QSignalSpy ready(window.viewport(), &ds::app::Viewport::glReady);
+        ds::app::SimulationController& sim = *window.simulation();
+        sim.setCameraMode(ds::graphics::CameraMode::Chase);  // Insets too.
+        int sent = 0;
+        int whilePainting = 0;
+        const auto check = [&window, &sent, &whilePainting] {
+            ++sent;
+            if (QOpenGLContext::currentContext() == window.viewport()->context()) {
+                ++whilePainting;
+            }
+        };
+        QObject::connect(&sim, &ds::app::SimulationController::telemetryUpdated, &window, check);
+        QObject::connect(window.viewport(), &ds::app::Viewport::statsUpdated, &window, check);
+        QTabWidget* tabs = window.tabs();
+        QPushButton* start = nullptr;
+        for (int i = 0; i < tabs->count() && start == nullptr; ++i) {
+            start = tabs->widget(i)->findChild<QPushButton*>(QStringLiteral("StartButton"));
+            if (start != nullptr) {
+                tabs->setCurrentIndex(i);  // The stick bars on screen.
+            }
+        }
+        ASSERT_NE(start, nullptr);
+        window.resize(960, 600);
+        window.show();
+        ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
+        if (ready.isEmpty()) {
+            ASSERT_TRUE(ready.wait(5000)) << "viewport did not initialise";
+        }
+        window.showMaximized();
+        QTest::qWait(500);
+        start->click();
+        QTest::qWait(300);
+        sim.keyboardAction(ds::input::KeyboardAction::ToggleArm);
+        for (int i = 0; i < 60 && !sim.snapshot().telemetry.armed; ++i) {
+            QTest::qWait(50);
+        }
+        ASSERT_TRUE(sim.snapshot().telemetry.armed);
+        for (int i = 0; i < 6; ++i) {  // The throttle bar moves: discs in the translucent pass.
+            sim.setFlightKeys(static_cast<std::uint32_t>(
+                i % 2 == 0 ? ds::input::FlightKey::ThrottleUp : ds::input::FlightKey::YawLeft));
+            QTest::qWait(600);
+        }
+        sim.setFlightKeys(0);
+        QTest::qWait(300);
+        EXPECT_GT(window.viewport()->frameStats().objectsDrawn, 5);
+        EXPECT_GT(sent, 10);
+        EXPECT_EQ(whilePainting, 0);
+    }
+    ds::log::setSink({});
+    for (const std::string& w : warnings) {
+        EXPECT_EQ(w.find("OpenGL context"), std::string::npos) << w;
+    }
 }
 
 TEST(Viewport, SurvivesTheContextBeingRecreated) {

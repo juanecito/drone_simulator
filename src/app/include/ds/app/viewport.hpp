@@ -99,6 +99,7 @@ protected:
     /// just before that context is destroyed.
     void initializeGL() override;
     /// @brief Advances the scene and renders one frame at device-pixel resolution.
+    /// @details The simulation is advanced between frames, outside painting.
     void paintGL() override;
     /// @brief Movement keys and `Esc` (releases the mouse).
     void keyPressEvent(QKeyEvent* event) override;
@@ -125,6 +126,11 @@ private:
     void releaseGl();
     // Next frame after a buffer swap: at once, or slowly while a file dialog is open.
     void scheduleFrame();
+    // Advances the simulation and sends the frame statistics, from the event loop between
+    // frames: never while painting. Their slots may repaint widgets at once
+    // (QProgressBar::setValue() does), which makes Qt's window context current in the middle
+    // of paintGL().
+    void advanceSimulation();
     void renderScene(const graphics::FrameTarget& target);
     void paintHud(const SimulationController& sim);
     void renderInsets(const SimulationController& sim, const graphics::FrameTarget& target,
@@ -145,10 +151,13 @@ private:
     double yawDelta_ = 0.0;
     double pitchDelta_ = 0.0;
     QElapsedTimer clock_;
+    QElapsedTimer simClock_;  // Between advanceSimulation() calls.
     QElapsedTimer statsClock_;
     QElapsedTimer exposureClock_;
     QElapsedTimer reloadClock_;
     bool slowFramePending_ = false;
+    bool statsPending_ = false;         // statsUpdated() is due (sent between frames).
+    bool contextSwitchLogged_ = false;  // The context was found switched in paintGL().
     double animationTime_ = 0.0;
     int framesSinceStats_ = 0;
     double fps_ = 0.0;
