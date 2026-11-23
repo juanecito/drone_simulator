@@ -1,4 +1,73 @@
-drone-simulator (0.1.0-1) unstable; urgency=medium
+drone-simulator (0.5.0-1) unstable; urgency=medium
+
+  * Fix and Improve
+    - Fix bug: OpenGL context Qt <> NOQt - Add advanceSimulation, only modify parameters of visualization between frames for PaintGL
+    - Refactor Renderer: split in small functions
+    - Add new screenshot of drone simulator with terrain generated with orthophoto and lidar data
+    - Terrain tab: configurable finest mesh spacing (0.25 to 4 m)
+    - Terrain tab: interpolation, spike removal and smoothing of elevation
+    - Providers: OpenStreetMap map and the French Géoplateforme (cartes.gouv.fr)
+    - Terrain tab: fit the terrain size to the elevation files
+    - Own-lidar mission over the user's LAS/LAZ files; folder file references
+
+  * Milestone M4 (2)
+    - Step 9: built-in real-terrain missions, data fetch script, TERRAIN.md
+    - Step 8: online imagery providers (XYZ/TMS/WMTS/WMS)
+    - Step 7: orthophoto files with GPU streaming
+    - Launch platform for aerial drones on sloped ground
+    - Viewport: repaint slowly while a file dialog is open
+    - Step 6: LAS/LAZ point clouds to a cached DTM
+    - Step 5: Settings › Data providers and Cache, API keys in the keyring
+    - Step 4: online elevation terrain (OpenTopography)
+    - Step 3: elevation-file terrain in the application
+    - Step 2: GDAL raster elevation source
+
+  * Milestone M7
+    - Build docs: GDAL, LASzip and QtKeychain Debian packages
+    - Close the milestone, move the online orthophoto provider after M4
+    - Step 8: NFR-REAL validation
+    - Step 7: telemetry recording, replays and the History tab
+    - Step 6: failure injection
+    - Step 5: position hold and return to home
+    - Step 4: weather generator in the Environment tab and on the HUD
+    - Step 3 extras: lens raindrops, lightning, daylight white balance
+    - Step 3: weather rendering
+    - Step 2: weather effects on the vehicles
+    - Step 1: weather generator core
+
+  * Fix licence for screenshot_drone_simulator.png in REUSE.toml
+
+  * Milestone M6
+    - Step 7: model files for vehicles and items (FR-GFX-12)
+    - Step 6: calibration wizard for ground mappings
+    - Step 5: ground missions and the parking zone
+    - Step 4: ramps and bridges as driving surfaces
+    - Step 3: ground HUD and headlights that light the scene
+    - Step 2: drive the ground drone in the app
+    - Step 1: ground drone core (physics, drive controller, world)
+
+  * Milestone M5
+    - Add chase-camera insets and keep the panel docked in full screen
+    - Add profiling preset to cmake
+    - Add Drone simulator screenshot in README.md
+    - Add items, missions
+    - Add a script to run the tests under Valgrind
+    - Fix crash in the NVIDIA driver when Qt replaces the viewport's GL context
+    - fly missions, Items tab, solid obstacles and the built-in mission pack
+    - git ignore update
+    - Missions tab with the list of missions and their details
+    - list every valid .json mission of the mission folders at start-up
+    - default mission "First flight" installed in the user's mission folder
+    - Step 1: core items, mission loader/validator, runner, scoring and storage
+
+  * Milestone M4 (1)
+0b47a59 M4 step 1: core/net, OpenTopography preset, quota, cache and terrain-file plumbing
+
+  * Milestone M3
+
+  * Milestone M2
+
+  * Milestone M1: Create core
 
   * Milestone M0: project skeleton.
     - Qt 6 main window with OpenGL 4.5 core viewport, tab panel, menus and
