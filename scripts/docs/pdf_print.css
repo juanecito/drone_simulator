@@ -1,0 +1,24 @@
+/* SPDX-FileCopyrightText: 2026 Juan Maria Gomez Lopez <juan-maria.gomez-lopez@tutamail.com>
+ * SPDX-License-Identifier: MIT
+ *
+ * A4 print style for docs rendered by scripts/docs/md_to_pdf.sh.
+ */
+@page { size: A4; margin: 16mm 14mm 18mm 14mm; }
+html { font: 10.5pt/1.5 "Inter", "DejaVu Sans", "Liberation Sans", sans-serif; color: #111; }
+body { max-width: none; margin: 0; padding: 0; }
+h1 { font-size: 26pt; margin: 0 0 6pt; letter-spacing: -0.02em; }
+h2 { font-size: 16pt; margin: 22pt 0 8pt; padding-top: 6pt; border-top: 2px solid #111; break-after: avoid; }
+h3 { font-size: 12.5pt; margin: 14pt 0 6pt; break-after: avoid; }
+p, li { orphans: 3; widows: 3; }
+a { color: #0b5d3b; text-decoration: none; }
+code { font: 9pt "DejaVu Sans Mono", monospace; background: #f2f2f0; padding: 0 2px; border-radius: 2px; }
+pre:not(.mermaid) { background: #f4f4f2; padding: 8pt; overflow-wrap: anywhere; white-space: pre-wrap; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt; font-size: 9pt; break-inside: auto; }
+tr { break-inside: avoid; }
+th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #ccc; padding: 4pt 6pt 4pt 0; }
+th { border-bottom: 1.5px solid #111; }
+pre.mermaid { background: none; padding: 0; margin: 10pt 0 14pt; text-align: center; break-inside: avoid; }
+pre.mermaid svg { max-width: 100% !important; height: auto; max-height: 235mm; }
+#title-block-header { display: none; }
+pre.mermaid svg[aria-roledescription="stateDiagram"] { max-height: 95mm; }
+pre.mermaid svg[aria-roledescription="sequence"] { max-height: 245mm; }

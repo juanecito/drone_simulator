@@ -18,6 +18,7 @@
 | QtKeychain | Qt 6 build (API keys in the OS keyring) | `qtkeychain-qt6-dev` |
 | nlohmann/json | ≥ 3.11 (header-only; optional, see below) | `nlohmann-json3-dev` |
 | Doxygen (+ Graphviz) | optional, for `docs` | `doxygen`, `graphviz` |
+| pandoc, Chromium | optional, PDF copies of `docs/*.md` | `pandoc`, `chromium` |
 | lintian, clang-format | optional, package and style checks | `lintian`, `clang-format` |
 | Xvfb + Mesa | optional, headless OpenGL tests | `xvfb`, `xauth`, `libgl1-mesa-dri` |
 
@@ -156,6 +157,19 @@ xdg-open build/debug/docs/html/index.html
 
 The API reference is generated from the Doxygen comments in the public headers; the Markdown
 pages (`README.md`, `docs/*.md`) are included. The `ci` preset fails on any Doxygen warning.
+
+Some pages also have a PDF copy with their Mermaid diagrams drawn, for example
+`docs/FRAME_PIPELINE.pdf`. Rebuild it after editing the Markdown:
+
+```sh
+scripts/docs/md_to_pdf.sh                                # docs/FRAME_PIPELINE.md -> .pdf
+scripts/docs/md_to_pdf.sh docs/TERRAIN.md /tmp/terrain.pdf
+```
+
+The script converts the page with pandoc, draws the diagrams with Mermaid 11.4.1 in headless
+Chrome or Chromium (set `CHROME` to choose the browser) and prints A4 with
+`scripts/docs/pdf_print.css`. Mermaid is downloaded once into `~/.cache/drone_simulator` and
+checked against a fixed SHA-256. The script stops on a diagram that does not parse.
 
 ## Debian package
 

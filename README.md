@@ -186,6 +186,8 @@ uses another database file (for testing). Uninstalling the package never touches
   profiles and validation.
 - [Ground model](docs/GROUND_MODEL.md) — ground drone: suspension, tyres, drivetrain, drive
   controller, reference profile and checks (M6, in progress).
+- [Frame pipeline](docs/FRAME_PIPELINE.md) ([PDF](docs/FRAME_PIPELINE.pdf)) — threads, the
+  simulation tick, weather, astronomy, terrain and missions, and how one frame is rendered.
 - API reference: `cmake --build --preset debug --target docs`, then open
   `build/debug/docs/html/index.html`.
 
