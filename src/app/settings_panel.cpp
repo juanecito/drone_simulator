@@ -65,6 +65,31 @@ SettingsPanel::SettingsPanel(SettingsController& settings, QWidget* parent)
                 coordinates_->setCurrentIndex(coordinates_->findData(int(display)));
             });
 
+    // Chase camera insets.
+    chaseTopView_ = new QCheckBox(tr("Show &top view"));
+    chaseTopView_->setObjectName(QStringLiteral("ChaseTopViewCheck"));
+    chaseTopView_->setToolTip(
+        tr("Chase camera: the inset in the bottom-left corner, the vehicle seen from above "
+           "with north up."));
+    chaseTopView_->setChecked(settings.chaseTopView());
+    connect(chaseTopView_, &QCheckBox::toggled, this,
+            [this](bool on) { settings_->setChaseTopView(on); });
+    chaseBehindView_ = new QCheckBox(tr("Show &behind view"));
+    chaseBehindView_->setObjectName(QStringLiteral("ChaseBehindViewCheck"));
+    chaseBehindView_->setToolTip(
+        tr("Chase camera: the inset in the bottom-right corner, the view from right behind "
+           "the vehicle's nose."));
+    chaseBehindView_->setChecked(settings.chaseBehindView());
+    connect(chaseBehindView_, &QCheckBox::toggled, this,
+            [this](bool on) { settings_->setChaseBehindView(on); });
+    connect(&settings, &SettingsController::chaseInsetsChanged, this,
+            [this](bool top, bool behind) {
+                const QSignalBlocker topBlocker(chaseTopView_);
+                const QSignalBlocker behindBlocker(chaseBehindView_);
+                chaseTopView_->setChecked(top);
+                chaseBehindView_->setChecked(behind);
+            });
+
     // Flight rules (FR-MIS-06d).
     enforceRules_ = new QCheckBox(tr("&End free flights that break a flight rule"));
     enforceRules_->setObjectName(QStringLiteral("EnforceRulesCheck"));
@@ -87,6 +112,8 @@ SettingsPanel::SettingsPanel(SettingsController& settings, QWidget* parent)
     auto* displayForm = new QFormLayout(displayGroup);
     displayForm->addRow(tr("&Units:"), units_);
     displayForm->addRow(tr("&Coordinates:"), coordinates_);
+    displayForm->addRow(tr("Chase camera:"), chaseTopView_);
+    displayForm->addRow(QString(), chaseBehindView_);
 
     // Data.
     const storage::StorageInfo& info = settings.storageInfo();

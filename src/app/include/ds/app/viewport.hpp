@@ -36,7 +36,7 @@ class SimulationController;
 /// 10× faster, the mouse wheel changes the speed.
 ///
 /// In the Chase camera two insets in the bottom corners show the vehicle from straight above
-/// (north up) and from right behind its nose.
+/// (north up) and from right behind its nose; each can be hidden (setChaseInsetsShown()).
 ///
 /// Vehicle cameras (FR-IN-05): aerial drones: `W`/`S` throttle, `A`/`D` yaw, arrows pitch
 /// and roll, `Space` arms or disarms; ground drones: `W`/`S` (or up/down) forward and reverse,
@@ -73,9 +73,15 @@ public:
     /// @brief The camera of the last frame (free or vehicle camera).
     [[nodiscard]] const graphics::Camera& lastCamera() const noexcept { return lastCamera_; }
     /// @brief Rectangles of the chase insets in widget coordinates (the top view bottom left,
-    /// the behind view bottom right), or nothing when they are not shown (not the Chase
-    /// camera, or a viewport smaller than 320 × 240).
+    /// the behind view bottom right), or nothing when neither is shown (not the Chase camera,
+    /// both hidden, or a viewport smaller than 320 × 240). A hidden inset keeps its rectangle:
+    /// see chaseInsetsShown().
     [[nodiscard]] std::optional<std::array<QRectF, 2>> chaseInsetRects() const;
+    /// @brief Shows or hides the chase top view (bottom left) and behind view (bottom right);
+    /// both are shown by default.
+    void setChaseInsetsShown(bool top, bool behind);
+    /// @brief Which chase insets are shown: {top view, behind view}.
+    [[nodiscard]] std::array<bool, 2> chaseInsetsShown() const noexcept { return insetShown_; }
     /// @brief Changes the quality settings.
     void setRenderSettings(const graphics::RenderSettings& settings);
 
@@ -143,6 +149,7 @@ private:
     std::uint32_t flightKeys_ = 0;
     graphics::Camera lastCamera_;
     std::array<graphics::Camera, 2> insetCameras_;  // Of the last frame (top, behind).
+    std::array<bool, 2> insetShown_{true, true};    // Top, behind.
     std::unique_ptr<graphics::Renderer> renderer_;
     std::optional<graphics::GlInfo> glInfo_;
     Keys keys_;

@@ -99,3 +99,11 @@ ds_set_warnings(drone_simulator)
 
 install(TARGETS drone_simulator
     RUNTIME DESTINATION ${DS_INSTALL_BINDIR} COMPONENT runtime)
+
+# HUD fonts (FR-GFX-14) and their licences, found at run time in <prefix>/share/fonts.
+install(FILES ${PROJECT_SOURCE_DIR}/assets/fonts/B612-Regular.ttf
+              ${PROJECT_SOURCE_DIR}/assets/fonts/B612-OFL.txt
+              ${PROJECT_SOURCE_DIR}/assets/fonts/DSEG14Classic-Regular.ttf
+              ${PROJECT_SOURCE_DIR}/assets/fonts/DSEG-LICENSE.txt
+    DESTINATION ${DS_INSTALL_DATADIR}/fonts
+    COMPONENT runtime)

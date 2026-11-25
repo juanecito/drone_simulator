@@ -4,35 +4,127 @@
 #include "ds/app/hud_painter.hpp"
 
 #include <QFont>
+#include <QFontDatabase>
 #include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <numbers>
+#include <system_error>
 #include <vector>
+
+#include "ds/app/asset_paths.hpp"
+#include "ds/common/log.hpp"
 
 namespace ds::app {
 namespace {
+
+// HUD palette: one green for text and symbols, a paler green to set some apart, amber and
+// red only for cautions and warnings.
+QColor green(int alpha = 255) { return {70, 200, 85, alpha}; }
+QColor paleGreen(int alpha = 255) { return {150, 210, 150, alpha}; }
+// Dark green halo around letters and symbols, so they stay readable over sky and snow.
+QColor outlineColor() { return {0, 25, 0, 210}; }
+// Translucent dark green behind panels.
+QColor plateColor() { return {0, 32, 8, 150}; }
 
 QColor colorFor(sim::HudLevel level) {
     switch (level) {
         case sim::HudLevel::Caution: return {255, 190, 40};
         case sim::HudLevel::Warning: return {255, 70, 60};
-        case sim::HudLevel::Good: return {110, 230, 120};
-        case sim::HudLevel::Muted: return {170, 170, 170};
+        case sim::HudLevel::Good: return paleGreen();
+        case sim::HudLevel::Muted: return {40, 120, 52};
         case sim::HudLevel::Normal: break;
     }
-    return {245, 245, 245};
+    return green();
 }
 
-// Text with a dark outline, anchored by @p align at @p anchor.
-void outlinedText(QPainter& p, QPointF anchor, const QString& text, const QColor& color,
-                  Qt::Alignment align) {
-    const QFontMetricsF fm(p.font());
-    const double w = fm.horizontalAdvance(text);
+// The HUD font: the first of these files found in `fonts/` of the asset directory, loaded on
+// first use, with how to draw with it; the system monospace font (bold) if none loads.
+struct HudFace {
+    QString family;
+    bool segments = false;    ///< DSEG: text goes through segmentText().
+    bool bold = false;        ///< Ask for the bold weight.
+    double sizeFactor = 1.0;  ///< Point size relative to the requested one.
+    double lineFactor = 1.1;  ///< Line distance in font heights.
+    double outline = 3.0;     ///< Width of the dark outline, in pixels.
+    double thicken = 0.0;     ///< Width of a stroke in the text colour that fattens thin glyphs.
+};
+
+const HudFace& hudFace() {
+    static const HudFace face = [] {
+        struct Candidate {
+            const char* file;
+            HudFace face;
+        };
+        const Candidate candidates[] = {
+            // B612, designed for cockpit displays: plain text, a lighter outline.
+            {"B612-Regular.ttf", {.lineFactor = 1.15, .outline = 2.5}},
+            // DSEG14 Classic: its segment digits fill the whole cell, so a tenth smaller and
+            // more leading.
+            {"DSEG14Classic-Regular.ttf", {.segments = true, .sizeFactor = 0.9, .lineFactor = 1.4}},
+        };
+        const std::filesystem::path dir = findAssetDirectory() / "fonts";
+        for (const Candidate& c : candidates) {
+            const std::filesystem::path file = dir / c.file;
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(file, ec)) {
+                continue;
+            }
+            const int id = QFontDatabase::addApplicationFont(QString::fromStdString(file.string()));
+            const QStringList families =
+                id >= 0 ? QFontDatabase::applicationFontFamilies(id) : QStringList{};
+            if (families.isEmpty()) {
+                log::warn("HUD font {} could not be loaded", file.string());
+                continue;
+            }
+            HudFace chosen = c.face;
+            chosen.family = families.front();
+            return chosen;
+        }
+        log::warn("No HUD font in {}; using the system monospace font", dir.string());
+        return HudFace{.family = QStringLiteral("monospace"), .bold = true};
+    }();
+    return face;
+}
+
+// Text as a 14-segment display shows it. DSEG draws lowercase as capitals; its space is a
+// quarter of a cell, too narrow to part words, so each blank becomes two (half a cell); the
+// dashes and bullets it lacks become "-" and ">". Other missing symbols (✓ ✗) come from a
+// fallback font. Apply once: blanks double each time.
+QString segmentText(const QString& text) {
+    if (!hudFace().segments) {
+        return text;
+    }
+    QString out;
+    out.reserve(text.size() + text.count(u' '));
+    for (const QChar c : text) {
+        switch (c.unicode()) {
+            case u' ': out += QStringLiteral("  "); break;
+            case 0x2013:  // – en dash
+            case 0x2014:  // — em dash
+            case 0x2212:  // − minus
+            case 0x00B7:  // · middle dot
+                out += u'-';
+                break;
+            case 0x25B8: out += u'>'; break;  // ▸
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+// Glyph outlines of @p shown (already through segmentText()) in @p font, anchored by @p align
+// at @p anchor (top of the line).
+QPainterPath textPath(const QFont& font, QPointF anchor, const QString& shown,
+                      Qt::Alignment align) {
+    const QFontMetricsF fm(font);
+    const double w = fm.horizontalAdvance(shown);
     double x = anchor.x();
     if (align & Qt::AlignRight) {
         x -= w;
@@ -40,19 +132,59 @@ void outlinedText(QPainter& p, QPointF anchor, const QString& text, const QColor
         x -= 0.5 * w;
     }
     QPainterPath path;
-    path.addText(QPointF(x, anchor.y() + fm.ascent()), p.font(), text);
-    p.setPen(QPen(QColor(0, 0, 0, 200), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    path.addText(QPointF(x, anchor.y() + fm.ascent()), font, shown);
+    return path;
+}
+
+void drawOutlined(QPainter& p, const QPainterPath& path, const QColor& color) {
+    const HudFace& face = hudFace();
+    p.setPen(QPen(outlineColor(), face.outline + face.thicken, Qt::SolidLine, Qt::RoundCap,
+                  Qt::RoundJoin));
     p.setBrush(Qt::NoBrush);
     p.drawPath(path);
-    p.setPen(Qt::NoPen);
+    if (face.thicken > 0.0) {
+        p.setPen(QPen(color, face.thicken, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    } else {
+        p.setPen(Qt::NoPen);
+    }
     p.setBrush(color);
     p.drawPath(path);
+}
+
+// Text with a dark outline, anchored by @p align at @p anchor.
+void outlinedText(QPainter& p, QPointF anchor, const QString& text, const QColor& color,
+                  Qt::Alignment align) {
+    drawOutlined(p, textPath(p.font(), anchor, segmentText(text), align), color);
+}
+
+// Left-aligned lines (already through segmentText()) from @p at on a plate that encloses
+// every glyph with its outline (sized from the drawn shapes, not from font metrics); returns
+// the plate.
+QRectF textPanel(QPainter& p, QPointF at, const std::vector<std::pair<QString, QColor>>& lines) {
+    const double line = hudLineHeight(p.font());
+    QRectF bounds(at, QSizeF(0.0, line * static_cast<double>(lines.size())));
+    std::vector<QPainterPath> paths;
+    paths.reserve(lines.size());
+    for (const auto& [text, color] : lines) {
+        paths.push_back(textPath(p.font(), at, text, Qt::AlignLeft));
+        bounds = bounds.united(paths.back().boundingRect());
+        at.ry() += line;
+    }
+    const double pad = 0.5 * (hudFace().outline + hudFace().thicken) + 5.0;
+    const QRectF plate = bounds.adjusted(-pad, -pad, pad, pad);
+    p.setPen(Qt::NoPen);
+    p.setBrush(plateColor());
+    p.drawRoundedRect(plate, 4, 4);
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        drawOutlined(p, paths[i], lines[i].second);
+    }
+    return plate;
 }
 
 // A column of items, top to bottom from @p anchor.
 void column(QPainter& p, QPointF anchor, const std::vector<const sim::HudItem*>& items,
             Qt::Alignment align) {
-    const double line = QFontMetricsF(p.font()).height() * 1.1;
+    const double line = hudLineHeight(p.font());
     for (const sim::HudItem* item : items) {
         if (item->text.empty()) {
             continue;
@@ -69,12 +201,12 @@ void horizon(QPainter& p, const QRectF& area, const sim::HudModel& hud) {
     p.translate(c);
     p.rotate(-hud.rollRad * 180.0 / std::numbers::pi);
     const double y0 = hud.pitchRad * pxPerRad;
-    p.setPen(QPen(QColor(255, 255, 255, 190), 1.5));
+    p.setPen(QPen(green(190), 1.5));
     const double half = 0.18 * area.width();
     p.drawLine(QPointF(-half, y0), QPointF(-0.25 * half, y0));
     p.drawLine(QPointF(0.25 * half, y0), QPointF(half, y0));
     // Pitch ladder every 10°.
-    p.setPen(QPen(QColor(255, 255, 255, 120), 1.0));
+    p.setPen(QPen(green(120), 1.0));
     for (int deg = -30; deg <= 30; deg += 10) {
         if (deg == 0) {
             continue;
@@ -88,7 +220,7 @@ void horizon(QPainter& p, const QRectF& area, const sim::HudModel& hud) {
     }
     p.restore();
     // Fixed aircraft symbol.
-    p.setPen(QPen(QColor(255, 255, 255, 230), 2.0));
+    p.setPen(QPen(green(230), 2.0));
     p.drawLine(c + QPointF(-22, 0), c + QPointF(-8, 0));
     p.drawLine(c + QPointF(8, 0), c + QPointF(22, 0));
     p.drawEllipse(c, 3.0, 3.0);
@@ -102,8 +234,8 @@ void groundGauges(QPainter& p, QPointF topLeft, const sim::HudGround& g, double 
     const double barW = 110.0 * scale;
     const double barH = 7.0 * scale;
     const QRectF bar(topLeft.x(), topLeft.y(), barW, barH);
-    p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
-    p.setBrush(QColor(0, 0, 0, 110));
+    p.setPen(QPen(outlineColor(), 1.0));
+    p.setBrush(plateColor());
     p.drawRect(bar);
     // Amber and red zones at both ends.
     for (const double side : {-1.0, 1.0}) {
@@ -121,11 +253,11 @@ void groundGauges(QPainter& p, QPointF topLeft, const sim::HudGround& g, double 
         }
     }
     const double x = bar.center().x() + g.loadTransfer * 0.5 * barW;
-    p.setPen(QPen(QColor(0, 0, 0, 220), 3.0 * scale));
+    p.setPen(QPen(outlineColor(), 3.0 * scale));
     p.drawLine(QPointF(x, bar.top() - 3.0 * scale), QPointF(x, bar.bottom() + 3.0 * scale));
     p.setPen(QPen(colorFor(g.stability), 1.5 * scale));
     p.drawLine(QPointF(x, bar.top() - 3.0 * scale), QPointF(x, bar.bottom() + 3.0 * scale));
-    p.setPen(QPen(QColor(255, 255, 255, 160), 1.0));
+    p.setPen(QPen(green(160), 1.0));
     p.drawLine(QPointF(bar.center().x(), bar.top()), QPointF(bar.center().x(), bar.bottom()));
 
     // Wheels seen from above, nose up: left column, right column, front to rear.
@@ -137,8 +269,8 @@ void groundGauges(QPainter& p, QPointF topLeft, const sim::HudGround& g, double 
     const double top = bar.bottom() + 9.0 * scale;
     const double left = topLeft.x();
     const double bodyH = perSide * wheelH + (perSide - 1) * gap;
-    p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
-    p.setBrush(QColor(255, 255, 255, 60));
+    p.setPen(QPen(outlineColor(), 1.0));
+    p.setBrush(green(60));
     p.drawRect(QRectF(left + wheelW + 2.0 * scale, top, bodyW, bodyH));
     for (int i = 0; i < g.wheelCount; ++i) {
         const bool right = i >= perSide;
@@ -173,8 +305,8 @@ void windArrow(QPainter& p, QPointF centre, double radius, double angleRad) {
     arrow.lineTo(-0.15 * radius, -0.1 * radius);
     arrow.lineTo(-0.45 * radius, -0.1 * radius);
     arrow.closeSubpath();
-    p.setPen(QPen(QColor(0, 0, 0, 200), 2.0));
-    p.setBrush(QColor(120, 200, 255, 220));
+    p.setPen(QPen(outlineColor(), 2.0));
+    p.setBrush(green(220));
     p.drawPath(arrow);
     p.restore();
 }
@@ -191,19 +323,19 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
                   std::optional<double> viewHeadingDeg) {
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
-    const QColor trueNorth(255, 80, 70);
-    const QColor magneticNorth(90, 170, 255);
-    const QColor ring(245, 245, 245, 220);
+    const QColor trueNorth = paleGreen();
+    const QColor magneticNorth = paleGreen();
+    const QColor ring = green(220);
 
     // Plate and ring.
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(0, 0, 0, 110));
+    p.setBrush(plateColor());
     p.drawEllipse(c, r, r);
     p.setBrush(Qt::NoBrush);
     p.setPen(QPen(ring, 1.5));
     p.drawEllipse(c, r, r);
 
-    // Ticks: every 10°, longer every 30°, longest and red at true north.
+    // Ticks: every 10°, longer every 30°, longest and pale at true north.
     for (int deg = 0; deg < 360; deg += 10) {
         const bool cardinal = deg % 90 == 0;
         const double inner = r * (cardinal ? 0.80 : deg % 30 == 0 ? 0.86 : 0.91);
@@ -222,11 +354,11 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
     } cardinals[] = {{"N", 0.0}, {"E", 90.0}, {"S", 180.0}, {"W", 270.0}};
     for (const auto& k : cardinals) {
         const QPointF at = polar(c, k.deg, r * 0.66) - QPointF(0.0, 0.5 * labelHeight);
-        outlinedText(p, at, QString::fromLatin1(k.text), k.deg == 0.0 ? trueNorth : ring,
-                     Qt::AlignHCenter);
+        outlinedText(p, at, QString::fromLatin1(k.text),
+                     k.deg == 0.0 ? trueNorth : colorFor(sim::HudLevel::Normal), Qt::AlignHCenter);
     }
 
-    // Magnetic north: blue marker outside the ring, turned by the declination.
+    // Magnetic north: pale marker outside the ring, turned by the declination.
     {
         const double d = compass.declinationDeg;
         QPainterPath marker;
@@ -234,7 +366,7 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
         marker.lineTo(polar(c, d - 6.0, r + 0.25 * r));
         marker.lineTo(polar(c, d + 6.0, r + 0.25 * r));
         marker.closeSubpath();
-        p.setPen(QPen(QColor(0, 0, 0, 200), 1.0));
+        p.setPen(QPen(outlineColor(), 1.0));
         p.setBrush(magneticNorth);
         p.drawPath(marker);
         const QPointF label =
@@ -244,7 +376,7 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
 
     // Camera view direction (free camera).
     if (viewHeadingDeg) {
-        p.setPen(QPen(QColor(255, 255, 255, 170), 1.2, Qt::DashLine));
+        p.setPen(QPen(green(170), 1.2, Qt::DashLine));
         p.drawLine(c, polar(c, *viewHeadingDeg, 0.92 * r));
     }
 
@@ -257,8 +389,8 @@ void paintCompass(QPainter& p, QPointF c, double r, const sim::HudCompass& compa
         arrow.lineTo(polar(c, h + 180.0, 0.12 * r));
         arrow.lineTo(polar(c, h - 145.0, 0.30 * r));
         arrow.closeSubpath();
-        p.setPen(QPen(QColor(0, 0, 0, 220), 1.5));
-        p.setBrush(QColor(255, 210, 60));
+        p.setPen(QPen(outlineColor(), 1.5));
+        p.setBrush(green());
         p.drawPath(arrow);
     }
 
@@ -273,7 +405,6 @@ namespace {
 // Mission panel (left, under the position panel); returns its bottom edge.
 double missionPanel(QPainter& p, QPointF at, const sim::HudMission& m, double maxWidth) {
     const QFontMetricsF fm(p.font());
-    const double line = fm.height() * 1.1;
     std::vector<std::pair<QString, sim::HudLevel>> lines;
     lines.emplace_back(QString::fromStdString(m.title), sim::HudLevel::Normal);
     lines.emplace_back(QString::fromStdString(m.state.text + "   " + m.timer.text),
@@ -284,24 +415,17 @@ double missionPanel(QPainter& p, QPointF at, const sim::HudMission& m, double ma
     for (const sim::HudItem& n : m.notes) {
         lines.emplace_back(QString::fromStdString(n.text), n.level);
     }
-    double width = 0.0;
-    for (auto& [text, level] : lines) {
-        text = fm.elidedText(text, Qt::ElideRight, maxWidth);
-        width = std::max(width, fm.horizontalAdvance(text));
-    }
-    const QRectF plate(at.x() - 6, at.y() - 4, width + 12,
-                       line * static_cast<double>(lines.size()) + 8);
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(0, 0, 0, 110));
-    p.drawRoundedRect(plate, 4, 4);
+    std::vector<std::pair<QString, QColor>> shown;
+    shown.reserve(lines.size());
     for (std::size_t i = 0; i < lines.size(); ++i) {
-        // The state line uses the state's colour, the title is white.
+        // The state line uses the state's colour, the title the normal text colour.
         const QColor color =
             i == 1 && m.timer.level == sim::HudLevel::Normal ? colorFor(m.state.level)
                                                               : colorFor(lines[i].second);
-        outlinedText(p, at, lines[i].first, color, Qt::AlignLeft);
-        at.ry() += line;
+        shown.emplace_back(fm.elidedText(segmentText(lines[i].first), Qt::ElideRight, maxWidth),
+                           color);
     }
+    const QRectF plate = textPanel(p, at, shown);
     return plate.bottom();
 }
 
@@ -312,12 +436,12 @@ void marker(QPainter& p, const QRectF& area, const graphics::Camera& camera,
     const double r = 7.0 * scale;
     const QRectF inner = area.adjusted(30 * scale, 30 * scale, -30 * scale, -30 * scale);
     const auto projected = projectToScreen(camera, area, m.position);
-    const QColor color(90, 220, 255);
+    const QColor color = paleGreen();
     if (projected && inner.contains(*projected)) {
         const QPointF c = *projected;
         QPolygonF diamond{{c.x(), c.y() - r}, {c.x() + r, c.y()}, {c.x(), c.y() + r},
                           {c.x() - r, c.y()}};
-        p.setPen(QPen(QColor(0, 0, 0, 200), 3.0));
+        p.setPen(QPen(outlineColor(), 3.0));
         p.setBrush(Qt::NoBrush);
         p.drawPolygon(diamond);
         p.setPen(QPen(color, 1.8));
@@ -343,7 +467,7 @@ void marker(QPainter& p, const QRectF& area, const graphics::Camera& camera,
     const QPointF tip = c + dir * std::min(tx, ty);
     const QPointF side(-dir.y(), dir.x());
     QPolygonF arrow{tip, tip - dir * (2.2 * r) + side * r, tip - dir * (2.2 * r) - side * r};
-    p.setPen(QPen(QColor(0, 0, 0, 200), 2.0));
+    p.setPen(QPen(outlineColor(), 2.0));
     p.setBrush(color);
     p.drawPolygon(arrow);
     const QPointF label = tip - dir * (3.5 * r);
@@ -352,6 +476,18 @@ void marker(QPainter& p, const QRectF& area, const graphics::Camera& camera,
 }
 
 }  // namespace
+
+QFont hudFont(double pointSize) {
+    QFont font(hudFace().family);
+    font.setStyleHint(QFont::Monospace);
+    font.setBold(hudFace().bold);
+    font.setPointSizeF(hudFace().sizeFactor * pointSize);
+    return font;
+}
+
+double hudLineHeight(const QFont& font) {
+    return QFontMetricsF(font).height() * hudFace().lineFactor;
+}
 
 std::optional<QPointF> projectToScreen(const graphics::Camera& camera, const QRectF& area,
                                        const glm::dvec3& world) {
@@ -371,17 +507,16 @@ void paintInsetFrame(QPainter& p, const QRectF& area, const QString& label, doub
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setRenderHint(QPainter::TextAntialiasing, true);
     p.setBrush(Qt::NoBrush);
-    p.setPen(QPen(QColor(0, 0, 0, 160), 3.0));
+    p.setPen(QPen(outlineColor(), 3.0));
     p.drawRect(area);
-    p.setPen(QPen(QColor(235, 245, 255, 200), 1.0));
+    // The light line unblended, so it keeps its colour on any pixel grid.
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.setPen(QPen(paleGreen(), 1.0));
     p.drawRect(area);
-    QFont font(QStringLiteral("monospace"));
-    font.setStyleHint(QFont::Monospace);
-    font.setBold(true);
-    font.setPointSizeF(8.0 * scale);
-    p.setFont(font);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setFont(hudFont(8.0 * scale));
     outlinedText(p, area.topLeft() + QPointF(5.0 * scale, 3.0 * scale), label,
-                 QColor(235, 245, 255), Qt::AlignLeft);
+                 colorFor(sim::HudLevel::Normal), Qt::AlignLeft);
     p.restore();
 }
 
@@ -396,9 +531,9 @@ void paintMapMarker(QPainter& p, QPointF at, double headingDeg, double scale) {
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setBrush(Qt::NoBrush);  // The vehicle stays visible inside.
-    p.setPen(QPen(QColor(0, 0, 0, 200), 3.5 * scale));
+    p.setPen(QPen(outlineColor(), 3.5 * scale));
     p.drawPath(arrow);
-    p.setPen(QPen(QColor(255, 210, 60), 1.5 * scale));
+    p.setPen(QPen(green(), 1.5 * scale));
     p.drawPath(arrow);
     p.restore();
 }
@@ -408,41 +543,28 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setRenderHint(QPainter::TextAntialiasing, true);
-    QFont font(QStringLiteral("monospace"));
-    font.setStyleHint(QFont::Monospace);
-    font.setBold(true);
-    font.setPointSizeF(10.0 * options.scale);
+    const QFont font = hudFont(10.0 * options.scale);
     p.setFont(font);
     const QRectF area(rect);
     const double margin = 12.0 * options.scale;
-    const double line = QFontMetricsF(font).height() * 1.1;
+    const double line = hudLineHeight(font);
 
     if (options.horizon) {
         horizon(p, area, hud);
     }
 
     // Position panel (top left, FR-GFX-14a) on a translucent plate.
+    QRectF positionPlate;
     {
-        std::vector<QString> lines{QString::fromStdString(hud.positionUtm),
-                                   QString::fromStdString(hud.positionElevation)};
-        if (!hud.positionLatLon.empty()) {
-            lines.push_back(QString::fromStdString(hud.positionLatLon));
+        const QColor color = colorFor(sim::HudLevel::Normal);
+        std::vector<std::pair<QString, QColor>> lines;
+        for (const std::string* text :
+             {&hud.positionUtm, &hud.positionElevation, &hud.positionLatLon}) {
+            if (!text->empty()) {
+                lines.emplace_back(segmentText(QString::fromStdString(*text)), color);
+            }
         }
-        const QFontMetricsF fm(font);
-        double width = 0.0;
-        for (const QString& l : lines) {
-            width = std::max(width, fm.horizontalAdvance(l));
-        }
-        const QRectF plate(area.left() + margin - 6, area.top() + margin - 4, width + 12,
-                           line * static_cast<double>(lines.size()) + 8);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 110));
-        p.drawRoundedRect(plate, 4, 4);
-        QPointF at(area.left() + margin, area.top() + margin);
-        for (const QString& l : lines) {
-            outlinedText(p, at, l, QColor(235, 245, 255), Qt::AlignLeft);
-            at.ry() += line;
-        }
+        positionPlate = textPanel(p, {area.left() + margin, area.top() + margin}, lines);
     }
 
     // Mission panel under the position panel; guidance markers.
@@ -463,14 +585,23 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     column(p, {area.right() - margin, area.top() + margin},
            {&hud.clockLocal, &hud.clockUtc, &hud.timer, &hud.replay}, Qt::AlignRight);
 
-    // Heading, true and magnetic (top centre).
-    outlinedText(p, {area.center().x(), area.top() + margin},
-                 QString::fromStdString(hud.compass.heading.text),
-                 colorFor(hud.compass.heading.level), Qt::AlignHCenter);
+    // Heading, true and magnetic (top centre); under the position panel if a narrow view
+    // would make them overlap.
+    double headingTop = area.top() + margin;
+    {
+        const QString text = segmentText(QString::fromStdString(hud.compass.heading.text));
+        QPainterPath heading =
+            textPath(font, {area.center().x(), headingTop}, text, Qt::AlignHCenter);
+        if (heading.boundingRect().left() < positionPlate.right() + 0.5 * margin) {
+            headingTop = positionPlate.bottom() + 0.3 * line;
+            heading = textPath(font, {area.center().x(), headingTop}, text, Qt::AlignHCenter);
+        }
+        drawOutlined(p, heading, colorFor(hud.compass.heading.level));
+    }
 
     // Warnings (under the heading, flashing).
     if (options.blinkOn) {
-        QPointF at(area.center().x(), area.top() + margin + 2.0 * line);
+        QPointF at(area.center().x(), headingTop + 2.0 * line);
         for (const sim::HudItem& w : hud.warnings) {
             outlinedText(p, at, QString::fromStdString(w.text), colorFor(w.level),
                          Qt::AlignHCenter);
@@ -505,10 +636,11 @@ void paintHud(QPainter& p, const QRect& rect, const sim::HudModel& hud,
     }
 
     // Vehicle state (bottom).
-    const double bottom = area.bottom() - margin - options.bottomReserved - 3.0 * line;
-    column(p, {area.left() + margin, bottom}, {&hud.battery, &hud.gps, &hud.lights}, Qt::AlignLeft);
-    column(p, {area.right() - margin, bottom}, {&hud.armed, &hud.mode, &hud.throttle},
-           Qt::AlignRight);
+    const double bottom = area.bottom() - margin - 3.0 * line;
+    column(p, {area.left() + margin, bottom - options.bottomReservedLeft},
+           {&hud.battery, &hud.gps, &hud.lights}, Qt::AlignLeft);
+    column(p, {area.right() - margin, bottom - options.bottomReservedRight},
+           {&hud.armed, &hud.mode, &hud.throttle}, Qt::AlignRight);
 
     // Compass rose (bottom centre, FR-GFX-14b).
     const double radius = compassRadius(options.scale);

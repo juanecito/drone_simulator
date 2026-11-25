@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <QFont>
 #include <QPointF>
 #include <QRect>
 #include <QRectF>
@@ -29,15 +30,28 @@ struct HudPaintOptions {
     double scale = 1.0;    ///< Text scale (device-independent pixels per point).
     /// Camera of the frame, to place the guidance markers (none drawn if null).
     const graphics::Camera* camera = nullptr;
-    /// Height kept free in the bottom-left and bottom-right corners (the chase insets): the
-    /// vehicle-state columns are drawn above it.
-    double bottomReserved = 0.0;
+    /// Height kept free in the bottom-left corner (the chase top view): the left
+    /// vehicle-state column is drawn above it.
+    double bottomReservedLeft = 0.0;
+    /// Height kept free in the bottom-right corner (the chase behind view).
+    double bottomReservedRight = 0.0;
 };
 
-/// @brief Paints @p hud into @p area with @p painter (antialiased text with a dark outline so
-/// it stays readable over sky and snow).
+/// @brief Paints @p hud into @p area with @p painter: green text in hudFont() and green
+/// symbols, each with a dark outline so they stay readable over sky and snow; amber and red
+/// mark cautions and warnings. The position and mission panels sit on plates that enclose
+/// every glyph.
 void paintHud(QPainter& painter, const QRect& area, const sim::HudModel& hud,
               const HudPaintOptions& options);
+
+/// @brief The HUD font at @p pointSize: from `fonts/` in the asset directory, the bundled
+/// cockpit-display font B612 Regular, otherwise the 14-segment display font DSEG14 Classic
+/// Regular, otherwise the system monospace font.
+/// @details Loaded into the application on first use; call from the GUI thread.
+[[nodiscard]] QFont hudFont(double pointSize);
+
+/// @brief Distance between two HUD text lines in @p font.
+[[nodiscard]] double hudLineHeight(const QFont& font);
 
 /// @brief Paints the frame and the @p label of a picture-in-picture inset at @p area.
 void paintInsetFrame(QPainter& painter, const QRectF& area, const QString& label, double scale);
@@ -47,8 +61,8 @@ void paintInsetFrame(QPainter& painter, const QRectF& area, const QString& label
 void paintMapMarker(QPainter& painter, QPointF at, double headingDeg, double scale);
 
 /// @brief Paints the north-up compass rose (FR-GFX-14b) centred at @p centre.
-/// @details True (geographic) north is at the top with the cardinal points N, E, S, W; a blue
-/// "MN" marker outside the ring shows magnetic north, turned by the declination; a yellow
+/// @details True (geographic) north is at the top with the cardinal points N, E, S, W; a pale
+/// "MN" marker outside the ring shows magnetic north, turned by the declination; a green
 /// arrow shows the vehicle's heading, and, if given, a dashed line the camera's view heading
 /// (free camera). The declination text is drawn under the rose.
 /// @param painter Painter (its font sets the text size).

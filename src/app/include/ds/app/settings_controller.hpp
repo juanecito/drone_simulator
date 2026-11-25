@@ -40,6 +40,10 @@ inline constexpr const char* kUnits = "display.units";                    ///< "
 inline constexpr const char* kCoordinates = "display.coordinates";        ///< "utm"/"utm+latlon".
 inline constexpr const char* kSceneTerrain = "scene.terrain";  ///< Object (scene_config.hpp).
 inline constexpr const char* kSceneEnvironment = "scene.environment";  ///< Object.
+/// "true"/"false": the chase camera's top-view inset is shown (default true).
+inline constexpr const char* kChaseTopView = "display.chaseTopView";
+/// "true"/"false": the chase camera's behind-view inset is shown (default true).
+inline constexpr const char* kChaseBehindView = "display.chaseBehindView";
 /// "true"/"false": free mode ends the flight when a flight rule is broken (FR-MIS-06d).
 inline constexpr const char* kEnforceFreeRules = "rules.enforceInFreeMode";
 /// Mission id selected last in the Missions tab (FR-UI-03).
@@ -86,6 +90,15 @@ public:
     /// @brief Changes and persists the coordinate display.
     void setCoordinateDisplay(CoordinateDisplay display);
 
+    /// @brief True if the chase camera shows its top-view inset (default true).
+    [[nodiscard]] bool chaseTopView() const noexcept { return chaseTopView_; }
+    /// @brief Shows or hides, and persists, the chase camera's top-view inset.
+    void setChaseTopView(bool shown);
+    /// @brief True if the chase camera shows its behind-view inset (default true).
+    [[nodiscard]] bool chaseBehindView() const noexcept { return chaseBehindView_; }
+    /// @brief Shows or hides, and persists, the chase camera's behind-view inset.
+    void setChaseBehindView(bool shown);
+
     /// @brief True if free mode ends the flight when a flight rule is broken (default false:
     /// warnings only, FR-MIS-06d).
     [[nodiscard]] bool enforceFreeFlightRules() const noexcept { return enforceFreeRules_; }
@@ -112,6 +125,8 @@ signals:
     void coordinateDisplayChanged(ds::app::CoordinateDisplay display);
     /// @brief The free-mode rule enforcement changed.
     void enforceFreeFlightRulesChanged(bool enforce);
+    /// @brief The chase insets shown changed: @p top view and @p behind view.
+    void chaseInsetsChanged(bool top, bool behind);
 
 private:
     void load();
@@ -123,6 +138,8 @@ private:
     UnitSystem units_ = UnitSystem::Metric;
     CoordinateDisplay coordinates_ = CoordinateDisplay::Utm;
     bool enforceFreeRules_ = false;
+    bool chaseTopView_ = true;
+    bool chaseBehindView_ = true;
 };
 
 }  // namespace ds::app

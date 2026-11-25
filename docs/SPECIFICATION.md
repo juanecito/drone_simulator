@@ -1591,7 +1591,9 @@ so Markdown pages appear in the generated site.
   **behind view** rigidly behind the nose (heading only, level horizon, unsmoothed) at
   0.4 × the chase distance with a 45° lens. The insets are rendered with the main view's
   terrain chunks and exposure (`Renderer::renderInset`); the HUD's bottom columns move above
-  them.
+  them. Each inset can be hidden in the Settings tab (Display → Chase camera: "Show top
+  view", "Show behind view", both on by default, saved per user); the column on a hidden
+  inset's side drops back to the corner.
 - **Keyboard flying** works only in the vehicle cameras (in the free camera W/S/A/D move the
   camera). Menu shortcuts are function keys (F5 start, F6 pause, F7 step, F8 reset) because
   letters are flight keys in the 3D view.

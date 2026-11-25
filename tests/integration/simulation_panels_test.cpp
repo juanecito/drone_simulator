@@ -499,6 +499,52 @@ TEST(HudPainter, PaintsTheWeatherUnderTheWind) {
     EXPECT_GT(red, 50);
 }
 
+TEST(HudPainter, PositionPanelEnclosesItsText) {
+    // FR-GFX-14a: every glyph of the top-left position panel, long lines included, lies on
+    // its plate: in each row, all bright text pixels are left of the plate's right edge.
+    sim::WorldSnapshot s;
+    s.hasVehicle = true;
+    sim::HudModel hud = sim::buildHud(s, geo::LocalFrame({40.4, -3.7, 650.0}), {});
+    hud.positionElevation = "Elev 2 712.4 m AMSL   AGL 135.2 m";
+    hud.positionLatLon = "48.865833°  -122.321111°   48°51'57.00\"N  122°19'16.00\"W";
+    hud.compass.heading.text.clear();  // Keep the top centre empty.
+
+    const QColor background(70, 90, 120);
+    QImage image(1280, 720, QImage::Format_RGB32);
+    image.fill(background);
+    {
+        QPainter painter(&image);
+        app::paintHud(painter, image.rect(), hud, {});
+    }
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        image.save(QString::fromUtf8(dir) + QStringLiteral("/position_panel.png"));
+    }
+    // The plate's colour, from its left padding (left of the text).
+    const QColor plate = image.pixelColor(8, 30);
+    ASSERT_NE(plate, background);
+    const auto isPlate = [&plate](const QColor& c) {
+        return std::abs(c.red() - plate.red()) <= 4 && std::abs(c.green() - plate.green()) <= 4 &&
+               std::abs(c.blue() - plate.blue()) <= 4;
+    };
+    int textPixels = 0;
+    for (int y = 0; y < 120; ++y) {
+        int plateRight = -1;
+        for (int x = 0; x < image.width() - 300; ++x) {
+            if (isPlate(image.pixelColor(x, y))) {
+                plateRight = x;
+            }
+        }
+        for (int x = 0; x < image.width() - 300; ++x) {
+            const QColor c = image.pixelColor(x, y);
+            if (c.green() > 170 && c.red() < 120) {
+                ++textPixels;
+                EXPECT_LT(x, plateRight) << "text outside the plate at row " << y << ", x " << x;
+            }
+        }
+    }
+    EXPECT_GT(textPixels, 500);
+}
+
 TEST(HudPainter, PaintsTheGroundGauges) {
     // FR-GFX-20: the load-transfer bar and the wheel-slip diagram are drawn under the
     // attitude column; one wheel spinning (red), one off the ground (grey).
@@ -524,8 +570,8 @@ TEST(HudPainter, PaintsTheGroundGauges) {
     if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
         image.save(QString::fromUtf8(dir) + QStringLiteral("/ground_hud.png"));
     }
-    // Strongly red pixels (the spinning wheel, the red end of the bar and the warning) and
-    // amber ones exist in the left half.
+    // Strongly red pixels exist in the left half: the spinning wheel (the rest of the HUD
+    // there is green, amber or translucent).
     int red = 0;
     for (int y = 0; y < image.height(); ++y) {
         for (int x = 0; x < image.width() / 2; ++x) {
@@ -535,7 +581,7 @@ TEST(HudPainter, PaintsTheGroundGauges) {
             }
         }
     }
-    EXPECT_GT(red, 40);
+    EXPECT_GT(red, 24);
 }
 
 TEST_F(SimulationPanelsTest, RoverHeadlightsAndGroundHud) {

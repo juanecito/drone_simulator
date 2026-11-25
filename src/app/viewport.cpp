@@ -424,7 +424,7 @@ void Viewport::keyReleaseEvent(QKeyEvent* event) {
 std::optional<std::array<QRectF, 2>> Viewport::chaseInsetRects() const {
     const SimulationController* const sim = simulation_.data();
     if (sim == nullptr || sim->cameraMode() != graphics::CameraMode::Chase || width() < 320 ||
-        height() < 240) {
+        height() < 240 || (!insetShown_[0] && !insetShown_[1])) {
         return std::nullopt;
     }
     const double scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
@@ -439,6 +439,11 @@ std::optional<std::array<QRectF, 2>> Viewport::chaseInsetRects() const {
     return std::array{QRectF(margin, top, w, h), QRectF(width() - margin - w, top, w, h)};
 }
 
+void Viewport::setChaseInsetsShown(bool top, bool behind) {
+    insetShown_ = {top, behind};
+    update();
+}
+
 void Viewport::renderInsets(const SimulationController& sim, const graphics::FrameTarget& target,
                             const graphics::FrameInput& main) {
     const qreal ratio = devicePixelRatioF();
@@ -449,6 +454,9 @@ void Viewport::renderInsets(const SimulationController& sim, const graphics::Fra
     frame.dtSeconds = 0.0;
     frame.resetExposure = false;
     for (std::size_t i = 0; i < rects.size(); ++i) {
+        if (!insetShown_[i]) {
+            continue;
+        }
         const QRectF& r = rects[i];
         const int x = toDevicePixels(r.left(), ratio);
         const int y = toDevicePixels(r.top(), ratio);
@@ -472,10 +480,12 @@ void Viewport::paintHud(const SimulationController& sim) {
     options.camera = &lastCamera_;
     const auto insets = chaseInsetRects();
     if (insets) {
-        options.bottomReserved = (*insets)[0].height() + 6.0 * options.scale;
+        const double reserved = (*insets)[0].height() + 6.0 * options.scale;
+        options.bottomReservedLeft = insetShown_[0] ? reserved : 0.0;
+        options.bottomReservedRight = insetShown_[1] ? reserved : 0.0;
     }
     ds::app::paintHud(painter, rect(), sim.hud(), options);
-    if (insets) {
+    if (insets && insetShown_[0]) {
         // The vehicle is small seen from above: mark it with its heading.
         const graphics::VehiclePose& pose = sim.vehiclePose();
         if (const auto at = projectToScreen(insetCameras_[0], (*insets)[0], pose.position);
@@ -490,6 +500,8 @@ void Viewport::paintHud(const SimulationController& sim) {
             }
         }
         paintInsetFrame(painter, (*insets)[0], tr("Top · N↑"), options.scale);
+    }
+    if (insets && insetShown_[1]) {
         paintInsetFrame(painter, (*insets)[1], tr("Behind"), options.scale);
     }
 }
@@ -522,14 +534,11 @@ void Viewport::paintFreeCompass(const SimulationController& sim, const graphics:
     QPainter painter(this);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     const double scale = std::clamp(static_cast<double>(height()) / 720.0, 0.8, 2.0);
-    QFont font(QStringLiteral("monospace"));
-    font.setStyleHint(QFont::Monospace);
-    font.setBold(true);
-    font.setPointSizeF(10.0 * scale);
+    const QFont font = hudFont(10.0 * scale);
     painter.setFont(font);
     const double radius = compassRadius(scale);
     const double margin = 12.0 * scale;
-    const double line = QFontMetricsF(font).height() * 1.1;
+    const double line = hudLineHeight(font);
     const QPointF centre(0.5 * width(), height() - margin - line - 4.0 - radius);
     paintCompass(painter, centre, radius, sim.hud().compass,
                  common::normalizeDegrees(common::radToDeg(camera.yawRad)));

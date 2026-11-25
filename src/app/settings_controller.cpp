@@ -26,6 +26,8 @@ struct Loaded {
     std::optional<std::string> units;
     std::optional<std::string> coordinates;
     std::optional<std::string> enforceRules;
+    std::optional<std::string> chaseTopView;
+    std::optional<std::string> chaseBehindView;
 };
 
 template <typename T>
@@ -71,6 +73,8 @@ void SettingsController::load() {
                     .units = valueOrLog(store.string(kUnits), kUnits),
                     .coordinates = valueOrLog(store.string(kCoordinates), kCoordinates),
                     .enforceRules = valueOrLog(store.string(kEnforceFreeRules), kEnforceFreeRules),
+                    .chaseTopView = valueOrLog(store.string(kChaseTopView), kChaseTopView),
+                    .chaseBehindView = valueOrLog(store.string(kChaseBehindView), kChaseBehindView),
                 };
             })
             .get();
@@ -84,6 +88,8 @@ void SettingsController::load() {
         }
     }
     enforceFreeRules_ = loaded.enforceRules && *loaded.enforceRules == "true";
+    chaseTopView_ = !loaded.chaseTopView || *loaded.chaseTopView != "false";
+    chaseBehindView_ = !loaded.chaseBehindView || *loaded.chaseBehindView != "false";
     if (loaded.coordinates) {
         if (*loaded.coordinates == kUtmLatLon) {
             coordinates_ = CoordinateDisplay::UtmAndLatLon;
@@ -135,6 +141,24 @@ void SettingsController::setEnforceFreeFlightRules(bool enforce) {
     enforceFreeRules_ = enforce;
     writeString(settings_keys::kEnforceFreeRules, enforce ? "true" : "false");
     emit enforceFreeFlightRulesChanged(enforce);
+}
+
+void SettingsController::setChaseTopView(bool shown) {
+    if (shown == chaseTopView_) {
+        return;
+    }
+    chaseTopView_ = shown;
+    writeString(settings_keys::kChaseTopView, shown ? "true" : "false");
+    emit chaseInsetsChanged(chaseTopView_, chaseBehindView_);
+}
+
+void SettingsController::setChaseBehindView(bool shown) {
+    if (shown == chaseBehindView_) {
+        return;
+    }
+    chaseBehindView_ = shown;
+    writeString(settings_keys::kChaseBehindView, shown ? "true" : "false");
+    emit chaseInsetsChanged(chaseTopView_, chaseBehindView_);
 }
 
 void SettingsController::writeString(const char* key, const char* value) {

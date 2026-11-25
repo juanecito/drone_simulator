@@ -167,6 +167,11 @@ void MainWindow::createViewport() {
     // Queued: the error dialog must not be opened from inside initializeGL() (FR-GFX-01).
     connect(viewport_, &Viewport::glFailed, this, &MainWindow::onGlFailed, Qt::QueuedConnection);
     connect(viewport_, &Viewport::statsUpdated, this, &MainWindow::updatePositionReadout);
+    if (settings_ != nullptr) {
+        viewport_->setChaseInsetsShown(settings_->chaseTopView(), settings_->chaseBehindView());
+        connect(settings_, &SettingsController::chaseInsetsChanged, viewport_,
+                &Viewport::setChaseInsetsShown);
+    }
     // The mouse is only captured to look around with the free camera.
     connect(simulation_, &SimulationController::cameraModeChanged, this, [this] {
         if (simulation_->vehicleView()) {

@@ -73,3 +73,17 @@ path = "tests/fixtures/online/geoplateforme-rge-alti.tif"
 precedence = "override"
 SPDX-FileCopyrightText = "IGN (Institut national de l'information géographique et forestière), RGE ALTI®"
 SPDX-License-Identifier = "etalab-2.0"
+
+# HUD font (FR-GFX-14), B612 from https://github.com/google/fonts/tree/main/ofl/b612.
+[[annotations]]
+path = ["assets/fonts/B612-Regular.ttf", "assets/fonts/B612-OFL.txt"]
+precedence = "override"
+SPDX-FileCopyrightText = "2012 The B612 Project Authors (https://github.com/polarsys/b612)"
+SPDX-License-Identifier = "OFL-1.1"
+
+# Fallback HUD font, DSEG v0.46 from https://github.com/keshikan/DSEG.
+[[annotations]]
+path = ["assets/fonts/DSEG14Classic-Regular.ttf", "assets/fonts/DSEG-LICENSE.txt"]
+precedence = "override"
+SPDX-FileCopyrightText = "2017 keshikan (http://www.keshikan.net)"
+SPDX-License-Identifier = "OFL-1.1"

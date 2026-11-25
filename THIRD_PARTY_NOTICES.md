@@ -112,6 +112,23 @@ THE SOFTWARE.
   Credit: NASA's Scientific Visualization Studio / LRO / LROC (Arizona State University).
   NASA does not endorse this program.
 
+### B612 Regular font (`assets/fonts/B612-Regular.ttf`)
+
+- HUD text. B612 was designed for aircraft cockpit displays (Airbus, ENAC, Intactile Design).
+  Copyright 2012 The B612 Project Authors (<https://github.com/polarsys/b612>). From the Google
+  Fonts repository (<https://github.com/google/fonts/tree/main/ofl/b612>), unmodified.
+  Installed as `/opt/drone_simulator/share/fonts/B612-Regular.ttf`.
+- SIL Open Font License 1.1 (`LICENSES/OFL-1.1.txt`; the upstream copy is
+  `assets/fonts/B612-OFL.txt`).
+
+### DSEG14 Classic Regular font (`assets/fonts/DSEG14Classic-Regular.ttf`)
+
+- HUD text, as on a 14-segment display. Copyright (c) 2017 keshikan (<http://www.keshikan.net>),
+  with Reserved Font Name "DSEG". DSEG v0.46 (<https://github.com/keshikan/DSEG>), unmodified.
+  Installed as `/opt/drone_simulator/share/fonts/DSEG14Classic-Regular.ttf`.
+- SIL Open Font License 1.1 (`LICENSES/OFL-1.1.txt`; the upstream copy is
+  `assets/fonts/DSEG-LICENSE.txt`).
+
 ### OpenGL Mathematics (GLM) 0.9.9.8 — header-only, compiled into the binary
 
 - © 2005 G-Truc Creation — <https://github.com/g-truc/glm>

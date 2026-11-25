@@ -149,19 +149,23 @@ TEST(Viewport, MainWindowViewportBecomesReady) {
 // FR-GFX-14, FR-GFX-14a). Without settings nothing is saved.
 // Pixels of the compass's heading arrow (yellow) and magnetic-north marker (blue) in the
 // bottom-centre area of @p image (FR-GFX-14b).
+// Green (heading arrow, ring, text) and pale green (north, magnetic north marker) pixels
+// around the compass rose.
 std::pair<int, int> compassPixels(const QImage& image) {
-    int yellow = 0;
-    int blue = 0;
+    int green = 0;
+    int pale = 0;
     const int w = image.width();
     const int h = image.height();
     for (int y = h * 2 / 3; y < h; ++y) {
         for (int x = w * 2 / 5; x < w * 3 / 5; ++x) {
             const QRgb c = image.pixel(x, y);
-            yellow += (qRed(c) > 220 && qGreen(c) > 180 && qBlue(c) < 110) ? 1 : 0;
-            blue += (qRed(c) < 140 && qGreen(c) > 140 && qBlue(c) > 220) ? 1 : 0;
+            green += (qRed(c) < 120 && qGreen(c) > 170 && qBlue(c) < 140) ? 1 : 0;
+            pale += (qRed(c) > 120 && qGreen(c) > 190 && qBlue(c) > 120 && qGreen(c) - qRed(c) > 40)
+                        ? 1
+                        : 0;
         }
     }
-    return {yellow, blue};
+    return {green, pale};
 }
 
 TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
@@ -187,15 +191,15 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
         image.save(QString::fromUtf8(dir) + QStringLiteral("/chase_view.png"));
     }
     EXPECT_GT(window.viewport()->frameStats().objectsDrawn, 5);
-    // The position panel (top left) has bright text with dark outlines.
+    // The position panel (top left) has bright green text with dark outlines.
     int bright = 0;
     int dark = 0;
     const double s = static_cast<double>(image.height()) / 800.0;
     for (int y = static_cast<int>(10 * s); y < static_cast<int>(60 * s); ++y) {
         for (int x = static_cast<int>(10 * s); x < static_cast<int>(300 * s); ++x) {
-            const int l = qGray(image.pixel(x, y));
-            bright += l > 200 ? 1 : 0;
-            dark += l < 40 ? 1 : 0;
+            const QRgb c = image.pixel(x, y);
+            bright += qGreen(c) > 170 && qRed(c) < 120 ? 1 : 0;
+            dark += qGray(c) < 40 ? 1 : 0;
         }
     }
     EXPECT_GT(bright, 100);
@@ -204,9 +208,9 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
                     ->findChild<QLabel*>(QStringLiteral("PositionLabel"))
                     ->text()
                     .startsWith(QStringLiteral("UTM")));
-    const auto [yellow, blue] = compassPixels(image);
-    EXPECT_GT(yellow, 40) << "drone heading arrow";
-    EXPECT_GT(blue, 15) << "magnetic north marker";
+    const auto [green, pale] = compassPixels(image);
+    EXPECT_GT(green, 40) << "drone heading arrow";
+    EXPECT_GT(pale, 15) << "north and magnetic north marker";
 
     // Chase insets in the bottom corners, framed (a light line on a dark outline).
     const auto insets = window.viewport()->chaseInsetRects();
@@ -232,6 +236,37 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
         EXPECT_GT(framed, 0.8 * (x1 - x0)) << "inset frame at y " << top;
     }
 
+    // Hiding the behind view leaves the top view: no frame in the bottom-right corner, and
+    // the right vehicle-state column moves down into it.
+    window.viewport()->setChaseInsetsShown(true, false);
+    QTest::qWait(300);
+    ASSERT_TRUE(window.viewport()->chaseInsetRects().has_value());
+    const QImage oneInset =
+        window.viewport()->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+    if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
+        oneInset.save(QString::fromUtf8(dir) + QStringLiteral("/chase_top_only.png"));
+    }
+    {
+        const QRectF& r = (*insets)[1];
+        const int top = static_cast<int>(std::lround(r.top() * ratio));
+        const int x0 = static_cast<int>(r.left() * ratio) + 4;
+        const int x1 = static_cast<int>(r.right() * ratio) - 4;
+        int framed = 0;
+        for (int x = x0; x < x1; ++x) {
+            int lo = 255;
+            int hi = 0;
+            for (int y = top - 2; y <= top + 2; ++y) {
+                lo = std::min(lo, qGray(oneInset.pixel(x, y)));
+                hi = std::max(hi, qGray(oneInset.pixel(x, y)));
+            }
+            framed += (hi > 150 && lo < 80) ? 1 : 0;
+        }
+        EXPECT_LT(framed, 0.3 * (x1 - x0)) << "behind view still framed";
+    }
+    window.viewport()->setChaseInsetsShown(false, false);
+    EXPECT_FALSE(window.viewport()->chaseInsetRects().has_value());
+    window.viewport()->setChaseInsetsShown(true, true);
+
     // The free camera keeps the compass, with the view direction (FR-GFX-14b).
     window.simulation()->setCameraMode(ds::graphics::CameraMode::Free);
     window.scene()->camera().yawRad = 1.0;
@@ -240,9 +275,9 @@ TEST(Viewport, ChaseViewShowsTheDroneAndTheHud) {
     if (const char* dir = std::getenv("DS_TEST_IMAGE_DIR")) {
         free.save(QString::fromUtf8(dir) + QStringLiteral("/free_view.png"));
     }
-    const auto [freeYellow, freeBlue] = compassPixels(free);
-    EXPECT_GT(freeYellow, 40);
-    EXPECT_GT(freeBlue, 15);
+    const auto [freeGreen, freePale] = compassPixels(free);
+    EXPECT_GT(freeGreen, 40);
+    EXPECT_GT(freePale, 15);
     EXPECT_FALSE(window.viewport()->chaseInsetRects().has_value()) << "insets only in Chase";
 }
 
